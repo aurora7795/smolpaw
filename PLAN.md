@@ -74,12 +74,25 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 - Multi-agent setups, a UI, scheduling.
 - Porting OpenClaw's full `radarr-grab-and-verify` flow (release selection, Transmission checks). Revisit once the generic path works; it is a good later rung.
 
-## Open questions
+## Decisions (settled 2026-10-24)
 
-1. Should `run_shell` run directly on the Mac, or inside a container/sandbox directory?
-2. Does Transmission (`:9091`) need credentials, for the later grab-and-verify rung?
-3. Which unrelated task should be rung 4?
-4. Is the Qwen 9B comparison enough, or add a larger model (when memory allows) as a ceiling?
+| Area | Decision |
+|---|---|
+| Shell scope | `run_shell` runs in `workspace/`; paths outside it need `[y/N]`. |
+| Auto-allowed | Read-only file commands (`ls`, `cat`, `head`, `grep`, `find`, `wc`, `stat`, `file`) and HTTP GET. Everything else asks `[y/N]`. |
+| Read scope | Reads limited to `workspace/` and `skills/`; anything else asks. |
+| Secrets | Harness injects keys from `.env`, only for hosts listed in `notes.md`. The model never sees keys; logs redact them. |
+| Skill writes | Allowed; show the text and ask `[y/N]` each time. |
+| Agent type | `ToolCallingAgent` only for the generic path. |
+| On decline | The model is told it was declined and continues (it may try another way or `ask_user`). |
+| `notes.md` | Lists only the services each rung needs. |
+| Logging | Every run saved to `logs/` (gitignored), keys redacted. |
+| Pass bar | 3 runs per rung, pass = 2 of 3. |
+| Rung 2 | A public API with no key (nothing of yours at risk). |
+| Rung 3 | Real Radarr add, a different movie each run, approved by hand. Remove the extras from Radarr afterwards. |
+| Rung 4 | Summarise sample text files in `workspace/` into `workspace/summary.md`. |
+| Models | Bonsai 8B and Qwen 3.5 9B (one loaded at a time on 16GB). |
+| Transmission | Credentials not needed until the later grab-and-verify rung. |
 
 ## Housekeeping
 
