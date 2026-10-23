@@ -221,6 +221,40 @@ def http_request(method: str, url: str, body: str = "") -> str:
     return _clip(_redact(f"HTTP {r.status_code}\n{r.text}"))
 
 
+_SPECS: dict[str, dict] = {}
+
+
+@tool
+def openapi_search(spec_url: str, keyword: str = "") -> str:
+    """Search a service's OpenAPI spec (a JSON file listing every endpoint) and list matching endpoints. Use this to find the real endpoint names instead of guessing. With no keyword, lists the spec's tags.
+
+    Args:
+        spec_url: URL of the OpenAPI JSON file.
+        keyword: Word to look for in endpoint paths, summaries and tags, e.g. "queue".
+    """
+    if spec_url not in _SPECS:
+        try:
+            r = requests.get(spec_url, timeout=30)
+            _SPECS[spec_url] = r.json()
+        except (requests.RequestException, ValueError) as exc:
+            return f"ERROR: could not load an OpenAPI JSON spec from {spec_url}: {exc}"
+    spec = _SPECS[spec_url]
+    paths = spec.get("paths", {})
+    if not keyword:
+        tags = sorted({t for ops in paths.values() for op in ops.values() if isinstance(op, dict) for t in op.get("tags", [])})
+        return f"{len(paths)} endpoints. Tags: {', '.join(tags)}"
+    kw = keyword.lower()
+    hits = []
+    for path, ops in paths.items():
+        for method, op in ops.items():
+            if not isinstance(op, dict):
+                continue
+            text = " ".join([path, op.get("summary", ""), " ".join(op.get("tags", []))]).lower()
+            if kw in text:
+                hits.append(f"{method.upper()} {path}  {op.get('summary', '')}".rstrip())
+    return "\n".join(hits[:20]) + (f"\n... {len(hits) - 20} more" if len(hits) > 20 else "") or "No matching endpoints."
+
+
 # --- files ------------------------------------------------------------------------
 
 @tool
@@ -327,13 +361,14 @@ def write_skill(name: str, text: str) -> str:
 
 
 GENERIC_TOOLS = [
-    run_shell, http_request, read_file, write_file, ask_user,
+    run_shell, http_request, openapi_search, read_file, write_file, ask_user,
     list_skills, read_skill, write_skill,
 ]
 
 GUIDANCE = """\
 You are Smolpaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.
-- Call list_skills first and read any relevant skill.
+- Call list_skills first, then read_skill for any relevant skill and follow it.
+- The contents of notes.md are included below. Do not look for it as a file.
 - The services below are reachable with http_request. API keys are added automatically; never ask for them.
 - Before changing anything, use read-only calls (GET, ls, cat) to learn how the service works.
 - Changes ask the user to confirm. If declined, do not repeat it: try another way or call ask_user.

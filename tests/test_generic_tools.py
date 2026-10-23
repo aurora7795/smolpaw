@@ -95,6 +95,19 @@ check("POST asks and is declined", g.http_request("POST", "http://127.0.0.1:9/x"
 check("bad JSON body rejected", g.http_request("POST", "http://127.0.0.1:9/x", "{bad").startswith("ERROR"))
 check("GET failure reports error without asking", g.http_request("GET", "http://127.0.0.1:9/x").startswith("ERROR") and not asked())
 
+# openapi_search (spec served from a fake requests.get)
+class _Resp:
+    def json(self):
+        return {"paths": {"/api/v3/queue": {"get": {"summary": "List queue", "tags": ["Queue"]}},
+                          "/api/v3/movie": {"get": {"summary": "List movies", "tags": ["Movie"]}}}}
+
+
+g.requests.get = lambda *a, **k: _Resp()
+check("openapi_search finds endpoint", "GET /api/v3/queue" in g.openapi_search("http://x/spec.json", "queue"))
+check("openapi_search excludes others", "movie" not in g.openapi_search("http://x/spec.json", "queue"))
+check("openapi_search lists tags", "Queue" in g.openapi_search("http://x/spec.json"))
+check("openapi_search no match", g.openapi_search("http://x/spec.json", "zzz") == "No matching endpoints.")
+
 # secrets
 if os.environ.get("RADARR_URL") and os.environ.get("RADARR_API_KEY"):
     g.NOTES = tmp / "notes.md"
