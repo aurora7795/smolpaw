@@ -20,3 +20,9 @@ build/
 .vscode/
 .idea/
 *.swp
+
+# Smolpaw runtime
+notes.md
+logs/
+workspace/*
+!workspace/.gitkeep
