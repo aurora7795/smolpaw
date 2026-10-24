@@ -108,6 +108,27 @@ check("openapi_search excludes others", "movie" not in g.openapi_search("http://
 check("openapi_search lists tags", "Queue" in g.openapi_search("http://x/spec.json"))
 check("openapi_search no match", g.openapi_search("http://x/spec.json", "zzz") == "No matching endpoints.")
 
+# HTML responses are flagged, JSON is not
+class _Http:
+    def __init__(self, text, ctype, status=200):
+        self.text, self.headers, self.status_code = text, {"content-type": ctype}, status
+
+
+_real_request = g.requests.request
+g.requests.request = lambda *a, **k: _Http("<!doctype html><html>login</html>", "text/html")
+res = g.http_request("GET", "http://x/DownloadQueue")
+check("HTML body flagged as not an answer", "HTML web page" in res and "login" not in res)
+g.requests.request = lambda *a, **k: _Http('{"ok": true}', "application/json")
+check("JSON body passed through", g.http_request("GET", "http://x/api").endswith('{"ok": true}'))
+g.requests.request = _real_request
+
+# short skills are inlined into the prompt, long ones only listed
+(g.SKILLS / "short.md").write_text("# Short\nuse thing")
+(g.SKILLS / "long.md").write_text("# Long\n" + "x" * 3000)
+ins = g.build_instructions()
+check("short skill inlined", "use thing" in ins)
+check("long skill listed not inlined", "Longer skills" in ins and "xxxxxxxxxx" not in ins)
+
 # secrets
 if os.environ.get("RADARR_URL") and os.environ.get("RADARR_API_KEY"):
     g.NOTES = tmp / "notes.md"

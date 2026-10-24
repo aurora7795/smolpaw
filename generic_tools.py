@@ -97,7 +97,7 @@ def _log(kind: str, **fields) -> None:
 def start_log(model: str, prompt: str) -> Path:
     global _log_file
     LOG_DIR.mkdir(exist_ok=True)
-    _log_file = LOG_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{model}.jsonl"
+    _log_file = LOG_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{model.replace('/', '_')}.jsonl"
     _log("start", model=model, prompt=prompt)
     return _log_file
 
@@ -191,6 +191,11 @@ def _auth_headers(url: str) -> dict[str, str]:
     return {}
 
 
+def _looks_like_html(r: requests.Response) -> bool:
+    head = r.text[:200].lstrip().lower()
+    return "text/html" in r.headers.get("content-type", "") or head.startswith(("<!doctype html", "<html"))
+
+
 @tool
 def http_request(method: str, url: str, body: str = "") -> str:
     """Make an HTTP request. GET runs immediately; any other method asks the user first. API keys for services listed in the notes are added automatically.
@@ -218,6 +223,12 @@ def http_request(method: str, url: str, body: str = "") -> str:
     if method != "GET":
         ACTIONS.append(f"{method} {url} -> HTTP {r.status_code}")
     _log("http", method=method, url=url, status=r.status_code)
+    if _looks_like_html(r):
+        return (
+            f"HTTP {r.status_code} but the body is an HTML web page, not API data. "
+            "The path is probably wrong, so this is NOT an answer. Do not read anything into the page. "
+            "Find the real endpoint (see the api-discovery skill)."
+        )
     return _clip(_redact(f"HTTP {r.status_code}\n{r.text}"))
 
 
@@ -367,7 +378,7 @@ GENERIC_TOOLS = [
 
 GUIDANCE = """\
 You are Smolpaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.
-- Call list_skills first, then read_skill for any relevant skill and follow it.
+- Skills below are already loaded. Follow the relevant one before acting.
 - The contents of notes.md are included below. Do not look for it as a file.
 - The services below are reachable with http_request. API keys are added automatically; never ask for them.
 - Before changing anything, use read-only calls (GET, ls, cat) to learn how the service works.
@@ -377,6 +388,17 @@ You are Smolpaw, an agent on the user's Mac. Work out how to meet the user's goa
 - Call final_answer when done."""
 
 
+INLINE_SKILL_MAX = 1500  # chars; longer skills are listed by name and read on demand
+
+
 def build_instructions() -> str:
     notes = NOTES.read_text() if NOTES.exists() else "(no notes.md found)"
-    return f"{GUIDANCE}\n\n--- notes.md ---\n{notes}"
+    inline, listed = [], []
+    for f in sorted(SKILLS.glob("*.md")) if SKILLS.exists() else []:
+        text = f.read_text()
+        (inline if len(text) <= INLINE_SKILL_MAX else listed).append((f.stem, text))
+    parts = [GUIDANCE, f"--- notes.md ---\n{notes}"]
+    parts += [f"--- skill: {name} ---\n{text}" for name, text in inline]
+    if listed:
+        parts.append("Longer skills (read with read_skill): " + ", ".join(name for name, _ in listed))
+    return "\n\n".join(parts)
