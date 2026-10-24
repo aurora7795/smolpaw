@@ -1,4 +1,6 @@
-# Smolpaw — Next Tranche Plan
+# Smolpaw — Plan and Status
+
+Last updated 2026-10-24. Measured results are in [RESULTS.md](RESULTS.md).
 
 ## Goal
 
@@ -6,10 +8,11 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 
 ## Where we are
 
-- Smolpaw is a smolagents CLI (`agent.py`) with `--model`, `--agent code|tool` and `--max-steps`.
-- `radarr_tools.py` holds hand-written Radarr tools: search, list options, add (dry-run default, id validation, `[y/N]` confirm), queue.
-- Results with those tools, Bonsai + `ToolCallingAgent`: 2 real adds succeeded, 9 of 9 dry-runs reported correctly after fixes. The code agent was unreliable on Bonsai.
-- Caveat: those tools hand the model the method. OpenClaw was not handed it; it had a shell, notes, and a skill it wrote after its own mistakes. The Radarr result is therefore a **baseline**, not proof of the goal.
+- Built and pushed: generic tools with a Python-side confirmation layer, `notes.md` and skills (short skills inlined into the prompt), `openapi_search`, an HTML-response warning, a step-cap fallback that shows the last tool result, run logs, 40+ safety tests, and the Tidepool test API. `agent.py` has `--model`, `--tools generic|radarr`, `--agent` and `--max-steps`.
+- Rung 1 (known API, skill) passes 6 of 6 on Gemma 4 E4B and Qwen 3.5 9B. Rung 2 on an invented API (Tidepool) passes 6 of 6. Bonsai 8B cannot do discovery; Nanbeige 3B is unusable under LM Studio.
+- OpenClaw baseline (one read-only run): correct in 11s on DeepSeek with about 24K prompt tokens per call, against about 3K for Smolpaw.
+- Not yet done: rungs 3 to 5, the eval script, harder discovery tests, a measured prefill cost for a large prompt on this Mac.
+- Caveats: the `api-discovery` skill supplies Radarr's spec URL, so rung 1 shows recipe-following, not discovery; samples are 3 runs per cell.
 
 ## What OpenClaw had that Smolpaw lacks
 
@@ -41,32 +44,32 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 
 ## Work items
 
-1. **Generic tools**: `http_request`, `run_shell`, file tools, `ask_user`, with the confirmation layer and secret injection.
-2. **Notes + skills loader**: `notes.md`, `skills/`, tools to list/read/write, prompt wiring.
-3. **Eval harness**: a script that runs a prompt N times on a model and records steps, wall time, parse errors, final answer and the harness-reported outcome, so runs are comparable.
-4. **Keep the Radarr tools as a baseline** behind a flag (`--tools radarr|generic`).
+1. **Generic tools** (done): `http_request`, `run_shell`, file tools, `ask_user`, with the confirmation layer and secret injection.
+2. **Notes + skills loader** (done): `notes.md`, `skills/`, tools to list/read/write, prompt wiring.
+3. **Eval harness** (not built; runs so far were shell loops): a script that runs a prompt N times on a model and records steps, wall time, parse errors, final answer and the harness-reported outcome, so runs are comparable.
+4. **Keep the Radarr tools as a baseline** (done) behind a flag (`--tools radarr|generic`).
 5. Commit in small steps; no secrets in git (`.env` stays ignored).
 
 ## Test ladder
 
-Run each rung 3 times on Bonsai and on Qwen 3.5 9B, with the `tool` agent. Start each from an empty `skills/` folder unless stated.
+Run each rung 3 times on Gemma 4 E4B and Qwen 3.5 9B (Bonsai failed discovery; see RESULTS.md). Start each from an empty `skills/` folder unless stated.
 
-| # | Goal given to the agent | What it shows |
-|---|---|---|
-| 1 | "What's in my Radarr queue?" (URL/key only in notes) | Can it use a known API from a note? |
-| 2 | Same for Sonarr or Plex (not used before) | Can it discover an unfamiliar API? |
-| 3 | "Add Moon to Radarr" (write, with confirm) | Does it work out add + profile + folder? |
-| 4 | An unrelated local task (e.g. summarise a folder of text files) | Is it general, not Radarr-shaped? |
-| 5 | Rerun #3 after it wrote a skill | Does a written skill reduce steps and errors? |
+| # | Goal given to the agent | What it shows | Status |
+|---|---|---|---|
+| 1 | "What's in my Radarr queue?" (URL/key only in notes) | Can it use a known API from a note? | Done: 6/6 on Gemma and Qwen after harness fixes |
+| 2 | An API it has not seen (PokeAPI, then invented Tidepool) | Can it discover an unfamiliar API? | Done: Tidepool 6/6; PokeAPI only measured memory. Harder variants pending |
+| 3 | "Add <movie> to Radarr" (write, with confirm) | Does it work out add + profile + folder? | Not run |
+| 4 | An unrelated local task (e.g. summarise a folder of text files) | Is it general, not Radarr-shaped? | Not run |
+| 5 | Rerun #3 after it wrote a skill | Does a written skill reduce steps and errors? | Not run |
 
 Record per run: success, steps, time, parse errors, number of confirm prompts, whether the final answer matched the real outcome, peak memory.
 
 ## Success criteria
 
-- Rungs 1 and 3: succeeds without help in at least 2 of 3 runs on Bonsai.
+- Rungs 1 and 3: succeeds without help in at least 2 of 3 runs on at least one local model.
 - Final answers never claim an outcome the harness line contradicts.
 - Rung 5 shows fewer steps or errors than rung 3.
-- If Bonsai fails where Qwen succeeds, note whether better notes or skills close the gap before blaming the model.
+- If one model fails where another succeeds, note whether better notes, skills or tool messages close the gap before blaming the model (this was true for Qwen: clearer tool errors fixed it).
 
 ## Out of scope for this tranche
 
@@ -91,10 +94,22 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 | Rung 2 | A public API with no key (nothing of yours at risk). |
 | Rung 3 | Real Radarr add, a different movie each run, approved by hand. Remove the extras from Radarr afterwards. |
 | Rung 4 | Summarise sample text files in `workspace/` into `workspace/summary.md`. |
-| Models | Bonsai 8B and Qwen 3.5 9B (one loaded at a time on 16GB). |
+| Models | Gemma 4 E4B and Qwen 3.5 9B for discovery rungs (one loaded at a time on 16GB, 16K context, one parallel slot). Bonsai 8B kept as a candidate for cheap guided execution. |
 | Transmission | Credentials not needed until the later grab-and-verify rung. |
+
+## Next steps
+
+1. Rung 3: a supervised real Radarr add with the `[y/N]` prompt, a different movie each run, on Gemma first.
+2. Harder Tidepool: no root index, a field only on the detail endpoint, pagination. See where discovery breaks.
+3. Rung 4 (unrelated local task) and rung 5 (does a written skill help).
+4. Build a small eval script so runs are comparable and token counts are recorded.
+5. Measure prefill time for a 24K-token prompt on this Mac, to quantify OpenClaw's overhead locally (no OpenClaw config change needed).
+6. Test whether a model can write a useful skill itself and a second run benefits ("discover once, then run cheaply").
+7. Decide whether Bonsai belongs in an execute-only tier, and whether a GGUF build of Nanbeige is worth one try.
+
+Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
 ## Housekeeping
 
-- The Radarr API key has appeared in chat history. Regenerate it in Radarr (Settings → General), then update `.env` and OpenClaw's `AGENTS.md`.
+- The Radarr API key has appeared in this project's chat history and in an OpenClaw session. Regenerate it in Radarr (Settings → General), then update `.env` and OpenClaw's `AGENTS.md`.
 - `transmission-query.sh` in OpenClaw's skill has a quoting bug (`$2` is not expanded inside single quotes), so `GET`/`REMOVE`/`ADD` with an argument don't work. Do not copy it as is.
