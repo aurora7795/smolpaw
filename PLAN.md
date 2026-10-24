@@ -8,11 +8,11 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 
 ## Where we are
 
-- Built and pushed: generic tools with a Python-side confirmation layer, `notes.md` and skills (short skills inlined into the prompt), `openapi_search`, an HTML-response warning, a step-cap fallback that shows the last tool result, run logs, 40+ safety tests, and the Tidepool test API. `agent.py` has `--model`, `--tools generic|radarr`, `--agent` and `--max-steps`.
+- Built and pushed: generic tools with a Python-side confirmation layer, `notes.md` and skills (short skills inlined into the prompt), `openapi_search`, an HTML-response warning, a step-cap fallback that shows the last tool result, run logs, 40+ safety tests, and the Tidepool test API. `agent.py` has `--backend lmstudio|ollama`, `--model`, `--tools generic|radarr`, `--agent` and `--max-steps`.
 - Rung 1 (known API, skill) passes 6 of 6 on Gemma 4 E4B and Qwen 3.5 9B. Rung 2 on an invented API (Tidepool) passes 6 of 6. Bonsai 8B cannot do discovery; Nanbeige 3B is unusable under LM Studio.
 - OpenClaw baseline (one read-only run): correct in 11s on DeepSeek with about 24K prompt tokens per call, against about 3K for Smolpaw.
-- Done on branch `feat/eval-and-harder-discovery` (merge pending): the eval script (`tests/eval.py`), harder Tidepool variants (17 of 18 passed) and prefill timing (see RESULTS.md).
-- Not yet done: rungs 3 to 5 (they need a person at the keyboard for write prompts), more models.
+- Done and merged: the eval script (`tests/eval.py`), harder Tidepool variants (17 of 18 passed), prefill timing, the error-hint skill experiment (no benefit) and an Ollama backend (`--backend ollama`; first spike in RESULTS.md).
+- Not yet done: rungs 3 to 5 (they need a person at the keyboard for write prompts), more models, Ollama support in the eval and prefill scripts.
 - Caveats: the `api-discovery` skill supplies Radarr's spec URL, so rung 1 shows recipe-following, not discovery; samples are 3 runs per cell.
 
 ## What OpenClaw had that Smolpaw lacks
@@ -45,7 +45,7 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 
 ### Ollama backend (in progress, [#13](https://github.com/aurora7795/smolpaw/issues/13))
 - Ollama serves an OpenAI-compatible API at `http://127.0.0.1:11434/v1` with tool calling, so `OpenAIServerModel` stays; only the base URL, API key and default model ID change per backend.
-- Main risk is context length: Ollama's default is small and over-long prompts are cut silently. The `/v1` endpoint has no per-request `num_ctx`, so the server runs with `OLLAMA_CONTEXT_LENGTH=16384` (fallback: a Modelfile with `PARAMETER num_ctx`), and `tests/eval.py` reads the loaded context from `/api/ps`. LiteLLM's `ollama_chat/` route is not used: it adds a heavy dependency.
+- Main risk is context length: over-long prompts are cut silently, and Ollama's default context depends on available memory (32K on this Mac, smaller on less memory). The `/v1` endpoint has no per-request `num_ctx`, so the server runs with `OLLAMA_CONTEXT_LENGTH=16384` (fallback: a Modelfile with `PARAMETER num_ctx`), and `tests/eval.py` reads the loaded context from `/api/ps`. LiteLLM's `ollama_chat/` route is not used: it adds a heavy dependency.
 - Steps:
   1. Spike (done, see RESULTS.md): tool calls, `usage.prompt_tokens` and the server-side context setting all work. The default context on this Mac is 32K, not 4K.
   2. `agent.py` (done): a `BACKENDS` dict, a `--backend lmstudio|ollama` flag (default `lmstudio`), a `backend` parameter on `build_agent()`, and a default model per backend. The prompt and the confirmation layer are unchanged.
