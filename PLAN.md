@@ -11,9 +11,23 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 - Built and pushed: generic tools with a Python-side confirmation layer, `notes.md` and skills (short skills inlined into the prompt), `openapi_search`, an HTML-response warning, a step-cap fallback that shows the last tool result, run logs, 40+ safety tests, and the Tidepool test API. `agent.py` has `--backend lmstudio|ollama`, `--model`, `--tools generic|radarr`, `--agent` and `--max-steps`.
 - Rung 1 (known API, skill) passes 6 of 6 on Gemma 4 E4B and Qwen 3.5 9B. Rung 2 on an invented API (Tidepool) passes 6 of 6. Bonsai 8B cannot do discovery; Nanbeige 3B is unusable under LM Studio.
 - OpenClaw baseline (one read-only run): correct in 11s on DeepSeek with about 24K prompt tokens per call, against about 3K for SmolPaw.
-- Done and merged: the eval script (`tests/eval.py`), harder Tidepool variants (17 of 18 passed), prefill timing, the error-hint skill experiment (no benefit) and an Ollama backend (`--backend ollama` for the agent, eval and prefill scripts), measured at 16K against LM Studio (see RESULTS.md).
-- Not yet done: rungs 3 to 5 (they need a person to approve write prompts, now possible remotely with `web.py` or `tests/eval.py --confirm web`), more models, a GGUF arm on Ollama.
+- Done and merged: the eval script (`tests/eval.py`), harder Tidepool variants (17 of 18 passed), prefill timing, the error-hint skill experiment (no benefit) and an Ollama backend (`--backend ollama` for the agent, eval and prefill scripts), measured against LM Studio at 16K and 32K; native tool-call history (parse errors cut about four times); GGUF against MLX builds (MLX stays); and the web harness (`web.py`) for answering prompts remotely (see RESULTS.md).
+- Not yet done: rungs 3 to 5 (they need a person to approve write prompts, now possible remotely with `web.py` or `tests/eval.py --confirm web`), more models, and the roadmap below.
 - Caveats: the `api-discovery` skill supplies Radarr's spec URL, so rung 1 shows recipe-following, not discovery; samples are 3 runs per cell.
+
+## Roadmap
+
+Build what costs no prompt first, then cheap tools, then on-demand versions of OpenClaw's prompt-expensive features. Keep the first-call prompt under about 3.5K tokens (about 2.2K to 2.9K today) and measure every addition with `tests/eval.py` before keeping it. The owner keeps a fuller working copy, with progress and the feature-by-feature reasoning, outside the repo; the issues below are shared by both.
+
+| Phase | What it includes | Prompt cost | Done when | Issues |
+|---|---|---|---|---|
+| 0. Finish the test ladder | Rung 3 (a supervised real write, fixing the skipped movie lookup), rung 4 (an unrelated local task), rung 5 (write a skill, then reuse it) | None | Rungs 1 and 3 pass 2 of 3 on a local model; rung 5 needs fewer steps than rung 3 | [#1](https://github.com/aurora7795/smolpaw/issues/1), [#3](https://github.com/aurora7795/smolpaw/issues/3), [#4](https://github.com/aurora7795/smolpaw/issues/4) |
+| 1. Free features | Recovery checks in Python, harness-run schedules, one chat channel, cheap and strong model routing | None (within about 50 tokens) | Each works end to end and ladder results are no worse | [#19](https://github.com/aurora7795/smolpaw/issues/19), [#20](https://github.com/aurora7795/smolpaw/issues/20), [#21](https://github.com/aurora7795/smolpaw/issues/21), [#22](https://github.com/aurora7795/smolpaw/issues/22) (overlaps [#7](https://github.com/aurora7795/smolpaw/issues/7)) |
+| 2. Cheap tools | HTML-to-text in `http_request`, web search, key user facts in `notes.md`; `edit_file` only if a task needs it | About 100 to 150 tokens each | Each measured on a task that needs it, within budget | [#23](https://github.com/aurora7795/smolpaw/issues/23), [#24](https://github.com/aurora7795/smolpaw/issues/24), [#25](https://github.com/aurora7795/smolpaw/issues/25) |
+| 3. On-demand versions of the expensive four | A rolling summary of earlier requests, `remember` and `recall`, `fetch_page(url, query)`, prompt-prefix caching measured | About 100 to 300 tokens in total, not growing per turn | A follow-up across two requests works and the prompt does not grow per turn | [#26](https://github.com/aurora7795/smolpaw/issues/26), [#27](https://github.com/aurora7795/smolpaw/issues/27), [#28](https://github.com/aurora7795/smolpaw/issues/28), [#29](https://github.com/aurora7795/smolpaw/issues/29) |
+| Ongoing | The PicoClaw prompt comparison; the remaining Gemma parse errors | None | A measured answer in RESULTS.md | [#18](https://github.com/aurora7795/smolpaw/issues/18), [#14](https://github.com/aurora7795/smolpaw/issues/14) |
+
+Not planned: persona files and full browser automation (all prompt cost, little task value), and sub-agents (one model fits on a 16GB Mac). The expensive four are conversation history, browser automation, persona files and inlined memory: each puts text into every call whether the task needs it or not, so phase 3 makes the useful part of each arrive only when the model asks.
 
 ## What OpenClaw had that SmolPaw lacks
 
@@ -127,6 +141,7 @@ Tracked as GitHub issues:
 11. Done: Tidepool `detail` rechecked at 32K with native history; 11 of 12 on both LM Studio and Ollama, so the gap is gone (see RESULTS.md). Closed: [#15](https://github.com/aurora7795/smolpaw/issues/15).
 12. Done: GGUF against MLX builds on Ollama; same pass rates, MLX faster (Gemma prefill about twice as fast), so the default MLX tags stay. Closed: [#16](https://github.com/aurora7795/smolpaw/issues/16).
 13. Measure the prompt PicoClaw actually sends, and its results, on the same local models and Tidepool tasks; the lighter claw harnesses advertise footprint, not prompt size: [#18](https://github.com/aurora7795/smolpaw/issues/18).
+14. The roadmap phases 1 to 3 (see Roadmap above): [#19](https://github.com/aurora7795/smolpaw/issues/19) to [#29](https://github.com/aurora7795/smolpaw/issues/29).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
