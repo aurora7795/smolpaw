@@ -3,7 +3,8 @@ Repeatable eval runs for the generic harness.
 
 Runs one prompt N times on a model and records pass/fail, steps, wall time, token counts,
 tool calls and the final answer. Confirmation prompts are answered "no" (and recorded), so
-use it for read-only tasks, unless --confirm web sends them to the web page (see web.py). The real notes.md is never touched: the run uses its own notes.
+use it for read-only tasks, unless --confirm web sends them to the web page (see web.py).
+The real notes.md is never touched: the run uses its own notes.
 
 Examples:
   .venv/bin/python tests/eval.py --model google/gemma-4-e4b --tidepool hint --n 3
@@ -182,7 +183,8 @@ def main() -> None:
     ap.add_argument("--web-host", default="127.0.0.1")
     ap.add_argument("--web-port", type=int, default=8770)
     ap.add_argument("--text-history", action="store_true",
-                    help="send earlier tool calls as smolagents' text, not native tool_calls (for comparison, #14)")
+                    help="send earlier tool calls as smolagents' text, not native tool_calls "
+                         "(for comparison, #14)")
     args = ap.parse_args()
 
     load_env()

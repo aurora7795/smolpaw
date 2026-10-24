@@ -274,6 +274,7 @@ from smolagents.models import ChatMessage, MessageRole  # noqa: E402
 from smolagents.monitoring import Timing  # noqa: E402
 
 from agent import NativeHistoryModel  # noqa: E402
+from generic_tools import GENERIC_TOOLS  # noqa: E402
 
 _t = Timing(0.0, 1.0)
 _steps = [
@@ -283,7 +284,8 @@ _steps = [
     ActionStep(step_number=2, timing=_t, model_output="Calling tools:\n[{'id': 'fake', 'function': {}}]",
                error=ValueError("could not parse a tool call")),
     ActionStep(step_number=3, timing=_t, model_output="",
-               tool_calls=[ToolCall("read_file", {"path": "a"}, "call_b"), ToolCall("read_file", {"path": "b"}, "call_c")],
+               tool_calls=[ToolCall("read_file", {"path": "a"}, "call_b"),
+                           ToolCall("read_file", {"path": "b"}, "call_c")],
                observations="a and b"),
 ]
 _msgs = [ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": "task"}])]
