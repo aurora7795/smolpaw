@@ -46,6 +46,25 @@ Same question as before (answer: Kestrel, 340 tons). Variants are in `tests/fake
 
 17 of 18 passed. The one failure: Gemma on `hint` tried about ten URLs, got 404s, and gave up without following the `docs` link in the 404 body (tracked as an issue). Both models handled the multi-call cases (fetch every vessel, follow pagination), but those cost 5 to 11 steps and 18K to 50K cumulative input tokens per task. Qwen was loaded with a 16K context here (earlier Qwen runs used its saved 32K setting); `tests/eval.py` records the loaded context for each run. A header-based variant was not built because `http_request` has no headers parameter.
 
+## Skill tweak tried and not adopted: read error bodies for hints
+
+Issue #9: Gemma failed the Tidepool `hint` variant once because it ignored a docs link in a 404 body. I added one line to the 404 guidance of `api-discovery.md` (read the body, it often names the right path or a docs link, follow it) and compared it with the unchanged skill.
+
+| Gemma 4 E4B, `hint` | Passed | Mean time | Mean steps | Mean input tokens |
+|---|---|---|---|---|
+| Current skill (6 new runs; the earlier 3 runs went 2/3) | 5/6 | 125s | 6.3 | 22.4K |
+| With the new line (6 runs) | 5/6 | 229s | 8.7 | 31.7K |
+
+The pass rate did not improve (each arm lost one run to the step cap), and the new line looked slower, though with 6 runs per arm the difference could be noise. A no-harm check on the other variants, compared with the earlier unchanged-skill runs:
+
+| Variant | Gemma before, after | Qwen before, after |
+|---|---|---|
+| hint | n/a | 3/3, 5.0 then 6.7 steps (44s then 56s) |
+| detail | 3/3, 9.3 then 9.7 steps | 3/3, 10.3 then 10.7 steps |
+| paged | 3/3, 5.7 then 5.3 steps | 3/3, 6.0 then 8.0 steps (61s then 80s) |
+
+Qwen took more steps on `hint` and `paged` with the new skill, and more of its runs used `run_shell` or re-read skills first; Gemma's other variants were unchanged. All of these are small samples, but nothing showed a benefit, so the skill is unchanged. Gemma's occasional fixation on one dead URL remains an open failure mode (roughly 2 of 9 `hint` runs with the unchanged skill). One eval quirk: a Qwen `detail` run hit the step cap yet counted as a pass because its answer table contained the right vessel and capacity.
+
 ## Ollama spike (Ollama 0.40.7, Tidepool `easy`)
 
 The spike ran through a scratch script that pointed `agent.py` at Ollama, before `--backend` existed. These are Ollama's default (GGUF) tags.

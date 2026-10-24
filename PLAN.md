@@ -121,7 +121,7 @@ Tracked as GitHub issues:
 5. Done on the feature branch (closes on merge): a small eval script so runs are comparable and token counts are recorded: [#5](https://github.com/aurora7795/smolpaw/issues/5).
 6. Done on the feature branch (closes on merge): prefill time on this Mac, to quantify OpenClaw's overhead locally: [#6](https://github.com/aurora7795/smolpaw/issues/6).
 7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier: [#7](https://github.com/aurora7795/smolpaw/issues/7). Gemma's loaded context is now confirmed as 16384 by `tests/eval.py`.
-8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): [#9](https://github.com/aurora7795/smolpaw/issues/9).
+8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): tried, no benefit, skill unchanged (see RESULTS.md). Closed: [#9](https://github.com/aurora7795/smolpaw/issues/9).
 9. Ollama as a second backend, with an MLX vs GGUF comparison (see "Ollama backend" above): [#13](https://github.com/aurora7795/smolpaw/issues/13). Spike and `--backend` done; the eval scripts and measurement remain.
 10. Gemma copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call as text), costing steps and sometimes a run, on both runtimes: [#14](https://github.com/aurora7795/smolpaw/issues/14).
 
