@@ -95,6 +95,17 @@ Clean passes: Gemma 13 of 15 on Ollama against 14 of 15 on LM Studio; Qwen 12 of
 - `detail` is where Ollama did worse: 2 clean passes of 6 against 6 of 6 on LM Studio. Failures: Gemma answered "Halcyon, 450 tons" (Halcyon holds 275), and another Gemma run never found the vessel endpoints and gave up; two Qwen runs hit the 12-step cap while fetching vessels one by one. Qwen's `paged` failure answered from page 1 ("Marigold, 120 tons") without following `next`.
 - Caveats: n=3 per cell, so the `detail` gap could be chance. The quantisations differ (LM Studio MLX 4-bit, Ollama `nvfp4`). The LM Studio rung 1 and `easy` columns come from earlier runs made before `tests/eval.py`, where context was not confirmed (Qwen used its saved 32K setting). Gemma's parse errors (#14) appeared on both runtimes.
 
+## Native tool-call history vs smolagents' text history (Gemma 4 E4B, Tidepool `detail`, 6 runs each, #14)
+
+LM Studio, 16K context, same prompt and notes. "Native" sends earlier tool calls and results as `tool_calls` and `tool` messages; "text" (`--text-history`) is smolagents' original `Calling tools: [...]` text.
+
+| History | Passed | Parse errors per run | Mean steps | Mean input tokens | Mean time |
+|---|---|---|---|---|---|
+| Native | 6/6 | 0, 0, 0, 0, 0, 0 (total 0) | 8.0 | 29.4K | 120s |
+| Text | 6/6 | 1, 0, 0, 1, 0, 0 (total 2) | 8.7 | 33.0K | 128s |
+
+Every native run took exactly 8 steps with the same token count, so it followed one path each time; the text runs took 8 to 10 steps. Parse errors were 0 of 6 runs with native history against 2 of 6 with text. That difference alone is small (Fisher exact p about 0.45). Earlier Gemma `detail` runs on the text format, from two other batches (0 to 3 parse errors per run, 6 of 12 runs with at least one, counting this arm's runs as well), make the contrast stronger (0 of 6 against 6 of 12, p about 0.05), but those batches ran on earlier code and one used a different skill, so treat the pooled figure as indicative only. Time differences are small and within run-to-run variation. Passing was not at issue: all 12 runs passed. Not tested: Qwen (it rarely showed the problem), the Ollama backend, or the failure where a model wraps `final_answer` arguments in an extra layer, which #14 also lists.
+
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 
 Time to read a prompt of random words (one output token requested), 32K context, no prompt-cache help:
