@@ -43,6 +43,18 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 - Step cap stays configurable (`--max-steps`, `MAX_STEPS`, default 12).
 - `run_shell` is the main risk (it can do anything the user account can). Keep confirm-by-default; no unrestricted mode.
 
+### Ollama backend (planned, [#13](https://github.com/aurora7795/smolpaw/issues/13))
+- Ollama serves an OpenAI-compatible API at `http://127.0.0.1:11434/v1` with tool calling, so `OpenAIServerModel` stays; only the base URL, API key and default model ID change per backend.
+- Main risk is context length: Ollama's default is small and over-long prompts are cut silently. The `/v1` endpoint has no per-request `num_ctx`, so the server runs with `OLLAMA_CONTEXT_LENGTH=16384` (fallback: a Modelfile with `PARAMETER num_ctx`), and `tests/eval.py` reads the loaded context from `/api/ps`. LiteLLM's `ollama_chat/` route is not used: it adds a heavy dependency.
+- Steps:
+  1. Spike: one Tidepool `easy` run on Qwen 3.5 9B and Gemma 4 E4B. Check that tool calls parse, that `usage.prompt_tokens` is returned, that the context setting holds, and how Qwen's thinking output comes back.
+  2. `agent.py`: a `BACKENDS` dict, a `--backend lmstudio|ollama` flag (default `lmstudio`), a `backend` parameter on `build_agent()`, and a default model per backend. The prompt and the confirmation layer are unchanged.
+  3. `tests/eval.py` and `tests/prefill_timing.py`: model management per backend (unload with `keep_alive: 0`, a warm-up load, the `/api/ps` context check), `--backend`, and the backend recorded in log names and JSON.
+  4. A backend-selection test.
+  5. Measure rung 1 and the Tidepool variants on Ollama (3 runs per cell) against the LM Studio (MLX) results. This also makes the GGUF Nanbeige test in #7 easy.
+  6. Update README, CHANGELOG and RESULTS.
+- Only one model fits on 16GB: unload LM Studio before loading a model in Ollama, and the reverse.
+
 ## Work items
 
 1. **Generic tools** (done): `http_request`, `run_shell`, file tools, `ask_user`, with the confirmation layer and secret injection.
@@ -110,6 +122,7 @@ Tracked as GitHub issues:
 6. Done on the feature branch (closes on merge): prefill time on this Mac, to quantify OpenClaw's overhead locally: [#6](https://github.com/aurora7795/smolpaw/issues/6).
 7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier: [#7](https://github.com/aurora7795/smolpaw/issues/7). Gemma's loaded context is now confirmed as 16384 by `tests/eval.py`.
 8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): [#9](https://github.com/aurora7795/smolpaw/issues/9).
+9. Ollama as a second backend, with an MLX vs GGUF comparison (see "Ollama backend" above): [#13](https://github.com/aurora7795/smolpaw/issues/13).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
