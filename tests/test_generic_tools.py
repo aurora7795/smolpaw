@@ -158,5 +158,17 @@ if os.environ.get("RADARR_URL") and os.environ.get("RADARR_API_KEY"):
 else:
     print("SKIP  live Radarr tests (RADARR_URL/RADARR_API_KEY unset)")
 
+# backend selection (no server needed: building the model makes no request)
+from agent import build_agent  # noqa: E402
+
+lm = build_agent(toolset="generic").model
+check("default backend is LM Studio", lm.client_kwargs["base_url"] == "http://127.0.0.1:1234/v1"
+      and lm.model_id == "ternary-bonsai-8b-mlx")
+ol = build_agent(toolset="generic", backend="ollama").model
+check("ollama backend uses port 11434 and its default model",
+      ol.client_kwargs["base_url"] == "http://127.0.0.1:11434/v1" and ol.model_id == "qwen3.5:9b")
+check("explicit model overrides backend default",
+      build_agent("gemma4:e4b", toolset="generic", backend="ollama").model.model_id == "gemma4:e4b")
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
