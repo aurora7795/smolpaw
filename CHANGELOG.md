@@ -5,6 +5,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- Ollama as a second model backend: `agent.py --backend ollama` (port 11434, default model `qwen3.5:9b`). `build_agent()` takes a `backend` argument; LM Studio stays the default. Tests cover the backend selection ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
 - README section comparing Smolpaw with OpenClaw on prompt size, task time and local reading speed, with the limits of what was measured.
 - `tests/eval.py`: runs a prompt N times on a model and records pass/fail, steps, time, tokens, tools and answer, with scripted confirmations and its own notes (the real `notes.md` is untouched). Can serve Tidepool itself (`--tidepool`).
 - Tidepool variants `hint`, `detail` and `paged` in `tests/fake_api.py` for harder discovery tests.

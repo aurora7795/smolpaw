@@ -1,5 +1,5 @@
 """
-Smolpaw — minimal smolagents CLI harness backed by LM Studio.
+Smolpaw — minimal smolagents CLI harness backed by LM Studio or Ollama.
 """
 
 import argparse
@@ -27,10 +27,12 @@ BANNER = r"""
          '-.-'
 """
 
-MODEL_ID = "ternary-bonsai-8b-mlx"
 MAX_STEPS = 12
-BASE_URL = "http://127.0.0.1:1234/v1"
-API_KEY = "lm-studio"
+# Both serve an OpenAI-compatible API; the key is ignored by either server but must be non-empty.
+BACKENDS = {
+    "lmstudio": {"url": "http://127.0.0.1:1234/v1", "key": "lm-studio", "model": "ternary-bonsai-8b-mlx"},
+    "ollama": {"url": "http://127.0.0.1:11434/v1", "key": "ollama", "model": "qwen3.5:9b"},
+}
 
 RADARR_INSTRUCTIONS = (
     "To add a movie: call search_movie, then list_add_options, then add_movie using ids "
@@ -52,12 +54,13 @@ def load_env(path: str = ".env") -> None:
             os.environ.setdefault(k.strip(), v.strip())
 
 
-def build_agent(model_id: str = MODEL_ID, agent_type: str = "code", max_steps: int = MAX_STEPS,
-                toolset: str = "generic"):
+def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps: int = MAX_STEPS,
+                toolset: str = "generic", backend: str = "lmstudio"):
+    cfg = BACKENDS[backend]
     model = OpenAIServerModel(
-        model_id=model_id,
-        api_base=BASE_URL,
-        api_key=API_KEY,
+        model_id=model_id or cfg["model"],
+        api_base=cfg["url"],
+        api_key=cfg["key"],
     )
     if toolset == "generic":
         # The generic path is ToolCallingAgent only: Bonsai was far more reliable with JSON tool calls.
@@ -71,7 +74,10 @@ def build_agent(model_id: str = MODEL_ID, agent_type: str = "code", max_steps: i
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default=MODEL_ID, help="LM Studio model identifier")
+    parser.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio",
+                        help="model server: lmstudio (port 1234) or ollama (port 11434)")
+    parser.add_argument("--model", default=None,
+                        help="model identifier on the chosen backend (default depends on --backend)")
     parser.add_argument("--tools", choices=["generic", "radarr"], default="generic",
                         help="generic = shell/http/files/skills; radarr = hand-written Radarr baseline")
     parser.add_argument("--agent", choices=["code", "tool"], default="code",
@@ -81,12 +87,13 @@ def main() -> None:
     args = parser.parse_args()
 
     load_env()
+    args.model = args.model or BACKENDS[args.backend]["model"]
     max_steps = args.max_steps or int(os.environ.get("MAX_STEPS", MAX_STEPS))
     if sys.stdout.isatty():  # keep piped runs and logs clean
         print(BANNER)
     label = args.tools if args.tools == "generic" else f"radarr, {args.agent}"
-    print(f"Smolpaw [{args.model}, {label}] — type your message, Ctrl-C or 'quit' to exit.\n")
-    agent = build_agent(args.model, args.agent, max_steps, args.tools)
+    print(f"Smolpaw [{args.backend}: {args.model}, {label}] — type your message, Ctrl-C or 'quit' to exit.\n")
+    agent = build_agent(args.model, args.agent, max_steps, args.tools, args.backend)
 
     while True:
         try:

@@ -46,6 +46,17 @@ Same question as before (answer: Kestrel, 340 tons). Variants are in `tests/fake
 
 17 of 18 passed. The one failure: Gemma on `hint` tried about ten URLs, got 404s, and gave up without following the `docs` link in the 404 body (tracked as an issue). Both models handled the multi-call cases (fetch every vessel, follow pagination), but those cost 5 to 11 steps and 18K to 50K cumulative input tokens per task. Qwen was loaded with a 16K context here (earlier Qwen runs used its saved 32K setting); `tests/eval.py` records the loaded context for each run. A header-based variant was not built because `http_request` has no headers parameter.
 
+## Ollama spike (Ollama 0.40.7, Tidepool `easy`)
+
+The spike ran through a scratch script that pointed `agent.py` at Ollama, before `--backend` existed. These are Ollama's default (GGUF) tags.
+
+| Model | Loaded context | Result |
+|---|---|---|
+| `qwen3.5:9b` (7.6 GB download, 7.7 to 9.8 GB in memory) | 32K (Ollama's default on this Mac) | 3/3 (17 to 49s, 3 to 5 steps) |
+| `gemma4:e4b` (9.5 GB download, 9.4 to 10.4 GB in memory) | 16K (`OLLAMA_CONTEXT_LENGTH=16384`) | 2/3 (13 to 61s), then 4/4 in a rerun that captured each step's errors |
+
+For comparison, LM Studio (MLX) gave 3/3 for both models in 30 to 74s (Rung 2 above), but at different context sizes and with n=3, so neither runtime is shown to be faster. Tool calls, `usage.prompt_tokens` and a separate `reasoning` field for thinking output all came through Ollama's OpenAI-compatible API. Gemma's failed run and most of its extra steps were parse errors: it copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call written as text). The same errors appear in the LM Studio Gemma logs, so this is not an Ollama problem ([#14](https://github.com/aurora7795/smolpaw/issues/14)).
+
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 
 Time to read a prompt of random words (one output token requested), 32K context, no prompt-cache help:
@@ -90,6 +101,8 @@ For comparison, Smolpaw's first call is about 2.9K tokens. A local model would a
 | Gemma 4 E4B (MLX 4-bit, 6.86 GB) | Best so far. Clean structured tool calls. Slow final steps (47 to 70s on PokeAPI), probably from reasoning mode. |
 | Qwen 3.5 9B (MLX, 5.98 GB) | Good once the harness fixes were in. Needs the clear tool errors; wanders without them. |
 | Ternary Bonsai 8B (MLX, 2.32 GB) | Good at guided execution of a known flow, poor at discovery; invents tools. Candidate for a cheap "execute" tier. |
+| Qwen 3.5 9B (Ollama `qwen3.5:9b`, GGUF) | 3/3 on Tidepool `easy` in a first spike; not yet run on the harder variants. |
+| Gemma 4 E4B (Ollama `gemma4:e4b`, GGUF) | 6 of 7 on Tidepool `easy`; same tool-call copying as under LM Studio ([#14](https://github.com/aurora7795/smolpaw/issues/14)). |
 | Nanbeige 4.2 3B OptiQ (MLX, 3.32 GB) | Unusable as loaded: at temperature 0 via the API it emits repeated junk instead of an answer. LM Studio marks it as not trained for tool use. Possible runtime or quant incompatibility (MLX engine 1.13.1); a GGUF build is untested. |
 
 ## Corrections

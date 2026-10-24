@@ -1,12 +1,12 @@
 # Smolpaw
 
-A lean, local-first agent harness built on [smolagents](https://github.com/huggingface/smolagents) and LM Studio. The aim is OpenClaw-like functionality (an agent that works out how to use services and remembers what it learned) using small local models on a 16GB Mac, with far less prompt overhead.
+A lean, local-first agent harness built on [smolagents](https://github.com/huggingface/smolagents), with models served locally by LM Studio or Ollama. The aim is OpenClaw-like functionality (an agent that works out how to use services and remembers what it learned) using small local models on a 16GB Mac, with far less prompt overhead.
 
 Status: experimental. See [RESULTS.md](RESULTS.md) for what has been measured, [PLAN.md](PLAN.md) for the plan and decisions, and the [comparison with OpenClaw](#how-it-compares-with-openclaw) below.
 
 ## How it works
 
-- `agent.py` runs a `ToolCallingAgent` against a model served by LM Studio (`http://127.0.0.1:1234/v1`).
+- `agent.py` runs a `ToolCallingAgent` against a model served by LM Studio (`http://127.0.0.1:1234/v1`, the default) or Ollama (`http://127.0.0.1:11434/v1`, with `--backend ollama`).
 - The model gets a small set of generic tools ([generic_tools.py](generic_tools.py)): shell, HTTP, files, skills and a way to ask you a question.
 - Every safety rule is enforced in Python, not in the prompt, so a model cannot talk its way past it.
 - `notes.md` lists the services the agent may use. Short skills in `skills/` are put straight into the prompt; longer ones are listed and read on demand.
@@ -46,9 +46,10 @@ An OpenClaw-sized prompt would cost roughly 40 to 115 seconds of reading on ever
 ## Requirements
 
 - Python 3.10+
-- [LM Studio](https://lmstudio.ai/) with its local server on port 1234, and at least one model that supports tool use. Only one model fits at a time on 16GB.
-- Models tried so far: `google/gemma-4-e4b`, `qwen3.5-9b-mlx`, `ternary-bonsai-8b-mlx`. See [RESULTS.md](RESULTS.md).
-- For the best behaviour load the model with a context length of at least 16384 and one parallel slot.
+- A local model server with at least one model that supports tool use. Only one model fits at a time on 16GB, so unload the other server's model before switching.
+  - [LM Studio](https://lmstudio.ai/) with its local server on port 1234 (default). Load the model with a context length of at least 16384 and one parallel slot.
+  - Or [Ollama](https://ollama.com/) on port 11434. See [Using Ollama](#using-ollama) for the context setting.
+- Models tried so far: on LM Studio `google/gemma-4-e4b`, `qwen3.5-9b-mlx`, `ternary-bonsai-8b-mlx`; on Ollama `qwen3.5:9b`, `gemma4:e4b`. See [RESULTS.md](RESULTS.md).
 
 ## Setup
 
@@ -78,7 +79,8 @@ python3 agent.py --model google/gemma-4-e4b
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--model` | `ternary-bonsai-8b-mlx` | LM Studio model identifier (see `lms ls`) |
+| `--backend` | `lmstudio` | `lmstudio` (port 1234) or `ollama` (port 11434) |
+| `--model` | `ternary-bonsai-8b-mlx` on LM Studio, `qwen3.5:9b` on Ollama | Model identifier on the chosen backend (see `lms ls` or `ollama list`) |
 | `--tools` | `generic` | `generic` or `radarr` (hand-written baseline) |
 | `--agent` | `code` | `radarr` toolset only: `code` writes Python, `tool` makes JSON tool calls |
 | `--max-steps` | 12 | Also settable as `MAX_STEPS` in `.env` |
@@ -86,6 +88,15 @@ python3 agent.py --model google/gemma-4-e4b
 Type a request and press Enter; `quit` or Ctrl-C exits. After each answer the harness prints `[Harness says]`: what was actually changed or declined, so you do not have to trust the model's summary. If the agent hits the step cap, the harness says so and shows the last tool result.
 
 Every run is logged to `logs/` (gitignored, keys redacted).
+
+### Using Ollama
+
+```bash
+ollama pull qwen3.5:9b
+python3 agent.py --backend ollama --model qwen3.5:9b
+```
+
+Ollama cuts prompts that exceed the loaded context with no error to the client (only a warning in the server log), and its OpenAI-compatible API cannot set the context per request. Set it on the server instead, for example `launchctl setenv OLLAMA_CONTEXT_LENGTH 16384` and then restart the Ollama app, or `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. Without it, Ollama picks a default from available memory (32K on the 16GB test Mac). `ollama ps` shows the context a loaded model is using. `tests/eval.py` and `tests/prefill_timing.py` still drive LM Studio only ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
 
 ## Safety model
 
