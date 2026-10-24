@@ -4,6 +4,7 @@ Smolpaw — minimal smolagents CLI harness backed by LM Studio.
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from smolagents import CodeAgent, OpenAIServerModel, ToolCallingAgent
@@ -13,6 +14,18 @@ import generic_tools
 import radarr_tools
 from generic_tools import GENERIC_TOOLS
 from radarr_tools import RADARR_TOOLS
+
+BANNER = r"""
+      .-.     .-.
+     ( o )   ( o )
+      '-'     '-'        S M O L P A W
+  .-.             .-.    a small agent with big paws
+ ( o )   .-"-.   ( o )
+  '-'   /     \   '-'
+       |  \_/  |
+        \     /
+         '-.-'
+"""
 
 MODEL_ID = "ternary-bonsai-8b-mlx"
 MAX_STEPS = 12
@@ -69,6 +82,8 @@ def main() -> None:
 
     load_env()
     max_steps = args.max_steps or int(os.environ.get("MAX_STEPS", MAX_STEPS))
+    if sys.stdout.isatty():  # keep piped runs and logs clean
+        print(BANNER)
     label = args.tools if args.tools == "generic" else f"radarr, {args.agent}"
     print(f"Smolpaw [{args.model}, {label}] — type your message, Ctrl-C or 'quit' to exit.\n")
     agent = build_agent(args.model, args.agent, max_steps, args.tools)
