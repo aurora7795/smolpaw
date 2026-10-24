@@ -98,6 +98,28 @@ python3 agent.py --backend ollama --model qwen3.5:9b
 
 Ollama cuts prompts that exceed the loaded context with no error to the client (only a warning in the server log), and its OpenAI-compatible API cannot set the context per request. Set it on the server instead. With the Ollama app, use its Context length setting (Settings): the app passes that to its server and it overrides `OLLAMA_CONTEXT_LENGTH` set with `launchctl`. With a server you start yourself, use `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. With neither set, Ollama picks a default from available memory. `ollama ps` shows the context a loaded model is using. On Apple Silicon, Ollama's default tags may be MLX builds rather than GGUF; `ollama show <tag>` reports the format and runner.
 
+### Web harness: answer prompts from your phone
+
+`web.py` runs the same agent and puts every `[y/N]` prompt and `ask_user` question on a web page, so you can approve or decline from another device (for example over Tailscale) while a task runs.
+
+```bash
+.venv/bin/python web.py --backend ollama --host 0.0.0.0
+# Smolpaw web [ollama: qwen3.5:9b] at http://<this-machine>:8770/?t=<token>
+```
+
+Open the printed URL. The page has a box for requests, a card with **Yes / No** (or a reply box) when the agent is waiting on you, the answer with the `[Harness says]` lines, a short activity feed from the run log, and a Stop button. One request runs at a time.
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--backend`, `--model`, `--max-steps` | as for `agent.py` | Generic toolset only |
+| `--host` | `127.0.0.1` | `0.0.0.0` to reach it from other devices |
+| `--port` | 8770 | |
+| `--timeout` | 0 (wait forever) | Seconds before an unanswered prompt counts as no |
+
+The confirmation rules are the same as in the terminal; only where you answer changes. Every request must carry the access token (random per start, or fixed with `SMOLPAW_WEB_TOKEN` in `.env` so a bookmark keeps working). Only a real Yes approves: a wrong token, a stale prompt or a timeout counts as no. Keys are redacted from everything the page shows. Anyone with the URL can approve shell commands as you, so keep it on a private network and do not forward the port to the internet. The server is plain HTTP; over Tailscale the connection is encrypted by the tunnel.
+
+`tests/eval.py --confirm web` sends the eval's prompts to the same page instead of answering no, so write tasks can be measured while you approve them remotely.
+
 ## Safety model
 
 | Action | Behaviour |
@@ -111,7 +133,7 @@ Ollama cuts prompts that exceed the loaded context with no error to the client (
 | `.env` files | Never readable or writable by the file tools. |
 | Declined action | The model is told and may try another way. |
 
-An approved shell command runs with your user's permissions, so read the prompt. See [PLAN.md](PLAN.md) for the reasoning.
+An approved shell command runs with your user's permissions, so read the prompt, in the terminal or on the web page. See [PLAN.md](PLAN.md) for the reasoning.
 
 ## Tools
 
@@ -145,6 +167,7 @@ Both take `--backend lmstudio|ollama` and first unload every model on both serve
 
 ```
 agent.py              CLI and agent wiring
+web.py                Web harness: run the agent and answer its prompts from a browser
 generic_tools.py      Tools, confirmation layer, secrets, logging, prompt building
 radarr_tools.py       Hand-written Radarr tools (baseline)
 skills/               Skills the agent follows or writes (api-discovery.md is hand-written)

@@ -72,6 +72,27 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
                instructions=RADARR_INSTRUCTIONS, **kwargs)
 
 
+def run_request(agent, model: str, toolset: str, user_input: str) -> tuple[str, str]:
+    """Run one request; return the answer and the harness's own account of what changed."""
+    radarr_tools.LAST_ACTION = ""
+    generic_tools.ACTIONS.clear()
+    generic_tools.LAST_RESULT = ""
+    if toolset == "generic":
+        print(f"[log] {generic_tools.start_log(model, user_input)}")
+    response = agent.run(user_input)
+    hit_cap = any(isinstance(getattr(step, "error", None), AgentMaxStepsError)
+                  for step in agent.memory.steps)
+    if hit_cap and toolset == "generic":
+        response = (f"STEP LIMIT REACHED: the agent did not finish. Its answer, if any: "
+                    f"{str(response).strip() or '(none)'}\nLast tool result -> "
+                    f"{generic_tools.LAST_RESULT or '(no tool results)'}")
+    if toolset == "generic":
+        generic_tools.log_final(response)
+        actions = "\n  ".join(generic_tools.ACTIONS) or "no changes made"
+        return str(response), f"[Harness says]\n  {actions}"
+    return str(response), f"[Radarr says] {radarr_tools.LAST_ACTION}" if radarr_tools.LAST_ACTION else ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio",
@@ -107,25 +128,10 @@ def main() -> None:
             break
 
         try:
-            radarr_tools.LAST_ACTION = ""
-            generic_tools.ACTIONS.clear()
-            generic_tools.LAST_RESULT = ""
-            if args.tools == "generic":
-                print(f"[log] {generic_tools.start_log(args.model, user_input)}")
-            response = agent.run(user_input)
-            hit_cap = any(isinstance(getattr(step, "error", None), AgentMaxStepsError)
-                          for step in agent.memory.steps)
-            if hit_cap and args.tools == "generic":
-                response = (f"STEP LIMIT REACHED: the agent did not finish. Its answer, if any: "
-                            f"{str(response).strip() or '(none)'}\nLast tool result -> "
-                            f"{generic_tools.LAST_RESULT or '(no tool results)'}")
+            response, outcome = run_request(agent, args.model, args.tools, user_input)
             print(f"\nAgent: {response}\n")
-            if args.tools == "generic":
-                generic_tools.log_final(response)
-                actions = "\n  ".join(generic_tools.ACTIONS) or "no changes made"
-                print(f"[Harness says]\n  {actions}\n")
-            elif radarr_tools.LAST_ACTION:
-                print(f"[Radarr says] {radarr_tools.LAST_ACTION}\n")
+            if outcome:
+                print(f"{outcome}\n")
         except Exception as exc:
             print(f"\n[Error] {exc}\n")
 

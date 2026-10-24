@@ -170,5 +170,101 @@ check("ollama backend uses port 11434 and its default model",
 check("explicit model overrides backend default",
       build_agent("gemma4:e4b", toolset="generic", backend="ollama").model.model_id == "gemma4:e4b")
 
+# web approvals: the browser answers the same prompts; only a correct token and a real boolean approve
+import json  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+import requests  # noqa: E402
+
+import web  # noqa: E402
+
+
+def run_in_thread(fn, *args) -> dict:
+    out: dict = {}
+    t = threading.Thread(target=lambda: out.update(value=fn(*args)), daemon=True)
+    t.start()
+    out["thread"] = t
+    return out
+
+
+def wait_pending(approvals: web.Approvals) -> dict | None:
+    for _ in range(100):
+        if approvals.pending:
+            return approvals.pending
+        time.sleep(0.02)
+    return None
+
+
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+token = "test-token-123456"
+appr = web.Approvals(timeout=5)
+srv = web.serve("127.0.0.1", port, token, appr)
+base = f"http://127.0.0.1:{port}"
+hdr = {"X-Token": token}
+http = requests.Session()  # earlier tests replace requests.get with a fake
+
+check("web page refuses a missing token", http.get(f"{base}/api/state", timeout=5).status_code == 403)
+check("web page refuses a wrong token",
+      http.get(f"{base}/api/state", headers={"X-Token": "nope"}, timeout=5).status_code == 403)
+
+job = run_in_thread(appr.confirm, "Run shell command?\n  rm x")
+p = wait_pending(appr)
+check("web prompt is shown as pending", p is not None and p["kind"] == "confirm" and "rm x" in p["text"])
+bad = http.post(f"{base}/api/answer", json={"id": p["id"], "value": True},
+                headers={"X-Token": "nope"}, timeout=5)
+check("wrong token cannot answer", bad.status_code == 403 and appr.pending is not None)
+s_yes = http.post(f"{base}/api/answer", json={"id": p["id"], "value": "yes"}, headers=hdr, timeout=5)
+check("string 'yes' does not approve", s_yes.status_code == 409 and appr.pending is not None)
+stale = http.post(f"{base}/api/answer", json={"id": p["id"] + 1, "value": True}, headers=hdr, timeout=5)
+check("stale prompt id is refused", stale.status_code == 409 and appr.pending is not None)
+ok = http.post(f"{base}/api/answer", json={"id": p["id"], "value": True}, headers=hdr, timeout=5)
+job["thread"].join(5)
+check("browser yes approves", ok.status_code == 200 and job.get("value") is True)
+
+job = run_in_thread(appr.confirm, "Write file?")
+p = wait_pending(appr)
+http.post(f"{base}/api/answer", json={"id": p["id"], "value": False}, headers=hdr, timeout=5)
+job["thread"].join(5)
+check("browser no declines", job.get("value") is False)
+
+quick = web.Approvals(timeout=0.2)
+check("unanswered confirm times out as no", quick.confirm("Run?") is False)
+check("unanswered question times out with a no-answer note", quick.ask("Which one?") == web.NO_ANSWER)
+
+job = run_in_thread(appr.ask, "Which host?")
+p = wait_pending(appr)
+http.post(f"{base}/api/answer", json={"id": p["id"], "value": "the NAS"}, headers=hdr, timeout=5)
+job["thread"].join(5)
+check("browser reply reaches ask_user", job.get("value") == "the NAS")
+
+saved_notes = g.NOTES
+g.NOTES = tmp / "web-notes.md"
+g.NOTES.write_text("- svc: http://example.com | key_env=SMOLPAW_TEST_WEB_KEY | header=X-Api-Key\n")
+os.environ["SMOLPAW_TEST_WEB_KEY"] = "s3cret-value-for-test"
+job = run_in_thread(appr.confirm, "POST with key s3cret-value-for-test?")
+p = wait_pending(appr)
+state = http.get(f"{base}/api/state", headers=hdr, timeout=5).json()
+check("keys are redacted on the web page",
+      "s3cret-value-for-test" not in json.dumps(state) and "[REDACTED]" in p["text"])
+appr.cancel()
+job["thread"].join(5)
+check("stop declines the pending prompt", job.get("value") is False)
+g.NOTES = saved_notes
+del os.environ["SMOLPAW_TEST_WEB_KEY"]
+
+appr.install()
+g.ACTIONS.clear()
+job = run_in_thread(g._approved, "Run shell command?\n  touch y")
+p = wait_pending(appr)
+http.post(f"{base}/api/answer", json={"id": p["id"], "value": False}, headers=hdr, timeout=5)
+job["thread"].join(5)
+check("web decline is recorded by the harness", job.get("value") is False and g.ACTIONS[-1].startswith("declined"))
+g.CONFIRM = fake_confirm
+srv.shutdown()
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
