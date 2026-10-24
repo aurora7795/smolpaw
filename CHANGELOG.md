@@ -5,6 +5,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- README section comparing Smolpaw with OpenClaw on prompt size, task time and local reading speed, with the limits of what was measured.
 - `tests/eval.py`: runs a prompt N times on a model and records pass/fail, steps, time, tokens, tools and answer, with scripted confirmations and its own notes (the real `notes.md` is untouched). Can serve Tidepool itself (`--tidepool`).
 - Tidepool variants `hint`, `detail` and `paged` in `tests/fake_api.py` for harder discovery tests.
 - `tests/prefill_timing.py`: times prompts of increasing size through LM Studio's API.
