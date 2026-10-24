@@ -106,6 +106,15 @@ g.requests.get = lambda *a, **k: _Resp()
 check("openapi_search finds endpoint", "GET /api/v3/queue" in g.openapi_search("http://x/spec.json", "queue"))
 check("openapi_search excludes others", "movie" not in g.openapi_search("http://x/spec.json", "queue"))
 check("openapi_search lists tags", "Queue" in g.openapi_search("http://x/spec.json"))
+class _Page:
+    def json(self):
+        return {"service": "x", "resources": {}}
+
+
+g.requests.get = lambda *a, **k: _Page()
+msg = g.openapi_search("http://x/index", "queue")
+check("openapi_search explains non-spec JSON", "not an OpenAPI spec" in msg and "http_request" in msg)
+g.requests.get = lambda *a, **k: _Resp()
 check("openapi_search no match", g.openapi_search("http://x/spec.json", "zzz") == "No matching endpoints.")
 
 # HTML responses are flagged, JSON is not
@@ -121,6 +130,11 @@ check("HTML body flagged as not an answer", "HTML web page" in res and "login" n
 g.requests.request = lambda *a, **k: _Http('{"ok": true}', "application/json")
 check("JSON body passed through", g.http_request("GET", "http://x/api").endswith('{"ok": true}'))
 g.requests.request = _real_request
+
+# last tool result is remembered for the step-cap fallback
+g.LAST_RESULT = ""
+g.run_shell("ls")
+check("last tool result remembered", g.LAST_RESULT.startswith("run_shell:"))
 
 # short skills are inlined into the prompt, long ones only listed
 (g.SKILLS / "short.md").write_text("# Short\nuse thing")

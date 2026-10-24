@@ -10,17 +10,22 @@ safety rule lives here, not in the prompt, so the model cannot talk its way past
   - .env files can never be read or written
 """
 
+import functools
 import json
 import os
 import re
 import shlex
 import subprocess
+import warnings
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
 from smolagents import tool
+
+# _remember wraps tools; smolagents only warns about this for its remote executor, which we do not use.
+warnings.filterwarnings("ignore", message=".*has decorators other than @tool.*")
 
 ROOT = Path(__file__).parent
 WORKSPACE = ROOT / "workspace"
@@ -106,6 +111,19 @@ def log_final(answer: object) -> None:
     _log("final", answer=str(answer), actions=list(ACTIONS))
 
 
+LAST_RESULT = ""  # most recent tool output, shown by the harness if the agent hits the step cap
+
+
+def _remember(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        global LAST_RESULT
+        result = fn(*args, **kwargs)
+        LAST_RESULT = f"{fn.__name__}: {result}"[:1500]
+        return result
+    return wrapper
+
+
 def _approved(desc: str) -> bool:
     ok = CONFIRM(desc)
     _log("confirm", desc=desc, approved=ok)
@@ -151,6 +169,7 @@ def _read_only_argv(cmd: str) -> list[str] | None:
 
 
 @tool
+@_remember
 def run_shell(command: str) -> str:
     """Run a shell command in the workspace folder. Read-only commands (ls, cat, head, grep, find, wc, stat, file) on workspace files run immediately; anything else asks the user first.
 
@@ -197,6 +216,7 @@ def _looks_like_html(r: requests.Response) -> bool:
 
 
 @tool
+@_remember
 def http_request(method: str, url: str, body: str = "") -> str:
     """Make an HTTP request. GET runs immediately; any other method asks the user first. API keys for services listed in the notes are added automatically.
 
@@ -236,6 +256,7 @@ _SPECS: dict[str, dict] = {}
 
 
 @tool
+@_remember
 def openapi_search(spec_url: str, keyword: str = "") -> str:
     """Search a service's OpenAPI spec (a JSON file listing every endpoint) and list matching endpoints. Use this to find the real endpoint names instead of guessing. With no keyword, lists the spec's tags.
 
@@ -248,9 +269,18 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
             r = requests.get(spec_url, timeout=30)
             _SPECS[spec_url] = r.json()
         except (requests.RequestException, ValueError) as exc:
-            return f"ERROR: could not load an OpenAPI JSON spec from {spec_url}: {exc}"
+            return (
+                f"ERROR: {spec_url} is not an OpenAPI spec ({type(exc).__name__}). "
+                "Do not guess spec URLs. Call the API itself with http_request instead."
+            )
     spec = _SPECS[spec_url]
-    paths = spec.get("paths", {})
+    if not isinstance(spec, dict) or "paths" not in spec:
+        _SPECS.pop(spec_url, None)
+        return (
+            f"ERROR: {spec_url} returns JSON but it is not an OpenAPI spec (it has no 'paths'). "
+            "That JSON is probably the API's own data or index: read it with http_request instead."
+        )
+    paths = spec["paths"]
     if not keyword:
         tags = sorted({t for ops in paths.values() for op in ops.values() if isinstance(op, dict) for t in op.get("tags", [])})
         return f"{len(paths)} endpoints. Tags: {', '.join(tags)}"
@@ -269,6 +299,7 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
 # --- files ------------------------------------------------------------------------
 
 @tool
+@_remember
 def read_file(path: str) -> str:
     """Read a text file. Files in workspace/ and skills/ are read immediately; other paths ask the user first. Paths are relative to workspace/.
 

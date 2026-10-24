@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from smolagents import CodeAgent, OpenAIServerModel, ToolCallingAgent
+from smolagents.utils import AgentMaxStepsError
 
 import generic_tools
 import radarr_tools
@@ -86,9 +87,16 @@ def main() -> None:
         try:
             radarr_tools.LAST_ACTION = ""
             generic_tools.ACTIONS.clear()
+            generic_tools.LAST_RESULT = ""
             if args.tools == "generic":
                 print(f"[log] {generic_tools.start_log(args.model, user_input)}")
             response = agent.run(user_input)
+            hit_cap = any(isinstance(getattr(step, "error", None), AgentMaxStepsError)
+                          for step in agent.memory.steps)
+            if hit_cap and args.tools == "generic":
+                response = (f"STEP LIMIT REACHED: the agent did not finish. Its answer, if any: "
+                            f"{str(response).strip() or '(none)'}\nLast tool result -> "
+                            f"{generic_tools.LAST_RESULT or '(no tool results)'}")
             print(f"\nAgent: {response}\n")
             if args.tools == "generic":
                 generic_tools.log_final(response)
