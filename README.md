@@ -96,7 +96,7 @@ ollama pull qwen3.5:9b
 python3 agent.py --backend ollama --model qwen3.5:9b
 ```
 
-Ollama cuts prompts that exceed the loaded context with no error to the client (only a warning in the server log), and its OpenAI-compatible API cannot set the context per request. Set it on the server instead, for example `launchctl setenv OLLAMA_CONTEXT_LENGTH 16384` and then restart the Ollama app, or `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. Without it, Ollama picks a default from available memory (32K on the 16GB test Mac). `ollama ps` shows the context a loaded model is using. `tests/eval.py` and `tests/prefill_timing.py` still drive LM Studio only ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
+Ollama cuts prompts that exceed the loaded context with no error to the client (only a warning in the server log), and its OpenAI-compatible API cannot set the context per request. Set it on the server instead, for example `launchctl setenv OLLAMA_CONTEXT_LENGTH 16384` and then restart the Ollama app, or `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. Without it, Ollama picks a default from available memory (32K on the 16GB test Mac). `ollama ps` shows the context a loaded model is using. On Apple Silicon, Ollama's default tags may be MLX builds rather than GGUF; `ollama show <tag>` reports the format and runner.
 
 ## Safety model
 
@@ -134,11 +134,12 @@ Repeatable runs and measurements:
 ```bash
 # run a task N times on a model; confirmations are answered "no"; uses its own notes
 .venv/bin/python tests/eval.py --model google/gemma-4-e4b --tidepool hint --n 3
-# time prompts of increasing size (prefill) through LM Studio
+.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --tidepool hint --n 3
+# time prompts of increasing size (prefill)
 .venv/bin/python tests/prefill_timing.py --model qwen3.5-9b-mlx --ctx 32768
 ```
 
-Both unload and load models through `lms`, and write results to `logs/`.
+Both take `--backend lmstudio|ollama` and first unload every model on both servers, since only one fits on 16GB. On LM Studio they load the model through `lms` with `--ctx`. Ollama sets the context on its server, so there they load the model, read the context it got from `/api/ps`, and warn if it differs from `--ctx`. `--no-load` (formerly `--no-lms`, still accepted) uses whatever is loaded. Results go to `logs/`, with the backend in the filename and the JSON.
 
 ## Layout
 

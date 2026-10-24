@@ -67,14 +67,14 @@ Qwen took more steps on `hint` and `paged` with the new skill, and more of its r
 
 ## Ollama spike (Ollama 0.40.7, Tidepool `easy`)
 
-The spike ran through a scratch script that pointed `agent.py` at Ollama, before `--backend` existed. These are Ollama's default (GGUF) tags.
+The spike ran through a scratch script that pointed `agent.py` at Ollama, before `--backend` existed. These are Ollama's default tags. On this Mac they pulled MLX builds (safetensors, `nvfp4` quantisation, run by Ollama's MLX runner, as `ollama show` reports), not GGUF.
 
 | Model | Loaded context | Result |
 |---|---|---|
 | `qwen3.5:9b` (7.6 GB download, 7.7 to 9.8 GB in memory) | 32K (Ollama's default on this Mac) | 3/3 (17 to 49s, 3 to 5 steps) |
 | `gemma4:e4b` (9.5 GB download, 9.4 to 10.4 GB in memory) | 16K (`OLLAMA_CONTEXT_LENGTH=16384`) | 2/3 (13 to 61s), then 4/4 in a rerun that captured each step's errors |
 
-For comparison, LM Studio (MLX) gave 3/3 for both models in 30 to 74s (Rung 2 above), but at different context sizes and with n=3, so neither runtime is shown to be faster. Tool calls, `usage.prompt_tokens` and a separate `reasoning` field for thinking output all came through Ollama's OpenAI-compatible API. Gemma's failed run and most of its extra steps were parse errors: it copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call written as text). The same errors appear in the LM Studio Gemma logs, so this is not an Ollama problem ([#14](https://github.com/aurora7795/smolpaw/issues/14)).
+For comparison, LM Studio (MLX 4-bit builds) gave 3/3 for both models in 30 to 74s (Rung 2 above), but at different context sizes and with n=3, so neither runtime is shown to be faster. Tool calls, `usage.prompt_tokens` and a separate `reasoning` field for thinking output all came through Ollama's OpenAI-compatible API. Gemma's failed run and most of its extra steps were parse errors: it copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call written as text). The same errors appear in the LM Studio Gemma logs, so this is not an Ollama problem ([#14](https://github.com/aurora7795/smolpaw/issues/14)).
 
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 
@@ -88,6 +88,8 @@ Time to read a prompt of random words (one output token requested), 32K context,
 | 23K | 114s (201 tok/s) | 41s (548 tok/s) |
 
 Reading OpenClaw's roughly 24K-token prompt would take about 2 minutes per call on Qwen and about 45 seconds on Gemma, and its task needed 3 model turns, so roughly 6 minutes and 2 minutes of prefill alone without caching. Smolpaw's roughly 3K-token first call costs about 13s and 5s. Caveat: the test used unique prompts. A server that caches a stable prompt prefix between calls (OpenClaw's prompt is mostly constant) could reduce this a lot; that has not been measured, nor has memory use.
+
+The table above is LM Studio. A two-size check of Qwen on Ollama (`qwen3.5:9b`, MLX `nvfp4`, 32K context, one run each) gave 8.9s at 1,911 tokens (215 tok/s) and 27.4s at 5,810 tokens (212 tok/s), close to LM Studio's 228 and 225 tok/s for the same prompts. Gemma and the larger sizes were not run on Ollama.
 
 ## Hand-written Radarr tools (baseline, Bonsai + ToolCallingAgent)
 
@@ -120,10 +122,12 @@ For comparison, Smolpaw's first call is about 2.9K tokens. A local model would a
 | Gemma 4 E4B (MLX 4-bit, 6.86 GB) | Best so far. Clean structured tool calls. Slow final steps (47 to 70s on PokeAPI), probably from reasoning mode. |
 | Qwen 3.5 9B (MLX, 5.98 GB) | Good once the harness fixes were in. Needs the clear tool errors; wanders without them. |
 | Ternary Bonsai 8B (MLX, 2.32 GB) | Good at guided execution of a known flow, poor at discovery; invents tools. Candidate for a cheap "execute" tier. |
-| Qwen 3.5 9B (Ollama `qwen3.5:9b`, GGUF) | 3/3 on Tidepool `easy` in a first spike; not yet run on the harder variants. |
-| Gemma 4 E4B (Ollama `gemma4:e4b`, GGUF) | 6 of 7 on Tidepool `easy`; same tool-call copying as under LM Studio ([#14](https://github.com/aurora7795/smolpaw/issues/14)). |
+| Qwen 3.5 9B (Ollama `qwen3.5:9b`, MLX nvfp4, 7.6 GB) | 3/3 on Tidepool `easy` in a first spike; not yet run on the harder variants. |
+| Gemma 4 E4B (Ollama `gemma4:e4b`, MLX nvfp4, 9.5 GB) | 6 of 7 on Tidepool `easy`; same tool-call copying as under LM Studio ([#14](https://github.com/aurora7795/smolpaw/issues/14)). |
 | Nanbeige 4.2 3B OptiQ (MLX, 3.32 GB) | Unusable as loaded: at temperature 0 via the API it emits repeated junk instead of an answer. LM Studio marks it as not trained for tool use. Possible runtime or quant incompatibility (MLX engine 1.13.1); a GGUF build is untested. |
 
 ## Corrections
 
 An earlier summary in this project overstated the Radarr wrapper-tool results ("9 of 9" and "11 of 11"). The counts in the table above are the accurate ones.
+
+The first write-up of the Ollama spike called Ollama's default `qwen3.5:9b` and `gemma4:e4b` tags GGUF builds. On this Mac they are MLX builds (`nvfp4`), so the spike compared two MLX runtimes with different quantisations, not MLX against GGUF. The registry serves a GGUF-style manifest to a plain HTTP request for the same tags, so check `ollama show <tag>` (format and runner) after pulling rather than trusting the tag name.

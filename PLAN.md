@@ -12,7 +12,7 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 - Rung 1 (known API, skill) passes 6 of 6 on Gemma 4 E4B and Qwen 3.5 9B. Rung 2 on an invented API (Tidepool) passes 6 of 6. Bonsai 8B cannot do discovery; Nanbeige 3B is unusable under LM Studio.
 - OpenClaw baseline (one read-only run): correct in 11s on DeepSeek with about 24K prompt tokens per call, against about 3K for Smolpaw.
 - Done and merged: the eval script (`tests/eval.py`), harder Tidepool variants (17 of 18 passed), prefill timing, the error-hint skill experiment (no benefit) and an Ollama backend (`--backend ollama`; first spike in RESULTS.md).
-- Not yet done: rungs 3 to 5 (they need a person at the keyboard for write prompts), more models, Ollama support in the eval and prefill scripts.
+- Not yet done: rungs 3 to 5 (they need a person at the keyboard for write prompts), more models, the Ollama measurement runs.
 - Caveats: the `api-discovery` skill supplies Radarr's spec URL, so rung 1 shows recipe-following, not discovery; samples are 3 runs per cell.
 
 ## What OpenClaw had that Smolpaw lacks
@@ -49,9 +49,9 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 - Steps:
   1. Spike (done, see RESULTS.md): tool calls, `usage.prompt_tokens` and the server-side context setting all work. The default context on this Mac is 32K, not 4K.
   2. `agent.py` (done): a `BACKENDS` dict, a `--backend lmstudio|ollama` flag (default `lmstudio`), a `backend` parameter on `build_agent()`, and a default model per backend. The prompt and the confirmation layer are unchanged.
-  3. `tests/eval.py` and `tests/prefill_timing.py`: model management per backend (unload with `keep_alive: 0`, a warm-up load, the `/api/ps` context check), `--backend`, and the backend recorded in log names and JSON. Replace `:` in model names in log filenames.
+  3. `tests/eval.py` and `tests/prefill_timing.py` (done): model management per backend (unload with `keep_alive: 0`, a warm-up load, the `/api/ps` context check), `--backend`, and the backend recorded in log names and JSON. Replace `:` in model names in log filenames.
   4. A backend-selection test (done).
-  5. Measure rung 1 and the Tidepool variants on Ollama (3 runs per cell) against the LM Studio (MLX) results. This also makes the GGUF Nanbeige test in #7 easy. Ollama has `-mlx` tags too, so MLX and GGUF can be compared within one runtime.
+  5. Measure rung 1 and the Tidepool variants on Ollama (3 runs per cell) against the LM Studio (MLX) results. On this Mac Ollama's default tags are MLX `nvfp4` builds, not GGUF. For an MLX vs GGUF comparison, pull an explicit quantisation tag (for example `qwen3.5:9b-q4_K_M`) and confirm with `ollama show` that it is GGUF on the llama.cpp runner. A GGUF Nanbeige build (#7) needs the same check.
   6. Update README, CHANGELOG and RESULTS.
 - Only one model fits on 16GB: unload LM Studio before loading a model in Ollama, and the reverse.
 
@@ -122,7 +122,7 @@ Tracked as GitHub issues:
 6. Done: prefill time on this Mac, to quantify OpenClaw's overhead locally: [#6](https://github.com/aurora7795/smolpaw/issues/6).
 7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier: [#7](https://github.com/aurora7795/smolpaw/issues/7). Gemma's loaded context is now confirmed as 16384 by `tests/eval.py`.
 8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): tried, no benefit, skill unchanged (see RESULTS.md). Closed: [#9](https://github.com/aurora7795/smolpaw/issues/9).
-9. Ollama as a second backend, with an MLX vs GGUF comparison (see "Ollama backend" above): [#13](https://github.com/aurora7795/smolpaw/issues/13). Spike and `--backend` done; the eval scripts and measurement remain.
+9. Ollama as a second backend, with an MLX vs GGUF comparison (see "Ollama backend" above): [#13](https://github.com/aurora7795/smolpaw/issues/13). Spike, `--backend` and the eval and prefill scripts done; the measurement remains.
 10. Gemma copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call as text), costing steps and sometimes a run, on both runtimes: [#14](https://github.com/aurora7795/smolpaw/issues/14).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
