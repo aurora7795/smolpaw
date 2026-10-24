@@ -5,6 +5,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- `web.py`: a web harness that runs the agent and puts its `[y/N]` prompts and `ask_user` questions on a phone-friendly page, with an access token, key redaction, an optional timeout (unanswered counts as no) and a Stop button. Standard library only. `tests/eval.py --confirm web` uses the same page. Tests cover tokens, stale and non-boolean answers, timeouts, redaction and the harness's decline record.
 - Ollama as a second model backend: `agent.py --backend ollama` (port 11434, default model `qwen3.5:9b`). `build_agent()` takes a `backend` argument; LM Studio stays the default. Tests cover the backend selection ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
 - `--backend` for `tests/eval.py` and `tests/prefill_timing.py`. On Ollama they load the model, read its context from `/api/ps` and warn if it differs from `--ctx` ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
 - README section comparing Smolpaw with OpenClaw on prompt size, task time and local reading speed, with the limits of what was measured.
@@ -14,6 +15,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 - Project rules in `CLAUDE.md` (branching, GitHub issues, changelog, docs upkeep), adapted from the InkTag project, and this changelog. Deferred work is now tracked as GitHub issues, linked from `PLAN.md`.
 
 ### Changed
+- `agent.py`: the per-request logic moved into `run_request()`, shared by the CLI and `web.py`. CLI output is unchanged.
 - `tests/eval.py` and `tests/prefill_timing.py` unload models on both LM Studio and Ollama before loading, and on Ollama runs only call `lms` when LM Studio's server is running. `--no-lms` is now `--no-load` (the old name still works). Log filenames include the backend and replace `:` in model ids.
 
 ### Fixed

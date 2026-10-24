@@ -3,11 +3,13 @@ Repeatable eval runs for the generic harness.
 
 Runs one prompt N times on a model and records pass/fail, steps, wall time, token counts,
 tool calls and the final answer. Confirmation prompts are answered "no" (and recorded), so
-use it for read-only tasks. The real notes.md is never touched: the run uses its own notes.
+use it for read-only tasks, unless --confirm web sends them to the web page (see web.py). The real notes.md is never touched: the run uses its own notes.
 
 Examples:
   .venv/bin/python tests/eval.py --model google/gemma-4-e4b --tidepool hint --n 3
   .venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --tidepool hint --n 3
+  .venv/bin/python tests/eval.py --model google/gemma-4-e4b --notes-file notes.md --confirm web \\
+      --web-host 0.0.0.0 --prompt "Add Gattaca to Radarr" --expect "added"
   .venv/bin/python tests/eval.py --model qwen3.5-9b-mlx --notes-file notes.md \\
       --prompt "What is in my Radarr download queue? Just look, don't change anything." \\
       --expect Gattaca
@@ -17,7 +19,9 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -164,6 +168,10 @@ def main() -> None:
     ap.add_argument("--notes-file", help="notes to use instead of the real notes.md")
     ap.add_argument("--tidepool", metavar="VARIANT", help="serve the fake Tidepool API (easy|hint|detail|paged)")
     ap.add_argument("--label", default="")
+    ap.add_argument("--confirm", choices=["no", "web"], default="no",
+                    help="no = answer every prompt no; web = answer prompts in the browser (web.py)")
+    ap.add_argument("--web-host", default="127.0.0.1")
+    ap.add_argument("--web-port", type=int, default=8770)
     args = ap.parse_args()
 
     load_env()
@@ -186,8 +194,18 @@ def main() -> None:
     if not prompt:
         ap.error("--prompt is required unless --tidepool is used")
     g.NOTES = tmp / "notes.md"
-    g.CONFIRM = lambda desc: False
-    g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
+    web_server, web_info = None, {}
+    if args.confirm == "web":
+        import web  # noqa: PLC0415 - only needed for this mode
+        approvals = web.Approvals()
+        approvals.install()
+        token = os.environ.get("SMOLPAW_WEB_TOKEN") or secrets.token_urlsafe(18)
+        web_info = {"mode": "eval", "backend": args.backend, "model": args.model, "status": "loading model"}
+        web_server = web.serve(args.web_host, args.web_port, token, approvals, info=web_info)
+        print(f"answer prompts at {web.url(args.web_host, args.web_port, token)}")
+    else:
+        g.CONFIRM = lambda desc: False
+        g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
 
     ctx = None
     try:
@@ -197,6 +215,7 @@ def main() -> None:
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
         for i in range(1, args.n + 1):
+            web_info.update(status="running", progress=f"{label}: run {i} of {args.n}")
             r = run_once(args.model, prompt, expects, args.max_steps, args.backend)
             results.append(r)
             flag = "PASS" if r["passed"] else "FAIL"
@@ -219,6 +238,8 @@ def main() -> None:
     finally:
         if server:
             server.terminate()
+        if web_server:
+            web_server.shutdown()
 
 
 if __name__ == "__main__":

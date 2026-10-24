@@ -7,6 +7,7 @@ Build, run and workflow rules for this repository. Several rules are adapted fro
 * **Setup**: `./setup.sh` (creates `.venv` and installs smolagents), then `cp .env.example .env` and `cp notes.example.md notes.md`.
 * **Run**: `.venv/bin/python agent.py --model <lm-studio-model-id>` (see the README for flags).
 * **Tests**: `.venv/bin/python tests/test_generic_tools.py` (must pass before every commit).
+* **Web harness**: `.venv/bin/python web.py --backend ollama --host 0.0.0.0` answers `[y/N]` prompts from a browser (see the README).
 * **Invented test API**: `.venv/bin/python tests/fake_api.py 8765`.
 * **LM Studio CLI**: `~/.lmstudio/bin/lms` (`ls`, `ps`, `load`, `unload`). It is not on PATH. Only one model fits at a time on 16GB.
 * **Ollama**: `ollama` (`list`, `ps`, `pull`, `stop`), server on port 11434; run the agent with `--backend ollama`. Set the context on the server, not per request: the app's Context length setting (it overrides `OLLAMA_CONTEXT_LENGTH`), or `OLLAMA_CONTEXT_LENGTH` for a hand-started `ollama serve`. Unload LM Studio's model before loading one in Ollama, and the reverse.
