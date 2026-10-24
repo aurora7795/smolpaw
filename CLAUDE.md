@@ -16,7 +16,20 @@ Build, run and workflow rules for this repository. Several rules are adapted fro
 
 * **Never edit code directly on `main`.** Before changing files, check the branch. On `main`, create a descriptive branch first (`feat/...`, `fix/...`, `docs/...`, `chore/...`). Stay on the current branch only for follow-up work on that branch.
 * Commit messages end with the standard Claude co-author line.
-* Pushing is done when the user says so. Do not merge into `main` or open a pull request unasked.
+* When a piece of work is finished and the tests pass, commit, merge it into `main` with a merge commit (`--no-ff`), push, and delete the merged local branch, without asking. Pull requests are optional; open or update one for work the user may want to review on GitHub.
+* Batch questions into one message rather than asking several times.
+
+### Without asking
+* Git as above, issues (open, update, close), PLAN.md, CHANGELOG.md and other docs.
+* Read-only measurement runs (Tidepool, prefill, reading the Radarr queue), including loading and unloading models and cleaning up afterwards.
+
+### Ask first
+* Writes to real services (for example adding or removing movies in Radarr).
+* Stopping or restarting the user's apps (Ollama, LM Studio, a running `web.py`).
+* Downloads over about 5 GB, or anything that leaves less than about 10 GB of disk free.
+* Deleting branches on GitHub, or any other action that cannot be undone.
+* Installing new software (for example another agent harness).
+* Any change to the confirmation layer (see section 6).
 * Never commit `.env`, `notes.md`, `logs/`, or the contents of `workspace/` (all gitignored). The repository is public: no keys, private addresses or personal data in commits, issues or docs.
 
 ## 3. Issue tracking (GitHub CLI)
