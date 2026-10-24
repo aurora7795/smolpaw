@@ -21,8 +21,8 @@ Smolpaw exists to see how much of what OpenClaw does can run on small local mode
 | | OpenClaw (DeepSeek v4 flash, cloud) | Smolpaw (Gemma 4 E4B or Qwen 3.5 9B, local) |
 |---|---|---|
 | First-call prompt | about 24K tokens (system prompt about 68K characters: workspace memory, skills, tool docs) | about 2.2K to 2.9K tokens |
-| "What's in my Radarr queue?" | correct, 11s, 3 model turns | correct, 35 to 71s, 3 steps (6 of 6 runs after the harness fixes) |
-| An API the model has never seen (invented "Tidepool" API) | not run | 6 of 6, then 17 of 18 on harder variants (404 at the root, details on a second endpoint, pagination) |
+| "What's in my Radarr queue?" | correct, 11s, 3 model turns | correct, 35 to 71s on LM Studio and 20 to 43s on Ollama, 3 to 7 steps (12 of 12 runs across both runtimes after the harness fixes) |
+| An API the model has never seen (invented "Tidepool" API) | not run | 6 of 6, then 17 of 18 on harder variants on LM Studio (404 at the root, details on a second endpoint, pagination); 25 of 30 clean passes on Ollama, weakest on the details variant |
 | Cost per task | about $0.0013, and the prompt goes to a cloud provider | no per-task cost; model inference stays on the machine |
 
 **What it means for limited hardware**
@@ -36,11 +36,19 @@ Reading a prompt is the bottleneck for a local model. Measured on this Mac with 
 
 An OpenClaw-sized prompt would cost roughly 40 to 115 seconds of reading on every call, before the model writes anything, and its task used 3 calls. It also needs about 24K tokens of context plus a reply reserve of its own (20K by its own budget report), which is a poor fit for the 16K to 32K contexts that leave room for the model on 16GB. A 3K-token harness keeps each call to a few seconds and fits in 16K. That is the practical gain: local 4B to 9B models can run these agent tasks at an interactive pace, where the larger harness is expected to be too slow or too memory-hungry.
 
+**How it compares with the lighter claw harnesses**
+
+Several projects describe themselves as lightweight OpenClaw alternatives: nanobot (Python, under 4,000 lines), PicoClaw (Go, about 10 to 20 MB of RAM), ZeroClaw and IronClaw (Rust), NullClaw (Zig, a 678 KB binary) and others. Their published claims are about deployment footprint: code size, memory, binary size, startup time or isolation. As far as we found, none of them states a prompt size, tokens per request or the context window it needs.
+
+Smolpaw measures something different. On a local model the harness's own memory hardly matters: the model takes 8 to 10 GB, and a harness of 10 MB or 300 MB is noise next to that. What costs time is the prompt the harness sends on every call, because the model must read all of it before answering, at about 5 seconds per 1K tokens for Qwen 3.5 9B on this Mac. So Smolpaw's goal is a small prompt (about 2.2K to 2.9K tokens on the first call), not a small binary.
+
+We have not yet measured the prompt any of these harnesses actually sends, so this is not a claim that Smolpaw's prompt is smaller than theirs. A harness that is light on memory could still send a large prompt, or a small one. Measuring PicoClaw against the same local models and tasks is the next step for this comparison ([#18](https://github.com/aurora7795/smolpaw/issues/18)).
+
 **What this does not show**
 
 - OpenClaw was **not** run on a local model, so "OpenClaw would not work here" is an estimate from prompt size and measured reading speed, not a test. The cloud run also benefited from provider-side prompt caching (about 60K cached tokens), and a local server that caches a stable prompt prefix could cut reading time a lot; that was not measured.
 - OpenClaw does much more: chat channels, long-term memory, many ready-made skills, and recovery behaviour such as checking a download is really moving. Smolpaw has a shell, HTTP, files, notes and skills, and a safety layer, nothing more.
-- Smolpaw's results are small samples (3 runs per cell) on a few read-only tasks. Real writes through the generic tools are not yet tested ([#1](https://github.com/aurora7795/smolpaw/issues/1)).
+- Smolpaw's results are small samples (3 runs per cell) on a few read-only tasks. Real writes through the generic tools are not yet measured: the first supervised attempt (adding a film to Radarr) failed because the model guessed the film's id and the root folder instead of looking them up ([#1](https://github.com/aurora7795/smolpaw/issues/1)).
 - It also needs help a strong model would not: clear tool error messages, short skills placed in the prompt, and a warning when a server returns a web page instead of data. Some small models (Bonsai 8B, Nanbeige 3B) did not work at all.
 
 ## Requirements

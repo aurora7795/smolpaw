@@ -126,6 +126,7 @@ Tracked as GitHub issues:
 10. Gemma copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call as text), costing steps and sometimes a run, on both runtimes: [#14](https://github.com/aurora7795/smolpaw/issues/14).
 11. Recheck Tidepool `detail` on Ollama with more runs (2 clean passes of 6 against 6 of 6 on LM Studio): [#15](https://github.com/aurora7795/smolpaw/issues/15).
 12. Compare GGUF and MLX builds of the same model on Ollama (the default tags here are MLX): [#16](https://github.com/aurora7795/smolpaw/issues/16).
+13. Measure the prompt PicoClaw actually sends, and its results, on the same local models and Tidepool tasks; the lighter claw harnesses advertise footprint, not prompt size: [#18](https://github.com/aurora7795/smolpaw/issues/18).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 

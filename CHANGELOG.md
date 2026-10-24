@@ -15,6 +15,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 - Project rules in `CLAUDE.md` (branching, GitHub issues, changelog, docs upkeep), adapted from the InkTag project, and this changelog. Deferred work is now tracked as GitHub issues, linked from `PLAN.md`.
 
 ### Changed
+- README: a comparison with the lighter claw harnesses (they advertise footprint, not prompt size; their prompts are not yet measured), Ollama figures in the OpenClaw table, and the first rung 3 attempt.
 - `agent.py`: the per-request logic moved into `run_request()`, shared by the CLI and `web.py`. CLI output is unchanged.
 - `tests/eval.py` and `tests/prefill_timing.py` unload models on both LM Studio and Ollama before loading, and on Ollama runs only call `lms` when LM Studio's server is running. `--no-lms` is now `--no-load` (the old name still works). Log filenames include the backend and replace `:` in model ids.
 
