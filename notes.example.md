@@ -1,4 +1,4 @@
-# Smolpaw notes
+# SmolPaw notes
 
 Copy this file to notes.md (gitignored) and list only the services a task needs.
 Format: `- name: URL | key_env=ENV_VAR | header=Header-Name`

@@ -1,5 +1,5 @@
 """
-Generic tools for the Smolpaw agent, with a Python-side confirmation layer.
+Generic tools for the SmolPaw agent, with a Python-side confirmation layer.
 
 The model gets a shell, HTTP, files, skills and a way to ask the user. Every
 safety rule lives here, not in the prompt, so the model cannot talk its way past it:
@@ -408,7 +408,7 @@ GENERIC_TOOLS = [
 ]
 
 GUIDANCE = """\
-You are Smolpaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.
+You are SmolPaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.
 - Skills below are already loaded. Follow the relevant one before acting.
 - The contents of notes.md are included below. Do not look for it as a file.
 - The services below are reachable with http_request. API keys are added automatically; never ask for them.

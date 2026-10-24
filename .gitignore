@@ -21,7 +21,7 @@ build/
 .idea/
 *.swp
 
-# Smolpaw runtime
+# SmolPaw runtime
 notes.md
 logs/
 workspace/*

@@ -1,4 +1,4 @@
-# Smolpaw: project rules (CLAUDE.md)
+# SmolPaw: project rules (CLAUDE.md)
 
 Build, run and workflow rules for this repository. Several rules are adapted from the InkTag project. For what the project is, see [README.md](README.md); for goals and status see [PLAN.md](PLAN.md); for measurements see [RESULTS.md](RESULTS.md).
 
