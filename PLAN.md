@@ -45,7 +45,7 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 
 ### Ollama backend (in progress, [#13](https://github.com/aurora7795/smolpaw/issues/13))
 - Ollama serves an OpenAI-compatible API at `http://127.0.0.1:11434/v1` with tool calling, so `OpenAIServerModel` stays; only the base URL, API key and default model ID change per backend.
-- Main risk is context length: over-long prompts are cut silently, and Ollama's default context depends on available memory (32K on this Mac, smaller on less memory). The `/v1` endpoint has no per-request `num_ctx`, so the server runs with `OLLAMA_CONTEXT_LENGTH=16384` (fallback: a Modelfile with `PARAMETER num_ctx`), and `tests/eval.py` reads the loaded context from `/api/ps`. LiteLLM's `ollama_chat/` route is not used: it adds a heavy dependency.
+- Main risk is context length: over-long prompts are cut silently, and the `/v1` endpoint has no per-request `num_ctx`. The context comes from the server: the Ollama app's Context length setting (32K on this Mac, which overrides `OLLAMA_CONTEXT_LENGTH`), or `OLLAMA_CONTEXT_LENGTH=16384` for a hand-started server (fallback: a Modelfile with `PARAMETER num_ctx`), and `tests/eval.py` reads the loaded context from `/api/ps`. LiteLLM's `ollama_chat/` route is not used: it adds a heavy dependency.
 - Steps:
   1. Spike (done, see RESULTS.md): tool calls, `usage.prompt_tokens` and the server-side context setting all work. The default context on this Mac is 32K, not 4K.
   2. `agent.py` (done): a `BACKENDS` dict, a `--backend lmstudio|ollama` flag (default `lmstudio`), a `backend` parameter on `build_agent()`, and a default model per backend. The prompt and the confirmation layer are unchanged.

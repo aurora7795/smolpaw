@@ -18,6 +18,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 
 ### Fixed
 - RESULTS.md and PLAN.md called Ollama's default `qwen3.5:9b` and `gemma4:e4b` tags GGUF; on this Mac they are MLX `nvfp4` builds.
+- README, PLAN, RESULTS and CLAUDE.md said Ollama picked a 32K context from available memory. It came from the Ollama app's Context length setting, which overrides `OLLAMA_CONTEXT_LENGTH`; the README now says how to set the context for the app and for a hand-started server.
 
 ## 2026-10-24
 

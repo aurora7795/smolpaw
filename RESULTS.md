@@ -71,8 +71,8 @@ The spike ran through a scratch script that pointed `agent.py` at Ollama, before
 
 | Model | Loaded context | Result |
 |---|---|---|
-| `qwen3.5:9b` (7.6 GB download, 7.7 to 9.8 GB in memory) | 32K (Ollama's default on this Mac) | 3/3 (17 to 49s, 3 to 5 steps) |
-| `gemma4:e4b` (9.5 GB download, 9.4 to 10.4 GB in memory) | 16K (`OLLAMA_CONTEXT_LENGTH=16384`) | 2/3 (13 to 61s), then 4/4 in a rerun that captured each step's errors |
+| `qwen3.5:9b` (7.6 GB download, 7.7 to 9.8 GB in memory) | 32K (the Ollama app's Context length setting) | 3/3 (17 to 49s, 3 to 5 steps) |
+| `gemma4:e4b` (9.5 GB download, 9.4 to 10.4 GB in memory) | 16K (a separate `ollama serve` with `OLLAMA_CONTEXT_LENGTH=16384`) | 2/3 (13 to 61s), then 4/4 in a rerun that captured each step's errors |
 
 For comparison, LM Studio (MLX 4-bit builds) gave 3/3 for both models in 30 to 74s (Rung 2 above), but at different context sizes and with n=3, so neither runtime is shown to be faster. Tool calls, `usage.prompt_tokens` and a separate `reasoning` field for thinking output all came through Ollama's OpenAI-compatible API. Gemma's failed run and most of its extra steps were parse errors: it copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call written as text). The same errors appear in the LM Studio Gemma logs, so this is not an Ollama problem ([#14](https://github.com/aurora7795/smolpaw/issues/14)).
 
@@ -131,3 +131,5 @@ For comparison, Smolpaw's first call is about 2.9K tokens. A local model would a
 An earlier summary in this project overstated the Radarr wrapper-tool results ("9 of 9" and "11 of 11"). The counts in the table above are the accurate ones.
 
 The first write-up of the Ollama spike called Ollama's default `qwen3.5:9b` and `gemma4:e4b` tags GGUF builds. On this Mac they are MLX builds (`nvfp4`), so the spike compared two MLX runtimes with different quantisations, not MLX against GGUF. The registry serves a GGUF-style manifest to a plain HTTP request for the same tags, so check `ollama show <tag>` (format and runner) after pulling rather than trusting the tag name.
+
+The same write-up said Ollama chose a 32K context from available memory on this Mac. The 32K came from the Ollama app's own Context length setting, which the app passes to its server and which overrides `OLLAMA_CONTEXT_LENGTH` set through `launchctl`.

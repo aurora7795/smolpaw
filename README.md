@@ -96,7 +96,7 @@ ollama pull qwen3.5:9b
 python3 agent.py --backend ollama --model qwen3.5:9b
 ```
 
-Ollama cuts prompts that exceed the loaded context with no error to the client (only a warning in the server log), and its OpenAI-compatible API cannot set the context per request. Set it on the server instead, for example `launchctl setenv OLLAMA_CONTEXT_LENGTH 16384` and then restart the Ollama app, or `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. Without it, Ollama picks a default from available memory (32K on the 16GB test Mac). `ollama ps` shows the context a loaded model is using. On Apple Silicon, Ollama's default tags may be MLX builds rather than GGUF; `ollama show <tag>` reports the format and runner.
+Ollama cuts prompts that exceed the loaded context with no error to the client (only a warning in the server log), and its OpenAI-compatible API cannot set the context per request. Set it on the server instead. With the Ollama app, use its Context length setting (Settings): the app passes that to its server and it overrides `OLLAMA_CONTEXT_LENGTH` set with `launchctl`. With a server you start yourself, use `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. With neither set, Ollama picks a default from available memory. `ollama ps` shows the context a loaded model is using. On Apple Silicon, Ollama's default tags may be MLX builds rather than GGUF; `ollama show <tag>` reports the format and runner.
 
 ## Safety model
 
