@@ -274,7 +274,6 @@ from smolagents.models import ChatMessage, MessageRole  # noqa: E402
 from smolagents.monitoring import Timing  # noqa: E402
 
 from agent import NativeHistoryModel  # noqa: E402
-from generic_tools import GENERIC_TOOLS  # noqa: E402
 
 _t = Timing(0.0, 1.0)
 _steps = [
