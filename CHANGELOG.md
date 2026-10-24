@@ -5,6 +5,9 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- `tests/eval.py`: runs a prompt N times on a model and records pass/fail, steps, time, tokens, tools and answer, with scripted confirmations and its own notes (the real `notes.md` is untouched). Can serve Tidepool itself (`--tidepool`).
+- Tidepool variants `hint`, `detail` and `paged` in `tests/fake_api.py` for harder discovery tests.
+- `tests/prefill_timing.py`: times prompts of increasing size through LM Studio's API.
 - Project rules in `CLAUDE.md` (branching, GitHub issues, changelog, docs upkeep), adapted from the InkTag project, and this changelog. Deferred work is now tracked as GitHub issues, linked from `PLAN.md`.
 
 ## 2026-10-24

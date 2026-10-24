@@ -84,8 +84,19 @@ An approved shell command runs with your user's permissions, so read the prompt.
 Checks the confirmation layer, path scoping, secret handling and tool messages. A live Radarr check runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
 
 ```bash
-.venv/bin/python tests/fake_api.py 8765
+.venv/bin/python tests/fake_api.py 8765 [easy|hint|detail|paged]
 ```
+
+Repeatable runs and measurements:
+
+```bash
+# run a task N times on a model; confirmations are answered "no"; uses its own notes
+.venv/bin/python tests/eval.py --model google/gemma-4-e4b --tidepool hint --n 3
+# time prompts of increasing size (prefill) through LM Studio
+.venv/bin/python tests/prefill_timing.py --model qwen3.5-9b-mlx --ctx 32768
+```
+
+Both unload and load models through `lms`, and write results to `logs/`.
 
 ## Layout
 

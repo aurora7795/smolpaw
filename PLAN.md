@@ -11,7 +11,8 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 - Built and pushed: generic tools with a Python-side confirmation layer, `notes.md` and skills (short skills inlined into the prompt), `openapi_search`, an HTML-response warning, a step-cap fallback that shows the last tool result, run logs, 40+ safety tests, and the Tidepool test API. `agent.py` has `--model`, `--tools generic|radarr`, `--agent` and `--max-steps`.
 - Rung 1 (known API, skill) passes 6 of 6 on Gemma 4 E4B and Qwen 3.5 9B. Rung 2 on an invented API (Tidepool) passes 6 of 6. Bonsai 8B cannot do discovery; Nanbeige 3B is unusable under LM Studio.
 - OpenClaw baseline (one read-only run): correct in 11s on DeepSeek with about 24K prompt tokens per call, against about 3K for Smolpaw.
-- Not yet done: rungs 3 to 5, the eval script, harder discovery tests, a measured prefill cost for a large prompt on this Mac.
+- Done on branch `feat/eval-and-harder-discovery` (merge pending): the eval script (`tests/eval.py`), harder Tidepool variants (17 of 18 passed) and prefill timing (see RESULTS.md).
+- Not yet done: rungs 3 to 5 (they need a person at the keyboard for write prompts), more models.
 - Caveats: the `api-discovery` skill supplies Radarr's spec URL, so rung 1 shows recipe-following, not discovery; samples are 3 runs per cell.
 
 ## What OpenClaw had that Smolpaw lacks
@@ -46,7 +47,7 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
 
 1. **Generic tools** (done): `http_request`, `run_shell`, file tools, `ask_user`, with the confirmation layer and secret injection.
 2. **Notes + skills loader** (done): `notes.md`, `skills/`, tools to list/read/write, prompt wiring.
-3. **Eval harness** (not built; runs so far were shell loops): a script that runs a prompt N times on a model and records steps, wall time, parse errors, final answer and the harness-reported outcome, so runs are comparable.
+3. **Eval harness** (done, `tests/eval.py`): a script that runs a prompt N times on a model and records steps, wall time, parse errors, final answer and the harness-reported outcome, so runs are comparable.
 4. **Keep the Radarr tools as a baseline** (done) behind a flag (`--tools radarr|generic`).
 5. Commit in small steps; no secrets in git (`.env` stays ignored).
 
@@ -57,7 +58,7 @@ Run each rung 3 times on Gemma 4 E4B and Qwen 3.5 9B (Bonsai failed discovery; s
 | # | Goal given to the agent | What it shows | Status |
 |---|---|---|---|
 | 1 | "What's in my Radarr queue?" (URL/key only in notes) | Can it use a known API from a note? | Done: 6/6 on Gemma and Qwen after harness fixes |
-| 2 | An API it has not seen (PokeAPI, then invented Tidepool) | Can it discover an unfamiliar API? | Done: Tidepool 6/6; PokeAPI only measured memory. Harder variants pending |
+| 2 | An API it has not seen (PokeAPI, then invented Tidepool) | Can it discover an unfamiliar API? | Done: Tidepool 6/6 and harder variants 17/18; PokeAPI only measured memory |
 | 3 | "Add <movie> to Radarr" (write, with confirm) | Does it work out add + profile + folder? | Not run |
 | 4 | An unrelated local task (e.g. summarise a folder of text files) | Is it general, not Radarr-shaped? | Not run |
 | 5 | Rerun #3 after it wrote a skill | Does a written skill reduce steps and errors? | Not run |
@@ -102,12 +103,13 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 Tracked as GitHub issues:
 
 1. Rung 3, a supervised real Radarr add with the `[y/N]` prompt, on Gemma first: [#1](https://github.com/aurora7795/smolpaw/issues/1).
-2. Harder Tidepool (no root index, a detail-only field, pagination): [#2](https://github.com/aurora7795/smolpaw/issues/2).
+2. Done on the feature branch (closes on merge): harder Tidepool (no root index, a detail-only field, pagination): [#2](https://github.com/aurora7795/smolpaw/issues/2).
 3. Rung 4, an unrelated local task: [#3](https://github.com/aurora7795/smolpaw/issues/3).
 4. Rung 5, can a model write a useful skill and reuse it ("discover once, then run cheaply"): [#4](https://github.com/aurora7795/smolpaw/issues/4).
-5. A small eval script so runs are comparable and token counts are recorded: [#5](https://github.com/aurora7795/smolpaw/issues/5).
-6. Measure prefill time for a 24K-token prompt on this Mac, to quantify OpenClaw's overhead locally (no OpenClaw config change needed): [#6](https://github.com/aurora7795/smolpaw/issues/6).
-7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier, confirm Gemma's loaded context: [#7](https://github.com/aurora7795/smolpaw/issues/7).
+5. Done on the feature branch (closes on merge): a small eval script so runs are comparable and token counts are recorded: [#5](https://github.com/aurora7795/smolpaw/issues/5).
+6. Done on the feature branch (closes on merge): prefill time on this Mac, to quantify OpenClaw's overhead locally: [#6](https://github.com/aurora7795/smolpaw/issues/6).
+7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier: [#7](https://github.com/aurora7795/smolpaw/issues/7). Gemma's loaded context is now confirmed as 16384 by `tests/eval.py`.
+8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): [#9](https://github.com/aurora7795/smolpaw/issues/9).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
