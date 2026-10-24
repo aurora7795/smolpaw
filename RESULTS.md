@@ -9,6 +9,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - OpenClaw's prompt is roughly 8x larger than SmolPaw's (about 24K tokens against about 3K on the first call). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against 5s to 13s for 3K, which is the efficiency gap this project is aiming at.
 - Discovery held up on harder variants of the invented API: 17 of 18 runs passed (hint, detail, paged).
 - Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time (#14).
+- On Ollama the default MLX builds beat the GGUF ones on speed (Gemma reads prompts about twice as fast) with the same pass rates (#16). With native history at 32K, the earlier Ollama weakness on Tidepool `detail` is gone: 11 of 12 on each runtime (#15).
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
 
 ## Rung 1: known API, skill available (Radarr queue)
@@ -132,6 +133,46 @@ Ollama 0.40.7, default MLX `nvfp4` tags, the app's 32K context, `tests/eval.py` 
 - Native history does not remove parse errors entirely (Gemma `paged`, Qwen `hint` and `paged` still had some), so #14 stays open. The one remaining native failure, Qwen on `detail`, hit the step cap while fetching vessels one by one, a step-budget problem rather than a format one.
 - Caveats: 3 runs per cell; 32K context rather than the 16K of the earlier Ollama section; same day, same Mac. The direction matches the LM Studio result above.
 
+## Tidepool `detail` rechecked at 32K with native history (#15, 6 runs per cell)
+
+The 16K runs above gave Ollama 2 clean passes of 6 on `detail` against 6 of 6 on LM Studio. Rerun with native history (now the default), both runtimes at 32K (the Ollama app's setting; LM Studio loaded at 32768 by `tests/eval.py`), default builds (MLX on both). Each cell: passes, mean time, mean steps.
+
+| `detail`, 6 runs | LM Studio | Ollama |
+|---|---|---|
+| Gemma 4 E4B | 6/6, 109s (99 to 123), 8.2 steps | 5/6, 42s (31 to 79), 8.8 steps |
+| Qwen 3.5 9B | 5/6, 117s (69 to 302), 10.7 steps | 6/6, 57s (48 to 66), 10.8 steps |
+
+- The gap is gone: 11 of 12 on each runtime. It is most likely the parse errors native history removed (#14), though context also changed from 16K to 32K, so the two causes are not separated.
+- Ollama took about 2 to 2.5 times less time per task at the same step counts (about 5 seconds per step against 11 to 13).
+- The failures were one step-capped run each. Qwen's on LM Studio collapsed into 11 parse errors in a row after one `run_shell` call (302s); its other five runs had 0 or 1, so this is one bad run, not a pattern.
+
+## GGUF against MLX builds on Ollama (#16, 32K, native history, 3 runs per cell)
+
+On this Mac the default tags (`qwen3.5:9b`, `gemma4:e4b`) are MLX `nvfp4` builds; the explicit tags `qwen3.5:9b-q4_K_M` and `gemma4:e4b-it-q4_K_M` pulled GGUF `Q4_K_M` builds on the llama.cpp runner (`ollama show`: format `gguf`, runner `llamacpp`). Sizes: GGUF 6.6 GB each; MLX 7.6 GB (Qwen) and 9.5 GB (Gemma). Tidepool MLX figures are the native-history runs from the #14 comparison above (same day, same context); rung 1 was run for all four builds against the Radarr queue, which was empty by then.
+
+| Task | Qwen, MLX | Qwen, GGUF | Gemma, MLX | Gemma, GGUF |
+|---|---|---|---|---|
+| Rung 1 (empty queue) | 3/3, 18s, 3.0 steps | 3/3, 39s, 3.7 | 3/3, 12s, 3.0 | 3/3, 18s, 3.0 |
+| Tidepool `easy` | 3/3, 39s, 7.7 | 3/3, 48s, 5.3 | 3/3, 31s, 5.0 | 3/3, 21s, 3.0 |
+| `hint` | 3/3, 41s, 8.0 | 2/3, 69s, 9.0 | 3/3, 22s, 4.0 | 3/3, 52s, 6.0 |
+| `detail` | 2/3, 63s, 12.0 | 3/3, 99s, 10.3 | 3/3, 34s, 8.0 | 2/3, 76s, 8.7 |
+| `paged` | 3/3, 44s, 7.7 | 3/3, 60s, 7.0 | 3/3, 27s, 6.0 | 3/3, 39s, 5.7 |
+| Parse errors, all 15 runs | 3 | 13 | 2 | 1 |
+
+Prefill (`tests/prefill_timing.py`, one run per size, tokens read per second):
+
+| Prompt tokens (about) | Qwen, MLX | Qwen, GGUF | Gemma, MLX | Gemma, GGUF |
+|---|---|---|---|---|
+| 1.9K | 215 | 207 | 627 | 327 |
+| 5.8K | 210 | 199 | 616 | 312 |
+| 11.4K | 201 | 186 | 598 | 293 |
+
+- Passes are the same within noise: 14 of 15 for both Qwen builds, 15 of 15 (MLX) against 14 of 15 (GGUF) for Gemma.
+- MLX is faster. Gemma reads prompts about twice as fast on MLX (about 600 against 310 tokens per second); Qwen reads at nearly the same speed on both (within about 5 to 8 percent), so Qwen's gap (about 5.5 against 8.7 seconds per step on Tidepool) comes from writing the reply, not reading.
+- GGUF Qwen made more parse errors (13 against 3), spread across all five tasks.
+- So the default MLX tags are the better choice on this Mac; the GGUF builds are smaller (6.6 GB) but slower, with no gain in passes.
+- Caveats: 3 runs per cell; the MLX Tidepool runs were not interleaved with the GGUF ones (a few hours apart); the quantisations differ (`nvfp4` against `Q4_K_M`), so this compares the builds Ollama offers, not the engines alone.
+
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 
 Time to read a prompt of random words (one output token requested), 32K context, no prompt-cache help:
@@ -180,6 +221,8 @@ For comparison, SmolPaw's first call is about 2.9K tokens. A local model would a
 | Ternary Bonsai 8B (MLX, 2.32 GB) | Good at guided execution of a known flow, poor at discovery; invents tools. Candidate for a cheap "execute" tier. |
 | Qwen 3.5 9B (Ollama `qwen3.5:9b`, MLX nvfp4, 7.6 GB) | 12 of 15 clean at 16K; weaker than on LM Studio on `detail` (step cap) and once on `paged`. |
 | Gemma 4 E4B (Ollama `gemma4:e4b`, MLX nvfp4, 9.5 GB) | 13 of 15 at 16K and 2 to 5 times faster than on LM Studio; both failures on `detail`. Same tool-call copying as under LM Studio ([#14](https://github.com/aurora7795/smolpaw/issues/14)). |
+| Qwen 3.5 9B (Ollama `qwen3.5:9b-q4_K_M`, GGUF, 6.6 GB) | 14 of 15 at 32K, same as the MLX build, but slower per step and more parse errors (13 against 3). |
+| Gemma 4 E4B (Ollama `gemma4:e4b-it-q4_K_M`, GGUF, 6.6 GB) | 14 of 15 at 32K; reads prompts at about half the MLX build's speed. |
 | Nanbeige 4.2 3B OptiQ (MLX, 3.32 GB) | Unusable as loaded: at temperature 0 via the API it emits repeated junk instead of an answer. LM Studio marks it as not trained for tool use. Possible runtime or quant incompatibility (MLX engine 1.13.1); a GGUF build is untested. |
 
 ## Corrections
