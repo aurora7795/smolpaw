@@ -8,6 +8,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
 - OpenClaw's prompt is roughly 8x larger than Smolpaw's (about 24K tokens against about 3K on the first call). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against 5s to 13s for 3K, which is the efficiency gap this project is aiming at.
 - Discovery held up on harder variants of the invented API: 17 of 18 runs passed (hint, detail, paged).
+- Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
 
 ## Rung 1: known API, skill available (Radarr queue)
 
@@ -76,6 +77,24 @@ The spike ran through a scratch script that pointed `agent.py` at Ollama, before
 
 For comparison, LM Studio (MLX 4-bit builds) gave 3/3 for both models in 30 to 74s (Rung 2 above), but at different context sizes and with n=3, so neither runtime is shown to be faster. Tool calls, `usage.prompt_tokens` and a separate `reasoning` field for thinking output all came through Ollama's OpenAI-compatible API. Gemma's failed run and most of its extra steps were parse errors: it copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call written as text). The same errors appear in the LM Studio Gemma logs, so this is not an Ollama problem ([#14](https://github.com/aurora7795/smolpaw/issues/14)).
 
+## Ollama against LM Studio at 16K (`tests/eval.py --backend ollama`, 3 runs each)
+
+Same tasks, same Mac, Ollama 0.40.7 with its default tags (MLX `nvfp4`) on a hand-started server with `OLLAMA_CONTEXT_LENGTH=16384`. `tests/eval.py` confirmed every Ollama cell loaded at 16384. Each cell gives passes, wall time per run and steps.
+
+| Task | Gemma, LM Studio | Gemma, Ollama | Qwen, LM Studio | Qwen, Ollama |
+|---|---|---|---|---|
+| Rung 1 (Radarr queue) | 3/3, 42 to 55s, 3 steps | 3/3, 20 to 36s, 4 to 7 | 3/3, 35 to 71s, 3 | 3/3, 25 to 43s, 3 to 4 |
+| Tidepool `easy` | 3/3, 31 to 74s, 3 to 5 | 3/3, 12 to 21s, 3 to 4 | 3/3, 30 to 62s, 3 to 5 | 3/3, 22 to 59s, 4 to 11 |
+| `hint` | 2/3, 59 to 354s (5/6 in a later set, mean 125s) | 3/3, 15 to 25s, 3 to 5 | 3/3, 35 to 55s | 3/3, 23 to 51s, 4 to 6 |
+| `detail` | 3/3, 113 to 174s, 8 to 10 | 1/3, 36 to 66s, 9 to 11 | 3/3, 71 to 140s, 9 to 11 | 1/3 clean, 56 to 253s, 11 to 13 |
+| `paged` | 3/3, 63 to 116s, 5 to 7 | 3/3, 28 to 44s, 5 to 10 | 3/3, 52 to 70s, 6 | 2/3, 26 to 53s, 5 to 6 |
+
+Clean passes: Gemma 13 of 15 on Ollama against 14 of 15 on LM Studio; Qwen 12 of 15 against 15 of 15. The eval counted Qwen's `detail` as 2 of 3, but one of those runs hit the step cap and passed only because its partial answer listed every vessel's capacity.
+
+- Speed: Gemma ran 2 to 5 times faster on Ollama in most cells. Qwen was a little faster or about the same, which fits its prefill speed being close on both runtimes (above). Why Gemma is faster was not measured (no Gemma prefill test on Ollama; the quantisations differ).
+- `detail` is where Ollama did worse: 2 clean passes of 6 against 6 of 6 on LM Studio. Failures: Gemma answered "Halcyon, 450 tons" (Halcyon holds 275), and another Gemma run never found the vessel endpoints and gave up; two Qwen runs hit the 12-step cap while fetching vessels one by one. Qwen's `paged` failure answered from page 1 ("Marigold, 120 tons") without following `next`.
+- Caveats: n=3 per cell, so the `detail` gap could be chance. The quantisations differ (LM Studio MLX 4-bit, Ollama `nvfp4`). The LM Studio rung 1 and `easy` columns come from earlier runs made before `tests/eval.py`, where context was not confirmed (Qwen used its saved 32K setting). Gemma's parse errors (#14) appeared on both runtimes.
+
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 
 Time to read a prompt of random words (one output token requested), 32K context, no prompt-cache help:
@@ -122,8 +141,8 @@ For comparison, Smolpaw's first call is about 2.9K tokens. A local model would a
 | Gemma 4 E4B (MLX 4-bit, 6.86 GB) | Best so far. Clean structured tool calls. Slow final steps (47 to 70s on PokeAPI), probably from reasoning mode. |
 | Qwen 3.5 9B (MLX, 5.98 GB) | Good once the harness fixes were in. Needs the clear tool errors; wanders without them. |
 | Ternary Bonsai 8B (MLX, 2.32 GB) | Good at guided execution of a known flow, poor at discovery; invents tools. Candidate for a cheap "execute" tier. |
-| Qwen 3.5 9B (Ollama `qwen3.5:9b`, MLX nvfp4, 7.6 GB) | 3/3 on Tidepool `easy` in a first spike; not yet run on the harder variants. |
-| Gemma 4 E4B (Ollama `gemma4:e4b`, MLX nvfp4, 9.5 GB) | 6 of 7 on Tidepool `easy`; same tool-call copying as under LM Studio ([#14](https://github.com/aurora7795/smolpaw/issues/14)). |
+| Qwen 3.5 9B (Ollama `qwen3.5:9b`, MLX nvfp4, 7.6 GB) | 12 of 15 clean at 16K; weaker than on LM Studio on `detail` (step cap) and once on `paged`. |
+| Gemma 4 E4B (Ollama `gemma4:e4b`, MLX nvfp4, 9.5 GB) | 13 of 15 at 16K and 2 to 5 times faster than on LM Studio; both failures on `detail`. Same tool-call copying as under LM Studio ([#14](https://github.com/aurora7795/smolpaw/issues/14)). |
 | Nanbeige 4.2 3B OptiQ (MLX, 3.32 GB) | Unusable as loaded: at temperature 0 via the API it emits repeated junk instead of an answer. LM Studio marks it as not trained for tool use. Possible runtime or quant incompatibility (MLX engine 1.13.1); a GGUF build is untested. |
 
 ## Corrections
