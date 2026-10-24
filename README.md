@@ -163,6 +163,8 @@ Repeatable runs and measurements:
 
 Both take `--backend lmstudio|ollama` and first unload every model on both servers, since only one fits on 16GB. On LM Studio they load the model through `lms` with `--ctx`. Ollama sets the context on its server, so there they load the model, read the context it got from `/api/ps`, and warn if it differs from `--ctx`. `--no-load` (formerly `--no-lms`, still accepted) uses whatever is loaded. Results go to `logs/`, with the backend in the filename and the JSON.
 
+Earlier tool calls and results are sent to the model as native `tool_calls` and `tool` messages, because small models copy smolagents' `Calling tools: [...]` text instead of making a real call ([#14](https://github.com/aurora7795/smolpaw/issues/14)). `tests/eval.py --text-history` (or `build_agent(native_history=False)`) sends smolagents' original text format, so the two can be compared; the eval JSON records which was used. This has not been measured yet.
+
 ## Layout
 
 ```

@@ -15,6 +15,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 - Project rules in `CLAUDE.md` (branching, GitHub issues, changelog, docs upkeep), adapted from the InkTag project, and this changelog. Deferred work is now tracked as GitHub issues, linked from `PLAN.md`.
 
 ### Changed
+- `agent.py`: earlier tool calls and results are sent to the model as native `tool_calls` and `tool` messages (`NativeHistoryModel`) instead of smolagents' `Calling tools: [...]` text, which small models copy instead of making a real call. Only messages smolagents generated are converted; text a model wrote is left alone. `build_agent(native_history=False)` and `tests/eval.py --text-history` keep the old format for comparison, and the eval JSON records which was used. Not yet measured; see [#14](https://github.com/aurora7795/smolpaw/issues/14).
 - `agent.py`: the per-request logic moved into `run_request()`, shared by the CLI and `web.py`. CLI output is unchanged.
 - `tests/eval.py` and `tests/prefill_timing.py` unload models on both LM Studio and Ollama before loading, and on Ollama runs only call `lms` when LM Studio's server is running. `--no-lms` is now `--no-load` (the old name still works). Log filenames include the backend and replace `:` in model ids.
 

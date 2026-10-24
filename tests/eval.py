@@ -123,13 +123,14 @@ def safe_name(model: str) -> str:
     return re.sub(r"[/:]", "_", model)
 
 
-def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backend: str = "lmstudio") -> dict:
+def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backend: str = "lmstudio",
+             native_history: bool = True) -> dict:
     g.ACTIONS.clear()
     g.LAST_RESULT = ""
     prompts: list[str] = []
     confirm = g.CONFIRM
     g.CONFIRM = lambda desc: (prompts.append(desc.splitlines()[0]), confirm(desc))[1]
-    agent = build_agent(model, "tool", max_steps, "generic", backend)
+    agent = build_agent(model, "tool", max_steps, "generic", backend, native_history)
     t0 = time.time()
     buf = io.StringIO()
     error = ""
@@ -180,6 +181,8 @@ def main() -> None:
                     help="no = answer every prompt no; web = answer prompts in the browser (web.py)")
     ap.add_argument("--web-host", default="127.0.0.1")
     ap.add_argument("--web-port", type=int, default=8770)
+    ap.add_argument("--text-history", action="store_true",
+                    help="send earlier tool calls as smolagents' text, not native tool_calls (for comparison, #14)")
     args = ap.parse_args()
 
     load_env()
@@ -224,7 +227,7 @@ def main() -> None:
         results = []
         for i in range(1, args.n + 1):
             web_info.update(status="running", progress=f"{label}: run {i} of {args.n}")
-            r = run_once(args.model, prompt, expects, args.max_steps, args.backend)
+            r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history)
             results.append(r)
             flag = "PASS" if r["passed"] else "FAIL"
             cap = " CAP" if r["hit_cap"] else ""
@@ -240,6 +243,7 @@ def main() -> None:
         out = ROOT / "logs" / f"eval-{stamp}-{args.backend}-{safe_name(args.model)}-{label}.json"
         out.parent.mkdir(exist_ok=True)
         out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
+                                   "history": "text" if args.text_history else "native",
                                    "loaded_context": ctx, "prompt": prompt, "expect": expects,
                                    "runs": results}, indent=2))
         print(f"  saved {out.relative_to(ROOT)}")
