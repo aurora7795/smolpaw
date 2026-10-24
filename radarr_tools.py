@@ -1,5 +1,5 @@
 """
-Radarr tools for the Smolpaw agent.
+Radarr tools for the SmolPaw agent.
 
 Config comes from the environment:
   RADARR_URL      e.g. http://192.168.1.50:7878

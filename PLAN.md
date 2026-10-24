@@ -1,21 +1,21 @@
-# Smolpaw — Plan and Status
+# SmolPaw — Plan and Status
 
 Last updated 2026-10-24. Measured results are in [RESULTS.md](RESULTS.md).
 
 ## Goal
 
-Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running in Smolpaw can **work out how to achieve a goal on its own**, the way the OpenClaw setup did with DeepSeek in the cloud. Radarr was one example; the harness must not be Radarr-specific.
+Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running in SmolPaw can **work out how to achieve a goal on its own**, the way the OpenClaw setup did with DeepSeek in the cloud. Radarr was one example; the harness must not be Radarr-specific.
 
 ## Where we are
 
 - Built and pushed: generic tools with a Python-side confirmation layer, `notes.md` and skills (short skills inlined into the prompt), `openapi_search`, an HTML-response warning, a step-cap fallback that shows the last tool result, run logs, 40+ safety tests, and the Tidepool test API. `agent.py` has `--backend lmstudio|ollama`, `--model`, `--tools generic|radarr`, `--agent` and `--max-steps`.
 - Rung 1 (known API, skill) passes 6 of 6 on Gemma 4 E4B and Qwen 3.5 9B. Rung 2 on an invented API (Tidepool) passes 6 of 6. Bonsai 8B cannot do discovery; Nanbeige 3B is unusable under LM Studio.
-- OpenClaw baseline (one read-only run): correct in 11s on DeepSeek with about 24K prompt tokens per call, against about 3K for Smolpaw.
+- OpenClaw baseline (one read-only run): correct in 11s on DeepSeek with about 24K prompt tokens per call, against about 3K for SmolPaw.
 - Done and merged: the eval script (`tests/eval.py`), harder Tidepool variants (17 of 18 passed), prefill timing, the error-hint skill experiment (no benefit) and an Ollama backend (`--backend ollama` for the agent, eval and prefill scripts), measured at 16K against LM Studio (see RESULTS.md).
 - Not yet done: rungs 3 to 5 (they need a person to approve write prompts, now possible remotely with `web.py` or `tests/eval.py --confirm web`), more models, a GGUF arm on Ollama.
 - Caveats: the `api-discovery` skill supplies Radarr's spec URL, so rung 1 shows recipe-following, not discovery; samples are 3 runs per cell.
 
-## What OpenClaw had that Smolpaw lacks
+## What OpenClaw had that SmolPaw lacks
 
 1. A shell and HTTP access, so any service is reachable.
 2. Always-loaded notes (`AGENTS.md`) listing hosts and where credentials live.

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Smolpaw are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). There have been no versioned releases yet; dates are when changes landed.
+All notable changes to SmolPaw are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). There have been no versioned releases yet; dates are when changes landed.
 
 ## [Unreleased]
 
@@ -8,13 +8,14 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 - `web.py`: a web harness that runs the agent and puts its `[y/N]` prompts and `ask_user` questions on a phone-friendly page, with an access token, key redaction, an optional timeout (unanswered counts as no) and a Stop button. Standard library only. `tests/eval.py --confirm web` uses the same page. Tests cover tokens, stale and non-boolean answers, timeouts, redaction and the harness's decline record.
 - Ollama as a second model backend: `agent.py --backend ollama` (port 11434, default model `qwen3.5:9b`). `build_agent()` takes a `backend` argument; LM Studio stays the default. Tests cover the backend selection ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
 - `--backend` for `tests/eval.py` and `tests/prefill_timing.py`. On Ollama they load the model, read its context from `/api/ps` and warn if it differs from `--ctx` ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
-- README section comparing Smolpaw with OpenClaw on prompt size, task time and local reading speed, with the limits of what was measured.
+- README section comparing SmolPaw with OpenClaw on prompt size, task time and local reading speed, with the limits of what was measured.
 - `tests/eval.py`: runs a prompt N times on a model and records pass/fail, steps, time, tokens, tools and answer, with scripted confirmations and its own notes (the real `notes.md` is untouched). Can serve Tidepool itself (`--tidepool`).
 - Tidepool variants `hint`, `detail` and `paged` in `tests/fake_api.py` for harder discovery tests.
 - `tests/prefill_timing.py`: times prompts of increasing size through LM Studio's API.
 - Project rules in `CLAUDE.md` (branching, GitHub issues, changelog, docs upkeep), adapted from the InkTag project, and this changelog. Deferred work is now tracked as GitHub issues, linked from `PLAN.md`.
 
 ### Changed
+- The project is now written SmolPaw everywhere it is named: docs, the startup and web harness lines, the web page title and the agent's own prompt ("You are SmolPaw"). Identifiers stay lowercase: the repository and its URLs, `SMOLPAW_WEB_TOKEN`, file names and folder paths.
 - `CLAUDE.md`: finished work is committed, merged into `main` and pushed without asking; read-only measurements, issues and docs need no approval. Writes to real services, stopping the user's apps, large downloads, irreversible actions, new software and confirmation-layer changes still need approval.
 - `agent.py`: earlier tool calls and results are sent to the model as native `tool_calls` and `tool` messages (`NativeHistoryModel`) instead of smolagents' `Calling tools: [...]` text, which small models copy instead of making a real call. Only messages smolagents generated are converted; text a model wrote is left alone. `build_agent(native_history=False)` and `tests/eval.py --text-history` keep the old format for comparison, and the eval JSON records which was used. Measured on LM Studio (Gemma, Tidepool `detail`, 6 runs each: 0 parse errors against 2) and on Ollama (both models, all four Tidepool variants, 48 runs: parse errors 19 to 5, passes 19 to 23 of 24); see RESULTS.md and [#14](https://github.com/aurora7795/smolpaw/issues/14).
 - README: a comparison with the lighter claw harnesses (they advertise footprint, not prompt size; their prompts are not yet measured), Ollama figures in the OpenClaw table, and the first rung 3 attempt.

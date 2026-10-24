@@ -1,5 +1,5 @@
 """
-Smolpaw — minimal smolagents CLI harness backed by LM Studio or Ollama.
+SmolPaw — minimal smolagents CLI harness backed by LM Studio or Ollama.
 """
 
 import argparse
@@ -187,7 +187,7 @@ def main() -> None:
     if sys.stdout.isatty():  # keep piped runs and logs clean
         print(BANNER)
     label = args.tools if args.tools == "generic" else f"radarr, {args.agent}"
-    print(f"Smolpaw [{args.backend}: {args.model}, {label}] — type your message, Ctrl-C or 'quit' to exit.\n")
+    print(f"SmolPaw [{args.backend}: {args.model}, {label}] — type your message, Ctrl-C or 'quit' to exit.\n")
     agent = build_agent(args.model, args.agent, max_steps, args.tools, args.backend)
 
     while True:

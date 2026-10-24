@@ -1,5 +1,5 @@
 """
-Smolpaw web harness: run the agent and answer its [y/N] prompts and questions from a browser.
+SmolPaw web harness: run the agent and answer its [y/N] prompts and questions from a browser.
 
   .venv/bin/python web.py --backend ollama --host 0.0.0.0
 
@@ -221,7 +221,7 @@ def url(host: str, port: int, token: str) -> str:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Run Smolpaw and answer its prompts from a browser.")
+    ap = argparse.ArgumentParser(description="Run SmolPaw and answer its prompts from a browser.")
     ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
     ap.add_argument("--model", default=None, help="default depends on --backend")
     ap.add_argument("--max-steps", type=int, default=None, help="default: MAX_STEPS env var, else 12")
@@ -241,7 +241,7 @@ def main() -> None:
     session = Session(build_agent(model, "tool", max_steps, "generic", args.backend), model, approvals)
     server = serve(args.host, args.port, token, approvals, session,
                    {"mode": "agent", "backend": args.backend, "model": model})
-    print(f"Smolpaw web [{args.backend}: {model}] at {url(args.host, args.port, token)}  (Ctrl-C to stop)")
+    print(f"SmolPaw web [{args.backend}: {model}] at {url(args.host, args.port, token)}  (Ctrl-C to stop)")
     try:
         threading.Event().wait()
     except KeyboardInterrupt:
@@ -252,7 +252,7 @@ def main() -> None:
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Smolpaw</title>
+<title>SmolPaw</title>
 <style>
 :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#dcdad5; --accent:#2f6fde;
         --yes:#1f8a4c; --no:#c23b3b; --warn:#fff4d6; }
@@ -278,7 +278,7 @@ button:disabled { opacity:.45; }
 .feed pre { font-size:12px; color:var(--muted); }
 [hidden] { display:none !important; }
 </style></head><body><main>
-<h1>Smolpaw</h1><div class="meta" id="meta">connecting...</div>
+<h1>SmolPaw</h1><div class="meta" id="meta">connecting...</div>
 <div class="card pending" id="pending" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
   <div class="row" id="yesno"><button class="yes" id="yes">Yes</button><button class="no" id="no">No</button></div>
   <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
@@ -303,7 +303,7 @@ $("send").onclick = () => { answer($("reply").value); $("reply").value = ""; };
 $("run").onclick = async () => { const p = $("prompt").value.trim(); if (p) { await api("/api/run", {prompt: p}); refresh(); } };
 $("stop").onclick = () => api("/api/stop", {});
 async function refresh() {
-  let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach Smolpaw"; return; }
+  let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach SmolPaw"; return; }
   $("meta").textContent = [s.mode, s.backend, s.model, s.status, s.progress].filter(Boolean).join(" · ");
   const p = s.pending;
   $("pending").hidden = !p;
