@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -35,7 +36,7 @@ class Approvals:
         self._serial = threading.Lock()  # tools can run in parallel threads: one prompt at a time
         self._lock = threading.Lock()
         self._done = threading.Event()
-        self._ids = itertools.count(1)
+        self._ids = itertools.count(int(time.time() * 1000))  # unique across restarts, so the page never reuses an id
         self._answer: object = None
         self.pending: dict | None = None
 

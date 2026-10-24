@@ -126,6 +126,9 @@ def safe_name(model: str) -> str:
 def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backend: str = "lmstudio") -> dict:
     g.ACTIONS.clear()
     g.LAST_RESULT = ""
+    prompts: list[str] = []
+    confirm = g.CONFIRM
+    g.CONFIRM = lambda desc: (prompts.append(desc.splitlines()[0]), confirm(desc))[1]
     agent = build_agent(model, "tool", max_steps, "generic", backend)
     t0 = time.time()
     buf = io.StringIO()
@@ -136,6 +139,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     except Exception as exc:  # noqa: BLE001
         answer, error = "", f"{type(exc).__name__}: {exc}"
     wall = time.time() - t0
+    g.CONFIRM = confirm
     steps = [s for s in agent.memory.steps if isinstance(s, ActionStep)]
     tokens_in, tokens_out = usage(agent)
     return {
@@ -148,6 +152,8 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "output_tokens": tokens_out,
         "tools": [tc.name for s in steps for tc in (s.tool_calls or [])],
         "declined": [a for a in g.ACTIONS if a.startswith("declined")],
+        "confirm_prompts": prompts,
+        "actions": list(g.ACTIONS),  # what [Harness says] would report, to check the answer against
         "answer": answer.strip()[:400],
         "error": error,
     }
