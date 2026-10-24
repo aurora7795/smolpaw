@@ -19,6 +19,7 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 - `tests/eval.py` and `tests/prefill_timing.py` unload models on both LM Studio and Ollama before loading, and on Ollama runs only call `lms` when LM Studio's server is running. `--no-lms` is now `--no-load` (the old name still works). Log filenames include the backend and replace `:` in model ids.
 
 ### Fixed
+- `tests/eval.py` no longer counts a run that hit the step cap as a pass when its forced last answer happens to match. It also records every harness action and approval prompt per run.
 - RESULTS.md and PLAN.md called Ollama's default `qwen3.5:9b` and `gemma4:e4b` tags GGUF; on this Mac they are MLX `nvfp4` builds.
 - README, PLAN, RESULTS and CLAUDE.md said Ollama picked a 32K context from available memory. It came from the Ollama app's Context length setting, which overrides `OLLAMA_CONTEXT_LENGTH`; the README now says how to set the context for the app and for a hand-started server.
 

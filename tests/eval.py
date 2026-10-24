@@ -142,11 +142,13 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     g.CONFIRM = confirm
     steps = [s for s in agent.memory.steps if isinstance(s, ActionStep)]
     tokens_in, tokens_out = usage(agent)
+    hit_cap = any(isinstance(s.error, AgentMaxStepsError) for s in steps)
     return {
-        "passed": bool(answer) and all(re.search(e, answer, re.I) for e in expects),
+        # A capped run did not finish, even if its forced last answer happens to match.
+        "passed": bool(answer) and not hit_cap and all(re.search(e, answer, re.I) for e in expects),
         "wall_s": round(wall, 1),
         "steps": len(steps),
-        "hit_cap": any(isinstance(s.error, AgentMaxStepsError) for s in steps),
+        "hit_cap": hit_cap,
         "parse_errors": sum(isinstance(s.error, AgentParsingError) for s in steps),
         "input_tokens": tokens_in,
         "output_tokens": tokens_out,
