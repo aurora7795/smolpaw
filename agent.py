@@ -3,11 +3,14 @@ Smolpaw — minimal smolagents CLI harness backed by LM Studio or Ollama.
 """
 
 import argparse
+import ast
+import json
 import os
 import sys
 from pathlib import Path
 
 from smolagents import CodeAgent, OpenAIServerModel, ToolCallingAgent
+from smolagents.models import ChatMessage, MessageRole
 from smolagents.utils import AgentMaxStepsError
 
 import generic_tools
@@ -42,6 +45,77 @@ RADARR_INSTRUCTIONS = (
 )
 
 
+# Markers for history messages smolagents generated itself, so text a model wrote is never converted.
+_CALLS = "\x00smolpaw-tool-calls\x00"
+_RESULT = "\x00smolpaw-tool-result\x00"
+
+
+def _text(content) -> str:
+    if isinstance(content, list):
+        return "\n".join(part.get("text", "") for part in content if part.get("type") == "text")
+    return content or ""
+
+
+def _mark(message: ChatMessage) -> ChatMessage:
+    """Tag smolagents' own tool-call and tool-result messages before it flattens the history to text."""
+    marker = {MessageRole.TOOL_CALL: _CALLS, MessageRole.TOOL_RESPONSE: _RESULT}.get(message.role)
+    if not marker or not isinstance(message, ChatMessage):
+        return message
+    text = _text(message.content).removeprefix("Calling tools:\n").removeprefix("Observation:\n")
+    return ChatMessage(role=message.role, content=[{"type": "text", "text": marker + text}])
+
+
+def native_tool_history(messages: list[dict]) -> list[dict]:
+    """Turn marked history back into native tool_calls and tool messages (OpenAI format).
+
+    smolagents sends earlier tool calls as text ("Calling tools: [{...}]"), which small models copy
+    instead of making a real call (#14). Unmarked text, including anything a model wrote, is left as is.
+    """
+    out: list[dict] = []
+    open_ids: list[str] = []
+
+    def close(result: str) -> None:
+        # Every tool call needs a tool message; parallel calls share one combined observation.
+        out.append({"role": "tool", "tool_call_id": open_ids[0], "content": result})
+        out.extend({"role": "tool", "tool_call_id": i, "content": "(see the result above)"} for i in open_ids[1:])
+        open_ids.clear()
+
+    for m in messages:
+        text = _text(m.get("content"))
+        if open_ids:
+            if m["role"] == "user" and _RESULT in text:
+                close(text.replace(_RESULT, "").strip())
+                continue
+            close("(no result)")
+        if m["role"] == "assistant" and _CALLS in text:
+            before, _, calls = text.partition(_CALLS)
+            try:
+                parsed = ast.literal_eval(calls.strip())
+                tool_calls = [{"id": c["id"], "type": "function",
+                               "function": {"name": c["function"]["name"],
+                                            "arguments": json.dumps(c["function"]["arguments"])}}
+                              for c in parsed]
+            except (ValueError, SyntaxError, KeyError, TypeError):
+                out.append({**m, "content": text.replace(_CALLS, "Calling tools:\n")})
+                continue
+            out.append({"role": "assistant", "content": before.strip(), "tool_calls": tool_calls})
+            open_ids.extend(c["id"] for c in tool_calls)
+            continue
+        out.append({**m, "content": text.replace(_RESULT, "")} if _RESULT in text else m)
+    if open_ids:
+        close("(no result)")
+    return out
+
+
+class NativeHistoryModel(OpenAIServerModel):
+    """OpenAIServerModel that sends earlier tool calls and results in the native tool-call format."""
+
+    def _prepare_completion_kwargs(self, messages, *args, **kwargs):
+        prepared = super()._prepare_completion_kwargs([_mark(m) for m in messages], *args, **kwargs)
+        prepared["messages"] = native_tool_history(prepared["messages"])
+        return prepared
+
+
 def load_env(path: str = ".env") -> None:
     """Load KEY=VALUE lines from a .env file without overriding the real environment."""
     p = Path(__file__).parent / path
@@ -55,9 +129,9 @@ def load_env(path: str = ".env") -> None:
 
 
 def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps: int = MAX_STEPS,
-                toolset: str = "generic", backend: str = "lmstudio"):
+                toolset: str = "generic", backend: str = "lmstudio", native_history: bool = True):
     cfg = BACKENDS[backend]
-    model = OpenAIServerModel(
+    model = (NativeHistoryModel if native_history else OpenAIServerModel)(
         model_id=model_id or cfg["model"],
         api_base=cfg["url"],
         api_key=cfg["key"],

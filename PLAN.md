@@ -123,7 +123,7 @@ Tracked as GitHub issues:
 7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier: [#7](https://github.com/aurora7795/smolpaw/issues/7). Gemma's loaded context is now confirmed as 16384 by `tests/eval.py`.
 8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): tried, no benefit, skill unchanged (see RESULTS.md). Closed: [#9](https://github.com/aurora7795/smolpaw/issues/9).
 9. Done: Ollama as a second backend, measured at 16K against LM Studio (see "Ollama backend" above): [#13](https://github.com/aurora7795/smolpaw/issues/13).
-10. Gemma copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call as text), costing steps and sometimes a run, on both runtimes: [#14](https://github.com/aurora7795/smolpaw/issues/14).
+10. Gemma copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call as text), costing steps and sometimes a run, on both runtimes: [#14](https://github.com/aurora7795/smolpaw/issues/14). Native tool-call history (PR #17) cut parse errors about four times on both models; some remain, so the issue stays open.
 11. Recheck Tidepool `detail` on Ollama with more runs (2 clean passes of 6 against 6 of 6 on LM Studio): [#15](https://github.com/aurora7795/smolpaw/issues/15).
 12. Compare GGUF and MLX builds of the same model on Ollama (the default tags here are MLX): [#16](https://github.com/aurora7795/smolpaw/issues/16).
 

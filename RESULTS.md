@@ -8,6 +8,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
 - OpenClaw's prompt is roughly 8x larger than Smolpaw's (about 24K tokens against about 3K on the first call). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against 5s to 13s for 3K, which is the efficiency gap this project is aiming at.
 - Discovery held up on harder variants of the invented API: 17 of 18 runs passed (hint, detail, paged).
+- Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time (#14).
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
 
 ## Rung 1: known API, skill available (Radarr queue)
@@ -94,6 +95,42 @@ Clean passes: Gemma 13 of 15 on Ollama against 14 of 15 on LM Studio; Qwen 12 of
 - Speed: Gemma ran 2 to 5 times faster on Ollama in most cells. Qwen was a little faster or about the same, which fits its prefill speed being close on both runtimes (above). Why Gemma is faster was not measured (no Gemma prefill test on Ollama; the quantisations differ).
 - `detail` is where Ollama did worse: 2 clean passes of 6 against 6 of 6 on LM Studio. Failures: Gemma answered "Halcyon, 450 tons" (Halcyon holds 275), and another Gemma run never found the vessel endpoints and gave up; two Qwen runs hit the 12-step cap while fetching vessels one by one. Qwen's `paged` failure answered from page 1 ("Marigold, 120 tons") without following `next`.
 - Caveats: n=3 per cell, so the `detail` gap could be chance. The quantisations differ (LM Studio MLX 4-bit, Ollama `nvfp4`). The LM Studio rung 1 and `easy` columns come from earlier runs made before `tests/eval.py`, where context was not confirmed (Qwen used its saved 32K setting). Gemma's parse errors (#14) appeared on both runtimes.
+
+## Native tool-call history vs smolagents' text history (#14)
+
+### LM Studio: Gemma 4 E4B, Tidepool `detail`, 6 runs each
+
+LM Studio, 16K context, same prompt and notes. "Native" sends earlier tool calls and results as `tool_calls` and `tool` messages; "text" (`--text-history`) is smolagents' original `Calling tools: [...]` text.
+
+| History | Passed | Parse errors per run | Mean steps | Mean input tokens | Mean time |
+|---|---|---|---|---|---|
+| Native | 6/6 | 0, 0, 0, 0, 0, 0 (total 0) | 8.0 | 29.4K | 120s |
+| Text | 6/6 | 1, 0, 0, 1, 0, 0 (total 2) | 8.7 | 33.0K | 128s |
+
+Every native run took exactly 8 steps with the same token count, so it followed one path each time; the text runs took 8 to 10 steps. Parse errors were 0 of 6 runs with native history against 2 of 6 with text. That difference alone is small (Fisher exact p about 0.45). Earlier Gemma `detail` runs on the text format, from two other batches (0 to 3 parse errors per run, 6 of 12 runs with at least one, counting this arm's runs as well), make the contrast stronger (0 of 6 against 6 of 12, p about 0.05), but those batches ran on earlier code and one used a different skill, so treat the pooled figure as indicative only. Time differences are small and within run-to-run variation. Passing was not at issue: all 12 runs passed. Qwen, the Ollama backend and the other Tidepool variants are covered below. Not tested separately: the failure where a model wraps `final_answer` arguments in an extra layer, which #14 also lists.
+
+### Ollama: both models, all four Tidepool variants, 3 runs per arm
+
+Ollama 0.40.7, default MLX `nvfp4` tags, the app's 32K context, `tests/eval.py` with and without `--text-history`, the two arms alternated per variant. Each cell gives passes, parse errors per run, mean steps and mean time.
+
+| Variant | Gemma, text | Gemma, native | Qwen, text | Qwen, native |
+|---|---|---|---|---|
+| `easy` | 3/3; 0, 0, 0; 3.3; 16s | 3/3; 0, 0, 0; 5.0; 31s | 3/3; 0, 0, 1; 6.3; 45s | 3/3; 0, 0, 0; 7.7; 39s |
+| `hint` | 3/3; 0, 0, 1; 6.0; 33s | 3/3; 0, 0, 0; 4.0; 22s | 3/3; 1, 0, 0; 7.0; 44s | 3/3; 0, 1, 0; 8.0; 41s |
+| `detail` | 2/3; 1, 3, 2; 9.7; 43s | 3/3; 0, 0, 0; 8.0; 34s | 1/3; 0, 2, 4; 12.3; 103s | 2/3; 0, 0, 0; 12.0; 63s |
+| `paged` | 3/3; 1, 1, 0; 5.3; 25s | 3/3; 0, 1, 1; 6.0; 27s | 1/3; 1, 1, 0; 6.7; 48s | 3/3; 2, 0, 0; 7.7; 44s |
+
+| Totals (12 runs each) | Passed | Parse errors | Runs with any | Mean steps | Mean time |
+|---|---|---|---|---|---|
+| Gemma, text | 11/12 | 9 | 6 | 6.1 | 29s |
+| Gemma, native | 12/12 | 2 | 2 | 5.8 | 29s |
+| Qwen, text | 8/12 | 10 | 6 | 8.1 | 60s |
+| Qwen, native | 11/12 | 3 | 2 | 8.8 | 47s |
+
+- Native history cut parse errors from 19 to 5 across both models, and the share of runs with any from half to one in six. Passes rose from 19 to 23 of 24. Qwen gained most: `detail` went from 1 to 2 of 3 and `paged` from 1 to 3 of 3. Both models' `detail` runs had no parse errors at all with native history (against up to 4 per run, and 5 of 6 runs with at least one, with text).
+- Steps and time were about the same overall. Gemma's slower native `easy` mean comes from one run that wandered for 9 steps (skills, a question) without any parse error; the other two took 3 steps.
+- Native history does not remove parse errors entirely (Gemma `paged`, Qwen `hint` and `paged` still had some), so #14 stays open. The one remaining native failure, Qwen on `detail`, hit the step cap while fetching vessels one by one, a step-budget problem rather than a format one.
+- Caveats: 3 runs per cell; 32K context rather than the 16K of the earlier Ollama section; same day, same Mac. The direction matches the LM Studio result above.
 
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 

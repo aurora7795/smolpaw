@@ -159,6 +159,8 @@ else:
     print("SKIP  live Radarr tests (RADARR_URL/RADARR_API_KEY unset)")
 
 # backend selection (no server needed: building the model makes no request)
+from smolagents import OpenAIServerModel  # noqa: E402
+
 from agent import build_agent  # noqa: E402
 
 lm = build_agent(toolset="generic").model
@@ -265,6 +267,46 @@ job["thread"].join(5)
 check("web decline is recorded by the harness", job.get("value") is False and g.ACTIONS[-1].startswith("declined"))
 g.CONFIRM = fake_confirm
 srv.shutdown()
+
+# native tool-call history (#14): smolagents' own calls go back as real tool_calls, model text stays text
+from smolagents.memory import ActionStep, ToolCall  # noqa: E402
+from smolagents.models import ChatMessage, MessageRole  # noqa: E402
+from smolagents.monitoring import Timing  # noqa: E402
+
+from agent import NativeHistoryModel  # noqa: E402
+
+_t = Timing(0.0, 1.0)
+_steps = [
+    ActionStep(step_number=1, timing=_t, model_output="",
+               tool_calls=[ToolCall("http_request", {"method": "GET", "url": "http://x/"}, "call_a")],
+               observations="HTTP 200\nok"),
+    ActionStep(step_number=2, timing=_t, model_output="Calling tools:\n[{'id': 'fake', 'function': {}}]",
+               error=ValueError("could not parse a tool call")),
+    ActionStep(step_number=3, timing=_t, model_output="",
+               tool_calls=[ToolCall("read_file", {"path": "a"}, "call_b"),
+                           ToolCall("read_file", {"path": "b"}, "call_c")],
+               observations="a and b"),
+]
+_msgs = [ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": "task"}])]
+for _s in _steps:
+    _msgs += _s.to_messages()
+_native = NativeHistoryModel(model_id="x", api_base="http://127.0.0.1:9/v1", api_key="k")
+hist = _native._prepare_completion_kwargs(_msgs, tools_to_call_from=g.GENERIC_TOOLS)["messages"]
+calls = [m for m in hist if m.get("tool_calls")]
+check("earlier tool calls are sent as native tool_calls",
+      [c["id"] for m in calls for c in m["tool_calls"]] == ["call_a", "call_b", "call_c"]
+      and json.loads(calls[0]["tool_calls"][0]["function"]["arguments"]) == {"method": "GET", "url": "http://x/"})
+check("tool results are tool messages with matching ids",
+      [(m["tool_call_id"], m["content"]) for m in hist if m["role"] == "tool"]
+      == [("call_a", "HTTP 200\nok"), ("call_b", "a and b"), ("call_c", "(see the result above)")])
+check("no 'Calling tools:' text left from smolagents' own calls",
+      sum("Calling tools:" in json.dumps(m) for m in hist) == 1)  # only the model's own invalid text remains
+check("model-written tool-call text is not turned into a real call",
+      not any(c["id"] == "fake" for m in calls for c in m["tool_calls"]))
+check("no internal markers reach the server", "smolpaw-tool" not in json.dumps(hist))
+_plain = OpenAIServerModel(model_id="x", api_base="http://127.0.0.1:9/v1", api_key="k")
+check("text history is still available for comparison",
+      not any(m.get("tool_calls") for m in _plain._prepare_completion_kwargs(_msgs)["messages"]))
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

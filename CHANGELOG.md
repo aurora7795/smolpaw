@@ -15,10 +15,12 @@ All notable changes to Smolpaw are documented here. The format follows [Keep a C
 - Project rules in `CLAUDE.md` (branching, GitHub issues, changelog, docs upkeep), adapted from the InkTag project, and this changelog. Deferred work is now tracked as GitHub issues, linked from `PLAN.md`.
 
 ### Changed
+- `agent.py`: earlier tool calls and results are sent to the model as native `tool_calls` and `tool` messages (`NativeHistoryModel`) instead of smolagents' `Calling tools: [...]` text, which small models copy instead of making a real call. Only messages smolagents generated are converted; text a model wrote is left alone. `build_agent(native_history=False)` and `tests/eval.py --text-history` keep the old format for comparison, and the eval JSON records which was used. Measured on LM Studio (Gemma, Tidepool `detail`, 6 runs each: 0 parse errors against 2) and on Ollama (both models, all four Tidepool variants, 48 runs: parse errors 19 to 5, passes 19 to 23 of 24); see RESULTS.md and [#14](https://github.com/aurora7795/smolpaw/issues/14).
 - `agent.py`: the per-request logic moved into `run_request()`, shared by the CLI and `web.py`. CLI output is unchanged.
 - `tests/eval.py` and `tests/prefill_timing.py` unload models on both LM Studio and Ollama before loading, and on Ollama runs only call `lms` when LM Studio's server is running. `--no-lms` is now `--no-load` (the old name still works). Log filenames include the backend and replace `:` in model ids.
 
 ### Fixed
+- `tests/eval.py` no longer counts a run that hit the step cap as a pass when its forced last answer happens to match. It also records every harness action and approval prompt per run.
 - RESULTS.md and PLAN.md called Ollama's default `qwen3.5:9b` and `gemma4:e4b` tags GGUF; on this Mac they are MLX `nvfp4` builds.
 - README, PLAN, RESULTS and CLAUDE.md said Ollama picked a 32K context from available memory. It came from the Ollama app's Context length setting, which overrides `OLLAMA_CONTEXT_LENGTH`; the README now says how to set the context for the app and for a hand-started server.
 
