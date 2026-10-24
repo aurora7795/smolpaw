@@ -51,7 +51,7 @@ Test whether a small local model (Bonsai 8B on LM Studio, 16GB Mac Mini) running
   2. `agent.py` (done): a `BACKENDS` dict, a `--backend lmstudio|ollama` flag (default `lmstudio`), a `backend` parameter on `build_agent()`, and a default model per backend. The prompt and the confirmation layer are unchanged.
   3. `tests/eval.py` and `tests/prefill_timing.py` (done): model management per backend (unload with `keep_alive: 0`, a warm-up load, the `/api/ps` context check), `--backend`, and the backend recorded in log names and JSON. Replace `:` in model names in log filenames.
   4. A backend-selection test (done).
-  5. Measure rung 1 and the Tidepool variants on Ollama (done at 16K: Gemma 13 of 15, Qwen 12 of 15 clean; weaker on `detail`, tracked in #15). On this Mac Ollama's default tags are MLX `nvfp4` builds, not GGUF. For an MLX vs GGUF comparison, pull an explicit quantisation tag (for example `qwen3.5:9b-q4_K_M`) and confirm with `ollama show` that it is GGUF on the llama.cpp runner. A GGUF Nanbeige build (#7) needs the same check. Tracked in #16.
+  5. Measure rung 1 and the Tidepool variants on Ollama (done at 16K: Gemma 13 of 15, Qwen 12 of 15 clean; weaker on `detail`, tracked in #15). On this Mac Ollama's default tags are MLX `nvfp4` builds; explicit `-q4_K_M` tags pull GGUF (checked with `ollama show`). Measured in #16: same passes, MLX faster. A GGUF Nanbeige build (#7) needs the same check.
   6. Update README, CHANGELOG and RESULTS (done).
 - Only one model fits on 16GB: unload LM Studio before loading a model in Ollama, and the reverse.
 
@@ -124,8 +124,8 @@ Tracked as GitHub issues:
 8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): tried, no benefit, skill unchanged (see RESULTS.md). Closed: [#9](https://github.com/aurora7795/smolpaw/issues/9).
 9. Done: Ollama as a second backend, measured at 16K against LM Studio (see "Ollama backend" above): [#13](https://github.com/aurora7795/smolpaw/issues/13).
 10. Gemma copies smolagents' tool-call history format (an extra `arguments` wrapper, or the call as text), costing steps and sometimes a run, on both runtimes: [#14](https://github.com/aurora7795/smolpaw/issues/14). Native tool-call history (PR #17) cut parse errors about four times on both models; some remain, so the issue stays open.
-11. Recheck Tidepool `detail` on Ollama with more runs (2 clean passes of 6 against 6 of 6 on LM Studio): [#15](https://github.com/aurora7795/smolpaw/issues/15).
-12. Compare GGUF and MLX builds of the same model on Ollama (the default tags here are MLX): [#16](https://github.com/aurora7795/smolpaw/issues/16).
+11. Done: Tidepool `detail` rechecked at 32K with native history; 11 of 12 on both LM Studio and Ollama, so the gap is gone (see RESULTS.md). Closed: [#15](https://github.com/aurora7795/smolpaw/issues/15).
+12. Done: GGUF against MLX builds on Ollama; same pass rates, MLX faster (Gemma prefill about twice as fast), so the default MLX tags stay. Closed: [#16](https://github.com/aurora7795/smolpaw/issues/16).
 13. Measure the prompt PicoClaw actually sends, and its results, on the same local models and Tidepool tasks; the lighter claw harnesses advertise footprint, not prompt size: [#18](https://github.com/aurora7795/smolpaw/issues/18).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
