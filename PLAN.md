@@ -99,13 +99,15 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 
 ## Next steps
 
-1. Rung 3: a supervised real Radarr add with the `[y/N]` prompt, a different movie each run, on Gemma first.
-2. Harder Tidepool: no root index, a field only on the detail endpoint, pagination. See where discovery breaks.
-3. Rung 4 (unrelated local task) and rung 5 (does a written skill help).
-4. Build a small eval script so runs are comparable and token counts are recorded.
-5. Measure prefill time for a 24K-token prompt on this Mac, to quantify OpenClaw's overhead locally (no OpenClaw config change needed).
-6. Test whether a model can write a useful skill itself and a second run benefits ("discover once, then run cheaply").
-7. Decide whether Bonsai belongs in an execute-only tier, and whether a GGUF build of Nanbeige is worth one try.
+Tracked as GitHub issues:
+
+1. Rung 3, a supervised real Radarr add with the `[y/N]` prompt, on Gemma first: [#1](https://github.com/aurora7795/smolpaw/issues/1).
+2. Harder Tidepool (no root index, a detail-only field, pagination): [#2](https://github.com/aurora7795/smolpaw/issues/2).
+3. Rung 4, an unrelated local task: [#3](https://github.com/aurora7795/smolpaw/issues/3).
+4. Rung 5, can a model write a useful skill and reuse it ("discover once, then run cheaply"): [#4](https://github.com/aurora7795/smolpaw/issues/4).
+5. A small eval script so runs are comparable and token counts are recorded: [#5](https://github.com/aurora7795/smolpaw/issues/5).
+6. Measure prefill time for a 24K-token prompt on this Mac, to quantify OpenClaw's overhead locally (no OpenClaw config change needed): [#6](https://github.com/aurora7795/smolpaw/issues/6).
+7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier, confirm Gemma's loaded context: [#7](https://github.com/aurora7795/smolpaw/issues/7).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 

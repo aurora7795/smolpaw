@@ -98,6 +98,8 @@ notes.example.md      Template for notes.md (gitignored)
 tests/                Safety tests and the Tidepool test API
 workspace/            The agent's working folder (contents gitignored)
 logs/                 Run logs (gitignored)
-PLAN.md               Goals, decisions, test ladder, next steps
+PLAN.md               Goals, decisions, test ladder, next steps (tracked as GitHub issues)
 RESULTS.md            Measured results and caveats
+CHANGELOG.md          Keep a Changelog history
+CLAUDE.md             Project rules: commands, branching, issues, changelog, docs
 ```

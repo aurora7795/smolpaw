@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes to Smolpaw are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). There have been no versioned releases yet; dates are when changes landed.
+
+## [Unreleased]
+
+### Added
+- Project rules in `CLAUDE.md` (branching, GitHub issues, changelog, docs upkeep), adapted from the InkTag project, and this changelog. Deferred work is now tracked as GitHub issues, linked from `PLAN.md`.
+
+## 2026-10-24
+
+### Added
+- Paw banner shown at startup in an interactive terminal.
+- `RESULTS.md` collecting measured results and caveats; `PLAN.md` now tracks status, the test ladder and next steps.
+- "Tidepool" (`tests/fake_api.py`), an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised.
+- `openapi_search` tool for finding real endpoints in a service's OpenAPI spec, and a hand-written `api-discovery` skill.
+- Generic tools with a Python-side confirmation layer: `run_shell`, `http_request`, `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`. Read-only commands and HTTP GET run freely; everything else asks `[y/N]`.
+- `notes.md` service list with per-host API key injection from `.env`; keys are redacted from output and logs. Every run is logged to `logs/`.
+- `--tools generic|radarr` flag; the generic toolset is the default and always uses `ToolCallingAgent`.
+- Safety tests (`tests/test_generic_tools.py`).
+
+### Changed
+- Short skills are inlined into the prompt instead of being read on demand.
+- `README.md` rewritten for the generic harness, safety model and layout.
+- `openapi_search` explains when a URL is not an OpenAPI spec instead of reporting "0 endpoints".
+- When the agent hits the step cap the harness reports it and shows the last tool result instead of a blank or misleading answer.
+
+### Fixed
+- `http_request` no longer passes an HTML page back as if it were API data; it warns that the path is probably wrong.
+- Log filenames no longer break for model identifiers containing `/`.
+
+## 2026-10-23
+
+### Added
+- Hand-written Radarr tools (`search_movie`, `list_add_options`, `add_movie`, `get_queue`) with dry-run by default, id validation and a `[y/N]` confirm before any real add.
+- `--model`, `--agent code|tool` and `--max-steps` flags; the step cap can also be set with `MAX_STEPS` in `.env`.
+- `.env` loading and `.env.example`.
+- A ground-truth `[Radarr says]` line printed after each Radarr-toolset run.
+
+### Changed
+- Default step cap raised from 8 to 12 and made configurable.
+- Dry-run and success messages from `add_movie` made unmistakable, and the agent is told to report exactly what tools returned.
+
+### Fixed
+- The model looping after a dry-run result (the result now says the task is finished).
+
+## 2026-10-23 (initial)
+
+### Added
+- Minimal smolagents CLI harness backed by LM Studio.
