@@ -115,11 +115,11 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 Tracked as GitHub issues:
 
 1. Rung 3, a supervised real Radarr add with the `[y/N]` prompt, on Gemma first: [#1](https://github.com/aurora7795/smolpaw/issues/1).
-2. Done on the feature branch (closes on merge): harder Tidepool (no root index, a detail-only field, pagination): [#2](https://github.com/aurora7795/smolpaw/issues/2).
+2. Done: harder Tidepool (no root index, a detail-only field, pagination): [#2](https://github.com/aurora7795/smolpaw/issues/2).
 3. Rung 4, an unrelated local task: [#3](https://github.com/aurora7795/smolpaw/issues/3).
 4. Rung 5, can a model write a useful skill and reuse it ("discover once, then run cheaply"): [#4](https://github.com/aurora7795/smolpaw/issues/4).
-5. Done on the feature branch (closes on merge): a small eval script so runs are comparable and token counts are recorded: [#5](https://github.com/aurora7795/smolpaw/issues/5).
-6. Done on the feature branch (closes on merge): prefill time on this Mac, to quantify OpenClaw's overhead locally: [#6](https://github.com/aurora7795/smolpaw/issues/6).
+5. Done: a small eval script so runs are comparable and token counts are recorded: [#5](https://github.com/aurora7795/smolpaw/issues/5).
+6. Done: prefill time on this Mac, to quantify OpenClaw's overhead locally: [#6](https://github.com/aurora7795/smolpaw/issues/6).
 7. More models: a GGUF build of Nanbeige, Bonsai as an execute-only tier: [#7](https://github.com/aurora7795/smolpaw/issues/7). Gemma's loaded context is now confirmed as 16384 by `tests/eval.py`.
 8. Teach the api-discovery skill to read error bodies for hints (Gemma failed the `hint` variant once): tried, no benefit, skill unchanged (see RESULTS.md). Closed: [#9](https://github.com/aurora7795/smolpaw/issues/9).
 9. Ollama as a second backend, with an MLX vs GGUF comparison (see "Ollama backend" above): [#13](https://github.com/aurora7795/smolpaw/issues/13). Spike and `--backend` done; the eval scripts and measurement remain.
