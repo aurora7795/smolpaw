@@ -404,6 +404,30 @@ ins = g.build_instructions()
 check("short skill inlined", "use thing" in ins)
 check("long skill listed not inlined", "Longer skills" in ins and "xxxxxxxxxx" not in ins)
 
+# key user facts in notes.md (#25): user preferences inlined into prompt, ignored by services()
+saved_notes = g.NOTES
+g.NOTES = tmp / "facts-notes.md"
+g.NOTES.write_text("""# SmolPaw notes
+
+## User facts
+- timezone: Europe/London
+- units: metric (Celsius, km)
+- owner: Martin
+
+## Services
+- mysvc: https://example.com/api | key_env=MY_KEY
+""")
+facts_ins = g.build_instructions()
+check("user facts inlined in prompt instructions", "timezone: Europe/London" in facts_ins and "units: metric" in facts_ins)
+parsed_svcs = g.services()
+check("services() parses valid service URL", "mysvc" in parsed_svcs and parsed_svcs["mysvc"]["url"] == "https://example.com/api")
+check("services() ignores user facts lines", "timezone" not in parsed_svcs and "units" not in parsed_svcs and "owner" not in parsed_svcs)
+
+# token budget check (#25): 3-line user facts block should be under 80 tokens (~320 chars)
+user_facts_block = "## User facts\n- timezone: Europe/London\n- units: metric (Celsius, km)\n- owner: Martin\n"
+check("user facts block fits token budget (< 80 tokens)", len(user_facts_block) < 320)
+g.NOTES = saved_notes
+
 # secrets
 if os.environ.get("RADARR_URL") and os.environ.get("RADARR_API_KEY"):
     g.NOTES = tmp / "notes.md"
