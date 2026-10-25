@@ -326,5 +326,71 @@ _plain = OpenAIServerModel(model_id="x", api_base="http://127.0.0.1:9/v1", api_k
 check("text history is still available for comparison",
       not any(m.get("tool_calls") for m in _plain._prepare_completion_kwargs(_msgs)["messages"]))
 
+# stall detection (#19): the harness stops a run that repeats the same failing call
+from agent import STALL_WINDOW, check_stall  # noqa: E402
+
+
+class _FakeAgent:
+    def __init__(self, steps):
+        self.memory = type("M", (), {"steps": steps})()
+        self.stall_reason = None
+        self.interrupted = False
+
+    def interrupt(self):
+        self.interrupted = True
+
+
+def _step(tool_calls, observations=None, error=None):
+    return ActionStep(step_number=1, timing=_t, model_output="", tool_calls=tool_calls,
+                      observations=observations, error=error)
+
+
+same_call = [ToolCall("http_request", {"method": "POST", "url": "http://x/add"}, f"c{i}") for i in range(5)]
+failing = [_step([c], observations="HTTP 400\nbad request") for c in same_call]
+a = _FakeAgent(failing[:STALL_WINDOW - 1])
+check_stall(a.memory.steps[-1], a)
+check("no stall flagged before the window fills", not a.interrupted)
+a = _FakeAgent(failing[:STALL_WINDOW])
+check_stall(a.memory.steps[-1], a)
+check("same call failing with HTTP 4xx repeatedly is a stall", a.interrupted and a.stall_reason)
+a = _FakeAgent([_step([ToolCall("run_shell", {"cmd": "echo a"}, "x")], observations="a\n")
+                for _ in range(STALL_WINDOW)])
+check_stall(a.memory.steps[-1], a)
+check("repeating a succeeding call is not a stall", not a.interrupted)
+a = _FakeAgent([_step([ToolCall("read_file", {"path": f"f{i}"}, "x")], observations="ERROR: no such file")
+                for i in range(STALL_WINDOW)])
+check_stall(a.memory.steps[-1], a)
+check("different arguments each time is not a stall", not a.interrupted)
+a = _FakeAgent(failing[:STALL_WINDOW - 1] + [_step([same_call[0]], error=ValueError("boom"))])
+check_stall(a.memory.steps[-1], a)
+check("a smolagents-level error counts as a failure too", a.interrupted)
+
+# run_request() reports a stall as a finished answer, but still lets a real Stop-button interrupt through
+from smolagents.utils import AgentError  # noqa: E402
+
+from agent import run_request  # noqa: E402
+
+
+class _StubAgent:
+    def __init__(self, reason):
+        self.memory = type("M", (), {"steps": []})()
+        self._reason = reason
+
+    def run(self, _task):
+        g.LAST_RESULT = "openapi_search: no matching endpoints."  # as a real tool call would set it
+        self.stall_reason = self._reason
+        raise AgentError("Agent interrupted.", type("L", (), {"log_error": lambda *a: None})())
+
+
+resp, _ = run_request(_StubAgent("the same call failed 3 times in a row"), "m", "generic", "task")
+check("a stall is reported as the answer, with the last tool result",
+      resp.startswith("STOPPED EARLY: the same call failed 3 times in a row")
+      and "no matching endpoints" in resp)
+try:
+    run_request(_StubAgent(None), "m", "generic", "task")
+    check("a non-stall interrupt (Stop button) is not swallowed", False)
+except AgentError:
+    check("a non-stall interrupt (Stop button) is not swallowed", True)
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
