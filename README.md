@@ -115,7 +115,7 @@ Ollama cuts prompts that exceed the loaded context with no error to the client (
 # SmolPaw web [ollama: qwen3.5:9b] at http://<this-machine>:8770/?t=<token>
 ```
 
-Open the printed URL. The page has a box for requests, a card with **Yes / No** (or a reply box) when the agent is waiting on you, the answer with the `[Harness says]` lines, a short activity feed from the run log, and a Stop button. One request runs at a time.
+Open the printed URL. The page has a box for requests, a card with **Yes / No** (or a reply box) when the agent is waiting on you, the answer with the `[Harness says]` lines, a short activity feed from the run log, and a Stop button. One request runs at a time. While a request is running, the page shows a small rotating "Pawing... (12s)"-style line so you can tell it is still working and how long it has taken.
 
 | Flag | Default | Notes |
 |---|---|---|
