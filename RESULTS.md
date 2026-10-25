@@ -256,9 +256,52 @@ Time to read a prompt of random words (one output token requested), 32K context,
 | 11K | 54.2s (211 tok/s) | 18.8s (596 tok/s) |
 | 23K | 114s (201 tok/s) | 41s (548 tok/s) |
 
-Reading OpenClaw's roughly 24K-token prompt would take about 2 minutes per call on Qwen and about 45 seconds on Gemma, and its task needed 3 model turns, so roughly 6 minutes and 2 minutes of prefill alone without caching. SmolPaw's roughly 3K-token first call costs about 13s and 5s. Caveat: the test used unique prompts. A server that caches a stable prompt prefix between calls (OpenClaw's prompt is mostly constant) could reduce this a lot; that has not been measured, nor has memory use.
+Reading OpenClaw's roughly 24K-token prompt would take about 2 minutes per call on Qwen and about 45 seconds on Gemma, and its task needed 3 model turns, so roughly 6 minutes and 2 minutes of prefill alone without caching. SmolPaw's roughly 3K-token first call costs about 13s and 5s. Caveat: the test used unique prompts, so no cache could help; a stable prefix is much cheaper (next section). Memory use was not measured.
 
 The table above is LM Studio. A two-size check of Qwen on Ollama (`qwen3.5:9b`, MLX `nvfp4`, 32K context, one run each) gave 8.9s at 1,911 tokens (215 tok/s) and 27.4s at 5,810 tokens (212 tok/s), close to LM Studio's 228 and 225 tok/s for the same prompts. Gemma and the larger sizes were not run on Ollama.
+
+## Prompt-prefix caching (#29, `tests/prefix_cache.py`, 32K context, both runtimes, 2026-10-25)
+
+Does the runtime skip re-reading the start of a prompt that has not changed? Random-word prompts of a fixed size, one output token asked for, three repeats each with a fresh prefix. Medians; `cold` is the first call with a prefix, `warm` and `warm2` the same prefix with a different ending, `changed start` the same body with a different first line (what a timestamp at the top of the prompt does).
+
+| Runtime and model | Prompt tokens | cold | warm | warm2 | changed start |
+|---|---|---|---|---|---|
+| LM Studio, Qwen 3.5 9B | 2,921 | 13.5s | 0.7s | 0.7s | 13.4s |
+| LM Studio, Qwen 3.5 9B | 11,500 | 54.0s | 1.7s | 1.6s | 53.9s |
+| LM Studio, Gemma 4 E4B | 2,850 | 4.5s | 0.6s | 0.6s | 4.7s |
+| LM Studio, Gemma 4 E4B | 11,203 | 19.3s | 0.6s | 0.5s | 19.2s |
+| Ollama, Qwen 3.5 9B | 2,921 | 13.5s | 13.6s | 0.4s | 13.6s |
+| Ollama, Qwen 3.5 9B | 11,500 | 57.1s | 17.2s | 0.5s | 57.3s |
+| Ollama, Gemma 4 E4B | 2,850 | 4.5s | 4.5s | 0.2s | 4.5s |
+| Ollama, Gemma 4 E4B | 11,203 | 18.7s | 5.3s | 0.2s | 19.0s |
+
+- **A stable start is almost free to re-read, a changed first line is not.** Where the cache works, the repeat costs 0.2 to 1.7s whatever the prompt size. Changing the first line gave the cold time in all 8 rows: the whole prompt was read again.
+- **LM Studio reuses the prefix from the second call.** Ollama does not: its first repeat reused nothing for the 3K prompts and only the first 8,192 tokens for the 11K ones (its `usage.prompt_tokens_details.cached_tokens` says so: 0 to 10 and 8,191 to 8,192). The second repeat reused nearly everything (2,760 to 2,884 of about 2,850, and 11,134 to 11,504 of about 11,200 to 11,500). Why Ollama waits a call was not investigated. LM Studio does not report cached tokens, so its reuse is inferred from the time.
+- **A 5-step series that grows the prompt by about 300 tokens a step**, as an agent's history does, summed over the 5 steps: stable start against first line changed every step:
+
+| Runtime and model | 3K start, stable | 3K start, changed each step | 12K start, stable | 12K start, changed each step |
+|---|---|---|---|---|
+| LM Studio, Qwen | 22.3s | 79.7s | 62.6s | 281.1s |
+| LM Studio, Gemma | 7.5s | 28.6s | 23.5s | 101.5s |
+| Ollama, Qwen | 38.3s | 89.1s | 94.8s | 333.6s |
+| Ollama, Gemma | 12.6s | 27.4s | 27.9s | 98.5s |
+
+  On Ollama the stable series pays for steps 1 and 2 (the cache fills) and is then fast; on LM Studio only step 1 is slow.
+
+**The real agent** (Tidepool `hint`, 3 runs per cell, native history, the actual prompt and tool schemas). Step times include writing the answer, so they are only a ceiling on reading time. The last column is the time to read every step's whole prompt with no cache at all, at the cold speed measured above, so it is a lower bound on a cacheless run:
+
+| Runtime and model | Passed | Mean run time | Mean steps | Time just to read every prompt cold |
+|---|---|---|---|---|
+| LM Studio, Qwen 3.5 9B | 3 of 3 | 39.0s | 4.7 | 94.3s |
+| Ollama, Qwen 3.5 9B | 3 of 3 | 45.0s | 5.7 | 115.2s |
+| Ollama, Gemma 4 E4B | 3 of 3 | 32.2s | 5.0 | 32.1s |
+| LM Studio, Gemma 4 E4B | 2 of 3 | 159.2s | 6.7 | 44.2s |
+
+- **Qwen: the cache is clearly working in the real agent.** A whole run took less time than reading its prompts cold would have taken alone, at least 2.4 times faster on LM Studio (94.3s against 39.0s) and at least 2.6 times on Ollama (115.2s against 45.0s). The first step of runs 2 and 3 (about 4,100 tokens, 7 to 8s against about 19s cold) also benefited, so the fixed start (instructions, notes, skills, tool schemas) is reused across runs.
+- **Gemma: not conclusive.** Its prompts are cheap to read (about 6s cold), so generation dominates the step times and they cannot show a saving. LM Studio's Gemma run 3 failed after 11 steps with outputs of 360 to 1,187 tokens; that is unrelated to caching.
+- **Does the prompt order need changing? No.** `build_instructions()` has nothing that changes between calls (no date or time), the tool schemas are fixed, and history is appended. The real runs above show the reuse. The rule to keep is that nothing volatile (a timestamp, a run ID, a changing count) goes near the start of the prompt, since a changed first line costs the full read; a test now checks the instructions are identical on repeated calls.
+
+Caveats: one Mac, three repeats per row and three agent runs per cell. Ollama ran with the context its app is set to (32,768), not the 16,384 of the earlier Ollama comparison; LM Studio was loaded at 32,768 to match. Prompts are random words, not real text, and a single request at a time. The agent's `gemma` rows say nothing either way about caching. Memory use was not measured. Raw numbers are in `logs/prefix-cache-*.json` (gitignored); rerun with `tests/prefix_cache.py` (see its docstring).
 
 ## Hand-written Radarr tools (baseline, Bonsai + ToolCallingAgent)
 

@@ -828,6 +828,11 @@ try:
 except AgentError:
     check("a non-stall interrupt (Stop button) is not swallowed", True)
 
+# the prompt start must not change between calls, or the runtime re-reads all of it (#29)
+_first_call = g.build_instructions()
+time.sleep(1.1)
+check("build_instructions is identical across calls, so a prompt prefix cache can reuse it", g.build_instructions() == _first_call)
+
 # export_findings.py: bundling run logs into one shareable report
 sys.path.insert(0, str(Path(__file__).parent))
 import export_findings as ef  # noqa: E402
