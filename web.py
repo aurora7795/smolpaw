@@ -91,12 +91,14 @@ class Session:
         self.agent, self.model, self.approvals = agent, model, approvals
         self._lock = threading.Lock()
         self.status, self.prompt, self.answer, self.outcome, self.error = "idle", "", "", "", ""
+        self.started_at = 0.0
 
     def start(self, prompt: str) -> bool:
         with self._lock:
             if self.status == "running":
                 return False
             self.status, self.prompt, self.answer, self.outcome, self.error = "running", prompt, "", "", ""
+            self.started_at = time.time()
         threading.Thread(target=self._run, args=(prompt,), daemon=True).start()
         return True
 
@@ -172,6 +174,7 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, {
                     **info, "can_run": s is not None,
                     "status": s.status if s else info.get("status", "running"),
+                    "started_at": s.started_at if s and s.status == "running" else None,
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
                     "outcome": s.outcome if s else "", "error": s.error if s else "",
                     "pending": approvals.pending, "feed": feed()})
@@ -284,13 +287,24 @@ button:disabled { opacity:.45; }
   <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
     <div class="row"><button id="send">Send answer</button></div></div></div>
 <div class="card" id="runcard" hidden><h2>Request</h2><textarea id="prompt" placeholder="What should the agent do?"></textarea>
-  <div class="row"><button id="run">Run</button><button class="ghost" id="stop">Stop</button></div></div>
+  <div class="row"><button id="run">Run</button><button class="ghost" id="stop">Stop</button></div>
+  <div class="meta" id="working" hidden></div></div>
 <div class="card" id="result" hidden><h2>Answer</h2><pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
 <div class="card feed"><h2>Activity</h2><pre id="feed">(nothing yet)</pre></div>
 </main><script>
 const token = new URLSearchParams(location.search).get("t") || "";
 const $ = id => document.getElementById(id);
 let pendingId = null;
+let startedAt = null;
+const VERBS = ["Pawing", "Sniffing", "Fetching", "Digging", "Trotting", "Scouting",
+               "Rummaging", "Burrowing", "Tinkering", "Nosing around"];
+function tick() {
+  if (!startedAt) return;
+  const secs = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  const verb = VERBS[Math.floor(secs / 3) % VERBS.length];
+  $("working").textContent = verb + "... (" + secs + "s)";
+}
+setInterval(tick, 1000);
 async function api(path, body) {
   const r = await fetch(path, {method: body ? "POST" : "GET", cache: "no-store",
     headers: {"X-Token": token, "Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined});
@@ -316,6 +330,9 @@ async function refresh() {
   if (!p) pendingId = null;
   $("runcard").hidden = !s.can_run;
   $("run").disabled = s.status === "running"; $("stop").disabled = s.status !== "running";
+  $("working").hidden = s.status !== "running";
+  if (s.status === "running") { startedAt = s.started_at ? s.started_at * 1000 : (startedAt || Date.now()); tick(); }
+  else { startedAt = null; }
   const done = s.answer || s.error;
   $("result").hidden = !done && !s.prompt;
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
