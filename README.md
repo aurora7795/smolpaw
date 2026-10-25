@@ -64,7 +64,7 @@ We have not yet measured the prompt any of these harnesses actually sends, so th
 
 ```bash
 ./setup.sh                      # creates .venv and installs smolagents, openai and ddgs (web search)
-cp .env.example .env            # then add an API key for each service you list in notes.md
+cp .env.example .env            # then add an API key for each service you list in notes.md (Radarr variables are only for the baseline toolset)
 cp notes.example.md notes.md    # then list the services you want the agent to reach
 ```
 
