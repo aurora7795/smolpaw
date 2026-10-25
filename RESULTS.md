@@ -12,6 +12,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - On Ollama the default MLX builds beat the GGUF ones on speed (Gemma reads prompts about twice as fast) with the same pass rates (#16). With native history at 32K, the earlier Ollama weakness on Tidepool `detail` is gone: 11 of 12 on each runtime (#15).
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
 - Converting web pages to text instead of returning raw HTML turned a 0 of 3 failure (both models, step-capped or giving up on the markup) into 3 of 3, in 2 to 4 steps instead of 7 to 13, and cut input tokens by 6x (Gemma) to 83x (Qwen, which otherwise burns the whole 32K context on one clipped HTML blob) (#23).
+- Rung 3, a real supervised Radarr write, is not yet passing: 0 of 3 real-movie attempts with Qwen (#1). Every attempt was safely contained (nothing was ever added to Radarr), but the model tends to guess a write's arguments before looking them up, and prefers ad-hoc shell spelunking of the raw OpenAPI spec over the `openapi_search` tool it is told to use.
 
 ## Rung 1: known API, skill available (Radarr queue)
 
@@ -37,6 +38,25 @@ Caveat: the skill gives the location of Radarr's OpenAPI spec, so this shows fol
 | Tidepool (invented, root index) | 3/3 (31 to 74s, 3 to 5 steps) | 3/3 (30 to 62s, 3 to 5 steps) |
 
 PokeAPI did not test discovery: both models went straight to the right URL from memory. Tidepool did: nothing in training data, notes list only the base URL, and every run answered Kestrel / 340 tons. Qwen's first move was often `openapi_search` on the base URL; the clearer error message ("returns JSON but is not an OpenAPI spec") fixed that immediately. Tidepool is an easy case (a root index exists); the harder variants are in the next section. Gemma's context setting for the Tidepool runs is unconfirmed (an explicit 16K load failed for memory, so on-demand loading was used).
+
+## Rung 3: supervised real write to Radarr (#1, 2026-10-25, qwen3.5:9b, Ollama, web harness)
+
+A real `POST /api/v3/movie` through the web harness (`web.py`), approvals answered by hand, no skill present beyond the inlined `api-discovery.md`. Four runs, one per real-time session:
+
+| Run | Movie | Outcome |
+|---|---|---|
+| 1 | "World of Warcraft" (not a real movie, excluded from the pass count) | Correctly concluded no such film exists on TMDB after wandering through the wrong endpoint family (`importlist/*`) and one fabricated, non-numeric TMDB id (`12a674`). Hit the step cap but caused no harm. |
+| 2 | Arrival (2016) | `GET /api/v3/movie/lookup` called with no `term=` parameter at all, which throws a 503 inside Radarr (`ArgumentNullException`) rather than a clean 4xx. Never called `openapi_search`, despite the inlined skill naming it. Hit the step cap. |
+| 3 | Arrival (2016) | Abandoned `http_request`/`openapi_search` for hand-rolled shell: fetched the OpenAPI spec with `curl` and tried to extract the `movie` endpoint's schema with a string of `grep`/Python one-liners, several of which had bugs (e.g. `'movie' in len(m)` — comparing membership against an int). Never produced a usable schema. Hit the step cap. |
+| 4 | Arrival (2016) | Opened with a `POST /api/v3/movie` carrying no body at all (415), then returned to the same shell-grep approach as run 3. Settled on a *guessed* TMDB id in its final answer, presented as fact, and told the user to run a DIY `curl` command themselves rather than finishing the task. Hit the step cap. |
+
+**0 of 3 real-movie passes** (rung 3 wants 2 of 3). Every run was verified against the live Radarr library afterwards: nothing was ever added, across all four runs — every write attempt failed before reaching a successful `POST`, so there was nothing to clean up.
+
+Two failure patterns recur across the real attempts, distinct from both #14 (history-copying) and #19 (repeat-loop stalls, which correctly did not fire here since every failing call differed):
+1. **Opens with an empty- or malformed-body `POST`** (runs 2 and 4) before looking anything up — a guess-first instinct the inlined skill's "do not guess endpoint names" line does not cover, since this is guessing *arguments*, not the endpoint.
+2. **Prefers ad-hoc shell spelunking of the raw OpenAPI spec over the provided `openapi_search` tool** (runs 3 and 4) — slower, more token-hungry, and error-prone (several of its own one-liners had bugs), despite the skill naming `openapi_search` explicitly.
+
+Caveats: one model (qwen3.5:9b), one service (Radarr), 2 of 4 runs same-day same-movie for comparability, not independence. Gemma on this rung is still untested. Not clear yet whether a cheap fix helps (a stronger per-write skill, or a harness-level hint on a malformed first write) or whether this needs a stronger model; no fix attempted yet, per "measure before adding."
 
 ## Harder discovery: Tidepool variants (`tests/eval.py`, 3 runs each, 16K context)
 
