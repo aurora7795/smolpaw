@@ -157,6 +157,10 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "input_tokens": tokens_in,
         "output_tokens": tokens_out,
         "tools": [tc.name for s in steps for tc in (s.tool_calls or [])],
+        # per model call: seconds, prompt tokens read and tokens written, to see where time goes (#29)
+        "step_stats": [{"seconds": round(s.timing.duration or 0, 1),
+                        "input_tokens": getattr(s.token_usage, "input_tokens", 0),
+                        "output_tokens": getattr(s.token_usage, "output_tokens", 0)} for s in steps],
         "declined": [a for a in g.ACTIONS if a.startswith("declined")],
         "confirm_prompts": prompts,
         "actions": list(g.ACTIONS),  # what [Harness says] would report, to check the answer against
