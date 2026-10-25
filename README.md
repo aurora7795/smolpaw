@@ -149,8 +149,9 @@ The confirmation rules are the same as in the terminal; only where you answer ch
 
 | Action | Behaviour |
 |---|---|
-| HTTP GET | Runs freely. |
-| Other HTTP methods | Ask `[y/N]` first. |
+| HTTP GET | Runs freely (after pre-flight query check). |
+| Other HTTP methods | Ask `[y/N]` first (after pre-flight validation). |
+| HTTP pre-flight validation | Empty required query parameters (`term=`, `query=`, `q=`) and empty `POST`/`PUT`/`PATCH` bodies (except action triggers) return `ERROR:` before any confirmation prompt or network call. |
 | Read-only shell commands on `workspace/` or `skills/` (`ls`, `cat`, `head`, `grep`, `find`, `wc`, `stat`, `file`) | Run freely. |
 | Any other shell command, pipes, redirects, `find -exec/-delete` | Ask first. |
 | Reading outside `workspace/` and `skills/` | Ask first. |
@@ -165,7 +166,7 @@ The model is told never to ask for a password, token or API key directly — a s
 
 ## Tools
 
-`run_shell`, `http_request`, `fetch_page` (fetch a web page and return text trimmed to match a query), `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`, `remember` (save a fact to long-term memory with user approval), `recall` (search long-term memory for previously remembered facts). `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. `fetch_page` trims large web pages to excerpts matching a query with surrounding context, so long pages do not flood memory. `remember` and `recall` provide on-demand memory without inlining stored facts into the prompt: facts stay in `memory.md` until the model asks for them. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
+`run_shell`, `http_request`, `fetch_page` (fetch a web page and return text trimmed to match a query), `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`, `remember` (save a fact to long-term memory with user approval), `recall` (search long-term memory for previously remembered facts). `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. `fetch_page` trims large web pages to excerpts matching a query with surrounding context, so long pages do not flood memory. `remember` and `recall` provide on-demand memory without inlining stored facts into the prompt: facts stay in `memory.md` until the model asks for them. Pre-flight validation in `http_request` catches empty required query parameters (`term`, `query`, `q`) and empty-body writes before sending. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
 
 ## Tests
 

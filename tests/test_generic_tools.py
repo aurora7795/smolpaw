@@ -227,6 +227,72 @@ check("POST asks and is declined", g.http_request("POST", "http://127.0.0.1:9/x"
 check("bad JSON body rejected", g.http_request("POST", "http://127.0.0.1:9/x", "{bad").startswith("ERROR"))
 check("GET failure reports error without asking", g.http_request("GET", "http://127.0.0.1:9/x").startswith("ERROR") and not asked())
 
+# pre-flight validation on writes and required queries (#31)
+net_called = [False]
+
+
+def _fail_network(*a, **k):
+    net_called[0] = True
+    raise AssertionError("Network call was made during preflight validation")
+
+
+saved_req = g.requests.request
+g.requests.request = _fail_network
+
+empty_post_res = g.http_request("POST", "http://127.0.0.1:9/x", "")
+check("empty-body POST returns ERROR without asking and makes no network call",
+      empty_post_res.startswith("ERROR") and "requires a request body" in empty_post_res
+      and not asked() and not net_called[0])
+
+ws_post_res = g.http_request("POST", "http://127.0.0.1:9/x", "   ")
+check("whitespace-only-body POST returns ERROR without asking and makes no network call",
+      ws_post_res.startswith("ERROR") and "requires a request body" in ws_post_res
+      and not asked() and not net_called[0])
+
+term_res = g.http_request("GET", "http://127.0.0.1:9/api/v3/movie/lookup?term=")
+check("lookup?term= returns ERROR without asking and makes no network call",
+      term_res.startswith("ERROR") and "query parameter 'term' is empty" in term_res
+      and not asked() and not net_called[0])
+
+q_res = g.http_request("GET", "http://127.0.0.1:9/search?q=")
+check("search?q= returns ERROR without asking and makes no network call",
+      q_res.startswith("ERROR") and "query parameter 'q' is empty" in q_res
+      and not asked() and not net_called[0])
+
+query_res = g.http_request("GET", "http://127.0.0.1:9/search?query=")
+check("search?query= returns ERROR without asking and makes no network call",
+      query_res.startswith("ERROR") and "query parameter 'query' is empty" in query_res
+      and not asked() and not net_called[0])
+
+check("empty body PUT returns ERROR without asking",
+      g.http_request("PUT", "http://127.0.0.1:9/x", "").startswith("ERROR")
+      and not asked() and not net_called[0])
+
+check("empty body PATCH returns ERROR without asking",
+      g.http_request("PATCH", "http://127.0.0.1:9/x", "").startswith("ERROR")
+      and not asked() and not net_called[0])
+
+g.requests.request = saved_req
+
+check("DELETE with no body is unaffected", g.http_request("DELETE", "http://127.0.0.1:9/x", "") == g.DECLINED and asked())
+check("?term=matrix is unaffected", "query parameter" not in g.http_request("GET", "http://127.0.0.1:9/api/v3/movie/lookup?term=matrix") and not asked())
+check("URL with no query string is unaffected", "query parameter" not in g.http_request("GET", "http://127.0.0.1:9/api/v3/movie") and not asked())
+check("action endpoint with empty body asks and is declined", g.http_request("POST", "http://127.0.0.1:9/api/v3/system/restart", "") == g.DECLINED and asked())
+check("/command needs a JSON body, so an empty POST is rejected",
+      g.http_request("POST", "http://127.0.0.1:9/api/v3/command", "").startswith("ERROR") and not asked())
+
+saved_notes = g.NOTES.read_text() if g.NOTES.exists() else ""
+g.NOTES.write_text("- svc: http://x:7878 | key_env=SMOLPAW_TEST_PREFLIGHT_KEY\n")
+os.environ["SMOLPAW_TEST_PREFLIGHT_KEY"] = "preflight-test-key-abcdef"
+preflight_redacted = g.http_request("POST", "http://x:7878/api?k=preflight-test-key-abcdef", "")
+check("preflight error redacts secrets in URL",
+      "preflight-test-key-abcdef" not in preflight_redacted and "[REDACTED]" in preflight_redacted)
+del os.environ["SMOLPAW_TEST_PREFLIGHT_KEY"]
+if saved_notes:
+    g.NOTES.write_text(saved_notes)
+else:
+    g.NOTES.unlink(missing_ok=True)
+
 # openapi_search (spec served from a fake requests.get)
 class _Resp:
     def json(self):
