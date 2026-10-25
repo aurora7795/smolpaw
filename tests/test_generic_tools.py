@@ -1117,6 +1117,9 @@ class _StubAgent:
         raise AgentError("Agent interrupted.", type("L", (), {"log_error": lambda *a: None})())
 
 
+# run_request starts a run log: keep it out of the real logs/ (and the page's Recent runs list)
+saved_log_dir, saved_log_file = g.LOG_DIR, g._log_file
+g.LOG_DIR = tmp / "stub-run-logs"
 resp, _ = run_request(_StubAgent("the same call failed 3 times in a row"), "m", "generic", "task")
 check("a stall is reported as the answer, with the last tool result",
       resp.startswith("STOPPED EARLY: the same call failed 3 times in a row")
@@ -1126,6 +1129,7 @@ try:
     check("a non-stall interrupt (Stop button) is not swallowed", False)
 except AgentError:
     check("a non-stall interrupt (Stop button) is not swallowed", True)
+g.LOG_DIR, g._log_file = saved_log_dir, saved_log_file
 
 # the prompt start must not change between calls, or the runtime re-reads all of it (#29)
 _first_call = g.build_instructions()
