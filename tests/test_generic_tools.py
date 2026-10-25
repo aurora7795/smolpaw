@@ -179,16 +179,13 @@ check("recall does not ask for confirmation", not asked())
 # memory is NOT inlined into prompt (prompt overhead is 0)
 check("memory is not inlined into prompt", "dark mode" not in g.build_instructions())
 
-# token budget check: tool schemas for remember and recall under 160 tokens
-rem_schema_len = len(json.dumps({
-    "name": g.remember.name, "description": g.remember.description,
-    "parameters": {"properties": {k: v["description"] for k, v in g.remember.inputs.items()}}
-}))
-rec_schema_len = len(json.dumps({
-    "name": g.recall.name, "description": g.recall.description,
-    "parameters": {"properties": {k: v["description"] for k, v in g.recall.inputs.items()}}
-}))
-check("remember and recall schema fits token budget (< 160 tokens)", (rem_schema_len + rec_schema_len) < 640)
+# Real token cost of the combined remember+recall schema, measured against the actual JSON
+# smolagents sends (get_tool_json_schema), not the hand-reconstructed dict this test used to check
+# (485 chars, missing "type": "object"/"required"/"nullable" -- about a third smaller than real).
+# Checked against two tokenizers (Ollama /api/generate, raw prompt, no chat template): 179 tokens
+# on Qwen 3.5 9B, 182 on Gemma 4 E4B. Both exceed #27's own 100-150 token budget and the "~147
+# tokens" this test originally claimed. See CHANGELOG.md. No tokenizer is available to this test
+# file, so there is no assertion here -- a char-count proxy already said something untrue once.
 
 # logging of remember and recall
 mem_log_file = tmp / "mem-log.jsonl"
