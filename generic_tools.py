@@ -139,6 +139,9 @@ def redact_pasted_secrets(text: str) -> str:
         lambda m: "[REDACTED: looks like a credential]" if _looks_like_a_token(m.group(0)) else m.group(0), text)
 
 
+LOG_OUT = 500  # chars of shell output kept in the run log, so a run can be audited afterwards
+
+
 def _clip(text: str) -> str:
     return text if len(text) <= MAX_OUT else text[:MAX_OUT] + f"\n... [truncated, {len(text)} chars total]"
 
@@ -188,7 +191,7 @@ def _approved(desc: str) -> bool:
 # --- paths ------------------------------------------------------------------------
 
 def _resolve(path: str) -> Path:
-    return (WORKSPACE / path).resolve()
+    return (WORKSPACE / os.path.expanduser(path)).resolve()
 
 
 def _in_scope(path: str) -> bool:
@@ -218,7 +221,8 @@ def _read_only_argv(cmd: str) -> list[str] | None:
         return None
     if any(_is_secret_file(_resolve(a)) for a in argv[1:] if not a.startswith("-")):
         return None
-    return argv
+    # Expand ~ ourselves: argv runs without a shell, so a literal "~" would otherwise reach the command.
+    return argv[:1] + [os.path.expanduser(a) for a in argv[1:]]
 
 
 WINDOWS = platform.system() == "Windows"
@@ -281,7 +285,7 @@ def run_shell(command: str) -> str:
     if not argv:
         ACTIONS.append(f"shell exit {r.returncode}: {command}")
     out = f"exit code {r.returncode}\n{r.stdout}{('[stderr] ' + r.stderr) if r.stderr else ''}"
-    _log("shell", command=command, read_only=bool(argv), exit=r.returncode)
+    _log("shell", command=command, read_only=bool(argv), exit=r.returncode, output=out[:LOG_OUT])
     return _clip(_redact(out))
 
 
@@ -1061,7 +1065,7 @@ def build_instructions() -> str:
     for f in sorted(SKILLS.glob("*.md")) if SKILLS.exists() else []:
         text = f.read_text()
         (inline if len(text) <= INLINE_SKILL_MAX else listed).append((f.stem, text))
-    parts = [GUIDANCE, f"--- notes.md ---\n{notes}"]
+    parts = [GUIDANCE, f"Home folder: {Path.home()}. Shell commands start in workspace/.", f"--- notes.md ---\n{notes}"]
     parts += [f"--- skill: {name} ---\n{text}" for name, text in inline]
     if listed:
         parts.append("Longer skills (read with read_skill): " + ", ".join(name for name, _ in listed))

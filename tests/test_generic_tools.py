@@ -60,6 +60,16 @@ check("rm asks and is declined", g.run_shell("rm a.txt") == g.DECLINED and asked
 check("rm did not run", (g.WORKSPACE / "a.txt").exists())
 check("cat outside scope asks", g.run_shell("cat /etc/hosts") == g.DECLINED and asked())
 check("path traversal asks", g.run_shell("cat ../../etc/hosts") == g.DECLINED and asked())
+check("~ path outside workspace asks (not treated as a workspace/~ folder)", g.run_shell("ls ~/Downloads") == g.DECLINED and asked())
+check("~ is expanded for scope checks", g._resolve("~") == Path.home().resolve())
+check("~ alone is outside scope, so not free", g._read_only_argv("ls ~") is None)
+check("home folder hint is in the prompt", str(Path.home()) in g.build_instructions())
+shell_log = tmp / "shell-log.jsonl"
+saved_shell_log, g._log_file = g._log_file, shell_log
+g.run_shell("cat a.txt")
+shell_entry = [json.loads(line) for line in shell_log.read_text().splitlines() if json.loads(line).get("kind") == "shell"][-1]
+g._log_file = saved_shell_log
+check("shell log records clipped output", "exit code 0" in shell_entry["output"] and len(shell_entry["output"]) <= g.LOG_OUT)
 check("pipe asks", g.run_shell("cat a.txt | wc -c") == g.DECLINED and asked())
 check("redirect asks", g.run_shell("cat a.txt > b.txt") == g.DECLINED and asked())
 check("command substitution asks", g.run_shell("cat $(echo a.txt)") == g.DECLINED and asked())
