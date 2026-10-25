@@ -33,6 +33,7 @@ ROOT = Path(__file__).parent
 WORKSPACE = ROOT / "workspace"
 SKILLS = ROOT / "skills"
 NOTES = ROOT / "notes.md"
+MEMORY = ROOT / "memory.md"
 LOG_DIR = ROOT / "logs"
 
 READ_ONLY_CMDS = {"ls", "cat", "head", "grep", "find", "wc", "stat", "file"}
@@ -712,9 +713,96 @@ def write_skill(name: str, text: str) -> str:
     return f"SUCCESS: saved skill '{p.stem}'."
 
 
+# --- memory -----------------------------------------------------------------------
+
+@tool
+def remember(fact: str) -> str:
+    """Save a fact or user preference to long-term memory. Asks the user first. Never save secrets.
+
+    Args:
+        fact: Fact to remember, e.g. "User prefers dark mode" or "Movie files go to /Volumes/Media".
+    """
+    fact = fact.strip()
+    if not fact:
+        return "ERROR: fact cannot be empty."
+    clean_fact = redact_pasted_secrets(_redact(fact))
+    if not _approved(f"Remember fact in memory:\n  {clean_fact}"):
+        return DECLINED
+    entry = clean_fact if clean_fact.startswith("- ") else f"- {clean_fact}"
+    try:
+        if MEMORY.exists():
+            text = MEMORY.read_text()
+            if text and not text.endswith("\n"):
+                text += "\n"
+            text += entry + "\n"
+        else:
+            text = f"# Memory\n\n{entry}\n"
+        MEMORY.parent.mkdir(parents=True, exist_ok=True)
+        MEMORY.write_text(text)
+    except OSError as exc:
+        ACTIONS.append(f"remember failed: {clean_fact}")
+        return f"ERROR: could not save memory ({exc})"
+    ACTIONS.append(f"remembered: {clean_fact}")
+    _log("remember", fact=clean_fact)
+    return f"SUCCESS: remembered: {clean_fact}"
+
+
+@tool
+@_remember
+def recall(query: str = "") -> str:
+    """Search long-term memory for previously remembered facts or preferences.
+
+    Args:
+        query: Word or phrase to search for. If empty, lists all remembered facts.
+    """
+    if not MEMORY.exists():
+        _log("recall", query=query, hits=0, result="no memory file")
+        return "No memories saved yet."
+    try:
+        raw = MEMORY.read_text().strip()
+    except OSError as exc:
+        _log("recall", query=query, hits=0, result=f"error ({type(exc).__name__})")
+        return f"ERROR: {exc}"
+    if not raw:
+        _log("recall", query=query, hits=0, result="empty memory file")
+        return "No memories saved yet."
+
+    lines = [line.strip() for line in raw.splitlines() if line.strip() and not line.startswith("#")]
+    if not lines:
+        _log("recall", query=query, hits=0, result="no facts")
+        return "No memories saved yet."
+
+    query = query.strip()
+    if not query:
+        _log("recall", query="", hits=len(lines), result=f"{len(lines)} facts")
+        return _clip(_redact("\n".join(lines)))
+
+    q_lower = query.lower()
+    q_words = [w for w in re.findall(r"\w+", q_lower) if len(w) > 1]
+
+    def line_matches(l: str) -> bool:
+        low = l.lower()
+        if q_lower in low:
+            return True
+        if len(q_words) > 1 and all(w in low for w in q_words):
+            return True
+        return False
+
+    hits = [line for line in lines if line_matches(line)]
+    if not hits and len(q_words) > 1:
+        hits = [line for line in lines if any(w in line.lower() for w in q_words)]
+
+    if not hits:
+        _log("recall", query=query, hits=0, result="no match")
+        return f"No memories matching {query!r}."
+
+    _log("recall", query=query, hits=len(hits), result=f"{len(hits)} hits")
+    return _clip(_redact("\n".join(hits)))
+
+
 GENERIC_TOOLS = [
     run_shell, http_request, fetch_page, openapi_search, read_file, write_file, ask_user,
-    list_skills, read_skill, write_skill,
+    list_skills, read_skill, write_skill, remember, recall,
 ]
 
 GUIDANCE = """\
