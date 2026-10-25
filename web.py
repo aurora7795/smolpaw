@@ -16,6 +16,7 @@ import secrets
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import generic_tools as g
@@ -161,6 +162,34 @@ def feed() -> list[str]:
     return lines
 
 
+def _files_payload() -> dict:
+    """Read-only view of notes.md, skills/*.md and memory.md, secret-redacted and clipped."""
+    def read_safe(p: Path) -> str:
+        try:
+            if p.exists() and p.is_file():
+                return g._clip(g._redact(p.read_text()))
+        except OSError:
+            pass
+        return ""
+
+    skills = []
+    try:
+        if g.SKILLS.exists() and g.SKILLS.is_dir():
+            for f in sorted(g.SKILLS.glob("*.md")):
+                if f.is_file():
+                    try:
+                        skills.append({"name": f.stem, "text": g._clip(g._redact(f.read_text()))})
+                    except OSError:
+                        continue
+    except OSError:
+        pass
+    return {
+        "notes": read_safe(g.NOTES),
+        "skills": skills,
+        "memory": read_safe(g.MEMORY),
+    }
+
+
 def make_handler(token: str, approvals: Approvals, session: Session | None, info: dict):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args) -> None:
@@ -198,6 +227,8 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
                     "outcome": s.outcome if s else "", "error": s.error if s else "",
                     "pending": approvals.pending, "feed": feed()})
+            if path == "/api/files":
+                return self._send(200, _files_payload())
             return self._send(404, {"error": "not found"})
 
         def do_POST(self) -> None:
@@ -303,6 +334,10 @@ button:disabled { opacity:.45; }
 .copybtn { font:12px inherit; font-weight:600; padding:4px 10px; border-radius:6px; border:1px solid var(--line);
            background:transparent; color:var(--muted); }
 .feed pre { font-size:12px; color:var(--muted); }
+summary { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; cursor:pointer; }
+summary:focus { outline:none; }
+.filesec { margin-top:12px; }
+.filesec h3 { font-size:12px; font-weight:600; color:var(--muted); margin:8px 0 2px; }
 [hidden] { display:none !important; }
 </style></head><body><main>
 <h1>SmolPaw</h1><div class="meta" id="meta">connecting...</div>
@@ -315,6 +350,15 @@ button:disabled { opacity:.45; }
   <div class="meta" id="working" hidden></div></div>
 <div class="card" id="result" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
   <pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
+<details class="card" id="filescard"><summary>Files</summary>
+  <div class="filesec">
+    <h2>Notes (notes.md)</h2>
+    <pre id="fnotes">(empty)</pre>
+    <h2 style="margin-top:12px">Skills (skills/)</h2>
+    <div id="fskills"><pre>(none)</pre></div>
+    <h2 style="margin-top:12px">Memory (memory.md)</h2>
+    <pre id="fmemory">(empty)</pre>
+  </div></details>
 <div class="card feed"><h2>Activity</h2><pre id="feed">(nothing yet)</pre></div>
 </main><script>
 const token = new URLSearchParams(location.search).get("t") || "";
@@ -356,6 +400,30 @@ $("copy").onclick = async () => {
     flash("Copied!");
   } catch (e) { flash("Copy failed"); }
 };
+async function loadFiles() {
+  try {
+    const data = await api("/api/files");
+    $("fnotes").textContent = data.notes || "(empty)";
+    $("fmemory").textContent = data.memory || "(empty)";
+    const skillsDiv = $("fskills");
+    while (skillsDiv.firstChild) skillsDiv.removeChild(skillsDiv.firstChild);
+    if (!data.skills || !data.skills.length) {
+      const p = document.createElement("pre");
+      p.textContent = "(none)";
+      skillsDiv.appendChild(p);
+    } else {
+      for (const s of data.skills) {
+        const title = document.createElement("h3");
+        title.textContent = s.name;
+        const pre = document.createElement("pre");
+        pre.textContent = s.text || "(empty)";
+        skillsDiv.appendChild(title);
+        skillsDiv.appendChild(pre);
+      }
+    }
+  } catch (e) {}
+}
+$("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
 async function refresh() {
   let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach SmolPaw"; return; }
   $("meta").textContent = [s.mode, s.backend, s.model, s.status, s.progress].filter(Boolean).join(" · ");
@@ -378,6 +446,7 @@ async function refresh() {
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
   $("outcome").textContent = s.outcome || "";
   $("feed").textContent = (s.feed || []).join("\\n") || "(nothing yet)";
+  if ($("filescard").open) loadFiles();
 }
 refresh(); setInterval(refresh, 1500);
 </script></body></html>

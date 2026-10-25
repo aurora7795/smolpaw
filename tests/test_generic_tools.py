@@ -852,6 +852,76 @@ p = wait_pending(appr)
 http.post(f"{base}/api/answer", json={"id": p["id"], "value": False}, headers=hdr, timeout=5)
 job["thread"].join(5)
 check("web decline is recorded by the harness", job.get("value") is False and g.ACTIONS[-1].startswith("declined"))
+
+# read-only files endpoint (#38)
+saved_notes, saved_skills, saved_memory = g.NOTES, g.SKILLS, g.MEMORY
+
+# 1. returns contents of temp files
+test_notes = tmp / "files-view-notes.md"
+test_notes.write_text("- svc: http://example.com\nUser prefers dark mode\n")
+test_skills = tmp / "files-view-skills"
+test_skills.mkdir(exist_ok=True)
+(test_skills / "radarr.md").write_text("# Radarr\nskill text here\n")
+(test_skills / "sonarr.md").write_text("# Sonarr\nsonarr skill text\n")
+test_mem = tmp / "files-view-memory.md"
+test_mem.write_text("# Memory\n- fact 1\n- fact 2\n")
+
+g.NOTES = test_notes
+g.SKILLS = test_skills
+g.MEMORY = test_mem
+
+res_files = http.get(f"{base}/api/files", headers=hdr, timeout=5)
+check("/api/files returns 200 with valid token", res_files.status_code == 200)
+files_data = res_files.json()
+check("with temp files, endpoint returns their contents",
+      files_data["notes"] == test_notes.read_text()
+      and len(files_data["skills"]) == 2
+      and files_data["skills"][0] == {"name": "radarr", "text": (test_skills / "radarr.md").read_text()}
+      and files_data["skills"][1] == {"name": "sonarr", "text": (test_skills / "sonarr.md").read_text()}
+      and files_data["memory"] == test_mem.read_text())
+
+# 2. wrong or missing token gets 403
+check("/api/files refuses a missing token with 403",
+      http.get(f"{base}/api/files", timeout=5).status_code == 403)
+check("/api/files refuses a wrong token with 403",
+      http.get(f"{base}/api/files", headers={"X-Token": "wrong"}, timeout=5).status_code == 403)
+
+# 3. missing files give empty values, not a 500
+g.NOTES = tmp / "missing-notes.md"
+g.SKILLS = tmp / "missing-skills"
+g.MEMORY = tmp / "missing-memory.md"
+res_missing = http.get(f"{base}/api/files", headers=hdr, timeout=5)
+check("missing files return 200 not 500", res_missing.status_code == 200)
+check("missing files return empty strings and empty list",
+      res_missing.json() == {"notes": "", "skills": [], "memory": ""})
+
+# 4. secret value from key_env comes back [REDACTED]
+sec_notes = tmp / "sec-notes.md"
+sec_notes.write_text("- radarr: http://example.com:7878 | key_env=TEST_FILES_KEY\nSecret is private-key-xyz123\n")
+os.environ["TEST_FILES_KEY"] = "private-key-xyz123"
+g.NOTES = sec_notes
+sec_res = http.get(f"{base}/api/files", headers=hdr, timeout=5).json()
+check("secret value from key_env in notes comes back as [REDACTED]",
+      "private-key-xyz123" not in json.dumps(sec_res) and "[REDACTED]" in sec_res["notes"])
+del os.environ["TEST_FILES_KEY"]
+
+# 5. query string (?path=../.env, ?name=../x) returns exactly the same fixed things
+g.NOTES = test_notes
+g.SKILLS = test_skills
+g.MEMORY = test_mem
+baseline = http.get(f"{base}/api/files", headers=hdr, timeout=5).json()
+q_path = http.get(f"{base}/api/files?path=../.env", headers=hdr, timeout=5).json()
+q_name = http.get(f"{base}/api/files?name=../x", headers=hdr, timeout=5).json()
+check("query string like ?path=../.env returns exactly the fixed files",
+      q_path == baseline and q_name == baseline)
+
+# 6. POST to /api/files returns 404
+check("POST to /api/files returns 404",
+      http.post(f"{base}/api/files", json={}, headers=hdr, timeout=5).status_code == 404)
+check("web page contains filescard", 'id="filescard"' in http.get(f"{base}/?t={token}", timeout=5).text)
+
+g.NOTES, g.SKILLS, g.MEMORY = saved_notes, saved_skills, saved_memory
+
 g.CONFIRM = fake_confirm
 srv.shutdown()
 
