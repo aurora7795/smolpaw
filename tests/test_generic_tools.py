@@ -865,6 +865,24 @@ else:
     os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
     g._configure_search_provider()
 
+# An invalid provider in the environment warns and falls back to ddgs at import (does not crash)
+import subprocess as _sp
+_r = _sp.run([sys.executable, "-c", "import generic_tools as g; print(g.web_search in g.GENERIC_TOOLS)"],
+             cwd=str(Path(__file__).parent.parent), capture_output=True, text=True,
+             env={**os.environ, "SMOLPAW_SEARCH_PROVIDER": "typo_engine"})
+check("invalid SMOLPAW_SEARCH_PROVIDER at import warns and keeps web_search on ddgs",
+      _r.returncode == 0 and "WARNING" in _r.stderr and "typo_engine" in _r.stderr and _r.stdout.strip() == "True")
+
+# The per-request search cap resets through ACTIONS.clear(), which agent.run_request must call
+check("agent.run_request clears ACTIONS (this resets the web_search cap)",
+      "generic_tools.ACTIONS.clear()" in (Path(__file__).parent.parent / "agent.py").read_text())
+
+# Long snippets are clipped
+g.SEARCH_PROVIDERS["long_fake"] = lambda q, n: [{"title": "T", "url": "https://e.com", "snippet": "word " * 500}]
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "long_fake"
+g.ACTIONS.clear()
+check("web_search clips each snippet to 300 characters", len(g.web_search("long").splitlines()[2].strip()) <= 300)
+
 # 5. 3-searches-per-request cap and its reset
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake"
 g.ACTIONS.clear()

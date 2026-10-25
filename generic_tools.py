@@ -17,6 +17,7 @@ import platform
 import re
 import shlex
 import subprocess
+import sys
 import warnings
 from datetime import datetime
 from html.parser import HTMLParser
@@ -62,7 +63,7 @@ def _ask_user(question: str) -> str:
 
 ASK = _ask_user
 
-_SEARCH_COUNT = 0
+_SEARCH_COUNT = 0  # reset by ACTIONS.clear(), which agent.py's run_request() calls at the start of every request
 MAX_SEARCHES = 3
 
 
@@ -734,7 +735,7 @@ def web_search(query: str) -> str:
     for i, item in enumerate(results, 1):
         title = str(item.get("title", "")).strip()
         url = str(item.get("url", "")).strip()
-        snippet = " ".join(str(item.get("snippet", "")).split())
+        snippet = " ".join(str(item.get("snippet", "")).split())[:300]
         formatted.append(f"{i}. {title}\n   {url}\n   {snippet}")
 
     out = "\n\n".join(formatted)
@@ -1032,7 +1033,11 @@ GENERIC_TOOLS = [
     run_shell, http_request, fetch_page, openapi_search, read_file, write_file, ask_user,
     list_skills, read_skill, write_skill, remember, recall,
 ]
-_configure_search_provider()
+try:
+    _configure_search_provider()
+except ValueError as _exc:
+    print(f"WARNING: {_exc} Falling back to ddgs.", file=sys.stderr)
+    _configure_search_provider("ddgs")
 
 GUIDANCE = """\
 You are SmolPaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.

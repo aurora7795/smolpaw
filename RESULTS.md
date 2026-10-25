@@ -347,3 +347,14 @@ An earlier summary in this project overstated the Radarr wrapper-tool results ("
 The first write-up of the Ollama spike called Ollama's default `qwen3.5:9b` and `gemma4:e4b` tags GGUF builds. On this Mac they are MLX builds (`nvfp4`), so the spike compared two MLX runtimes with different quantisations, not MLX against GGUF. The registry serves a GGUF-style manifest to a plain HTTP request for the same tags, so check `ollama show <tag>` (format and runner) after pulling rather than trusting the tag name.
 
 The same write-up said Ollama chose a 32K context from available memory on this Mac. The 32K came from the Ollama app's own Context length setting, which the app passes to its server and which overrides `OLLAMA_CONTEXT_LENGTH` set through `launchctl`.
+
+## Cost of the `web_search` tool schema (#24)
+
+`tests/tool_schema_tokens.py` sends the tool's JSON schema as smolagents renders it to Ollama's `/api/generate` (`raw: true`, one output token) and subtracts the count for an empty prompt. One run per model, read-only:
+
+| Model | Schema tokens |
+|---|---|
+| Qwen 3.5 9B | 91 |
+| Gemma 4 E4B | 92 |
+
+This is the schema alone. The whole first-call prompt with `web_search` enabled was not re-measured, and no task using search was run, so reliability of the default `ddgs` backend is unmeasured ([#44](https://github.com/aurora7795/smolpaw/issues/44)). A live `ddgs` 9.16.1 search returned results, and its exception classes match those `generic_tools.py` imports.

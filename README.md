@@ -157,7 +157,7 @@ The confirmation rules are the same as in the terminal; only where you answer ch
 | Reading outside `workspace/` and `skills/` | Ask first. |
 | Writing any file or skill | Ask first, showing the text. |
 | `.env` files | Never readable or writable by the file tools. |
-| Web search (`web_search`) | Runs freely (read-only). Search results are untrusted web text and may contain prompt injections or instructions aimed at the model; the confirmation layer protects against acting on them. |
+| Web search (`web_search`) | Runs freely (read-only). Search queries leave your machine (to DuckDuckGo, or to your SearXNG instance) and need no approval, so the model could put text from your files into a query; set `SMOLPAW_SEARCH_PROVIDER=none` if that matters to you. Search results are untrusted web text and may contain prompt injections or instructions aimed at the model; the confirmation layer protects against acting on them. |
 | An `ask_user` answer that looks like a credential (a GitHub/AWS/OpenAI/Slack token, a JWT, or any other long opaque token) | Redacted before it reaches the model, the log, or anything the model repeats back. |
 | Declined action | The model is told and may try another way. |
 
@@ -171,7 +171,7 @@ The model is told never to ask for a password, token or API key directly — a s
 
 ### Web search
 
-`web_search(query)` works out of the box with no configuration beyond `./setup.sh`. The default backend uses the `ddgs` package to query DuckDuckGo without requiring an API key or external service. Because `ddgs` is an unofficial scraper, DuckDuckGo searches can be patchy, rate-limited, or encounter timeouts; clear error messages instruct the model not to retry the same failed query. Searches are capped at 3 calls per request to avoid runaway loops.
+`web_search(query)` works out of the box with no configuration beyond `./setup.sh`. The default backend uses the `ddgs` package to query DuckDuckGo without requiring an API key or external service. Because `ddgs` is an unofficial scraper, DuckDuckGo searches can be patchy, rate-limited, or encounter timeouts; clear error messages instruct the model not to retry the same failed query. Searches are capped at 3 calls per request to avoid runaway loops; failed searches count towards the cap. An invalid `SMOLPAW_SEARCH_PROVIDER` prints a warning and falls back to `ddgs`.
 
 Search provider selection is controlled by `SMOLPAW_SEARCH_PROVIDER` in `.env`:
 - Unset or `ddgs` (default): uses DuckDuckGo via the `ddgs` package.
