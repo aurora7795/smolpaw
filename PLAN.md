@@ -148,6 +148,8 @@ Tracked as GitHub issues:
 17. The roadmap phases 1 to 3 (see Roadmap above): [#19](https://github.com/aurora7795/smolpaw/issues/19) to [#29](https://github.com/aurora7795/smolpaw/issues/29).
 18. Web UI review (web.py): done: a settings card for backend, model, step limit and prompt timeout ([#37](https://github.com/aurora7795/smolpaw/issues/37); loading models, the loaded context and the Radarr toolset are not covered); done: a read-only view of `notes.md`, skills and `memory.md` ([#38](https://github.com/aurora7795/smolpaw/issues/38)); done: file and skill tool logging, past runs list, run summaries with token totals ([#39](https://github.com/aurora7795/smolpaw/issues/39)), and recent-runs polish ([#43](https://github.com/aurora7795/smolpaw/issues/43)).
 
+19. Web search ([#24](https://github.com/aurora7795/smolpaw/issues/24)): a pluggable `web_search` tool, on by default with the `ddgs` package so users get search with no setup (it scrapes DuckDuckGo and may be patchy), SearXNG as an alternative. Revisit the default-on choice once its cost and reliability are measured: [#44](https://github.com/aurora7795/smolpaw/issues/44).
+
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
 ## Housekeeping
