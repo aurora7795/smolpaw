@@ -208,7 +208,11 @@ def _run_summary(path: Path | None) -> str | None:
         dur = "unfinished"
     tool_calls = sum(1 for e in entries if e.get("kind") in TOOL_KINDS)
     tool_str = f"{tool_calls} tool call" if tool_calls == 1 else f"{tool_calls} tool calls"
-    return g._redact(f"{start_t} · {model} · {dur} · {tool_str}")
+    final = next((e for e in entries if e.get("kind") == "final"), {})
+    tokens = ""
+    if isinstance(final.get("input_tokens"), int):
+        tokens = f" · {final['input_tokens']:,} in / {final.get('output_tokens', 0):,} out tokens"
+    return g._redact(f"{start_t} · {model} · {dur} · {tool_str}{tokens}")
 
 
 def _list_runs() -> list[dict]:
@@ -298,7 +302,7 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
                     "outcome": s.outcome if s else "", "error": s.error if s else "",
                     "pending": approvals.pending, "feed": feed(),
-                    "summary": curr_summary or ""})
+                    "summary": curr_summary or "", "run_id": g._log_file.name if g._log_file else ""})
             if path == "/api/files":
                 return self._send(200, _files_payload())
             if path == "/api/runs":
@@ -517,7 +521,7 @@ async function loadFiles() {
   } catch (e) {}
 }
 $("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
-let selectedRunId = null;
+let selectedRunId = null, lastRunId = null, runsKey = null;
 async function loadRuns() {
   try {
     const runs = await api("/api/runs");
@@ -572,13 +576,16 @@ async function refresh() {
   $("result").hidden = !done && !s.prompt;
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
   $("outcome").textContent = s.outcome || "";
+  if (lastRunId !== null && s.run_id !== lastRunId) selectedRunId = null;
+  lastRunId = s.run_id;
   if (!selectedRunId) {
     $("livebtn").hidden = true;
     $("actsummary").textContent = s.summary || "";
     $("feed").textContent = (s.feed || []).join("\\n") || "(nothing yet)";
   }
   if ($("filescard").open) loadFiles();
-  loadRuns();
+  const key = [s.run_id, s.status, s.summary].join("|");
+  if (key !== runsKey) { runsKey = key; loadRuns(); }
 }
 refresh(); setInterval(refresh, 1500);
 </script></body></html>
