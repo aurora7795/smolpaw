@@ -8,7 +8,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
 - OpenClaw's prompt is roughly 8x larger than SmolPaw's (about 24K tokens against about 3K on the first call). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against 5s to 13s for 3K, which is the efficiency gap this project is aiming at.
 - Discovery held up on harder variants of the invented API: 17 of 18 runs passed (hint, detail, paged).
-- Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time (#14).
+- Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time. A recheck with the actual error text shows the remaining rare errors are a different, generic issue (the model skipping a tool call, not copying history) (#14).
 - On Ollama the default MLX builds beat the GGUF ones on speed (Gemma reads prompts about twice as fast) with the same pass rates (#16). With native history at 32K, the earlier Ollama weakness on Tidepool `detail` is gone: 11 of 12 on each runtime (#15).
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
 - Converting web pages to text instead of returning raw HTML turned a 0 of 3 failure (both models, step-capped or giving up on the markup) into 3 of 3, in 2 to 4 steps instead of 7 to 13, and cut input tokens by 6x (Gemma) to 83x (Qwen, which otherwise burns the whole 32K context on one clipped HTML blob) (#23).
@@ -133,6 +133,20 @@ Ollama 0.40.7, default MLX `nvfp4` tags, the app's 32K context, `tests/eval.py` 
 - Steps and time were about the same overall. Gemma's slower native `easy` mean comes from one run that wandered for 9 steps (skills, a question) without any parse error; the other two took 3 steps.
 - Native history does not remove parse errors entirely (Gemma `paged`, Qwen `hint` and `paged` still had some), so #14 stays open. The one remaining native failure, Qwen on `detail`, hit the step cap while fetching vessels one by one, a step-budget problem rather than a format one.
 - Caveats: 3 runs per cell; 32K context rather than the 16K of the earlier Ollama section; same day, same Mac. The direction matches the LM Studio result above.
+
+### Rechecked with the actual error text (#14, 2026-10-25, 14 runs)
+
+`tests/eval.py` now records each parse error's text, not only a count. Rerun on Gemma 4 E4B, Ollama, native history, 32K: `detail` x6, `paged` x4, `hint` x4.
+
+| Variant | Passed | Parse errors |
+|---|---|---|
+| `detail` | 5/6 | 0 |
+| `paged` | 4/4 | 1 |
+| `hint` | 4/4 | 0 |
+
+13 of 14 passed; the one parse error's full text: `Error while parsing tool call from model output: The model output does not contain any JSON blob.` That is not the history-copying bug #14 was opened for (there is no `Calling tools:` text in native history for the model to copy); it is smolagents' ToolCallingAgent flagging a step where Gemma wrote prose instead of a tool call, which costs one retried step, not the run. The one failing `detail` run was a normal discovery miss (the model never found the working endpoint and said so), not a parsing error.
+
+So with native history, the original failure mode is gone in this sample; what is left is a smaller, different, generic issue (small models occasionally skip the tool call) that happens well under once in ten runs and self-corrects within the step budget. Not chasing further for now: the fix (a sturdier system prompt sentence, or re-prompting on a bare parse error) has a prompt or step cost, and the rate is low enough that it has not cost a run since native history landed.
 
 ## Tidepool `detail` rechecked at 32K with native history (#15, 6 runs per cell)
 
