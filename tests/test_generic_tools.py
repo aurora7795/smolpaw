@@ -1249,5 +1249,49 @@ check("a stale terminal answer after the web already answered does not flip the 
 
 sys.stdin = _saved_stdin
 
+# settings card (#37): backend, model, step limit and timeout change between requests
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    set_port = s.getsockname()[1]
+set_appr = web.Approvals(timeout=0)
+set_sess = web.Session(build_agent("m1", "tool", 5, "generic", "lmstudio"), "m1", set_appr, "lmstudio", 5)
+set_srv = web.serve("127.0.0.1", set_port, token, set_appr, set_sess, {"mode": "agent"})
+set_base = f"http://127.0.0.1:{set_port}"
+good = {"backend": "ollama", "model": "m2", "max_steps": 7, "timeout": 30}
+old_agent = set_sess.agent
+st = http.get(f"{set_base}/api/state", headers=hdr, timeout=5).json()
+check("state reports the current settings",
+      st["backend"] == "lmstudio" and st["model"] == "m1" and st["max_steps"] == 5 and "ollama" in st["backends"])
+check("settings need the token", http.post(f"{set_base}/api/settings", json=good, timeout=5).status_code == 403)
+for label, bad_body in [("unknown backend", {**good, "backend": "x"}), ("empty model", {**good, "model": " "}),
+                        ("zero steps", {**good, "max_steps": 0}), ("string steps", {**good, "max_steps": "7"}),
+                        ("negative timeout", {**good, "timeout": -1})]:
+    r = http.post(f"{set_base}/api/settings", json=bad_body, headers=hdr, timeout=5)
+    check(f"settings refuse {label}", r.status_code == 400 and set_sess.model == "m1")
+set_sess.status = "running"
+r = http.post(f"{set_base}/api/settings", json=good, headers=hdr, timeout=5)
+check("settings are refused while a request runs", r.status_code == 409 and set_sess.agent is old_agent)
+set_sess.status = "idle"
+r = http.post(f"{set_base}/api/settings", json=good, headers=hdr, timeout=5)
+check("settings rebuild the agent between requests",
+      r.status_code == 200 and set_sess.agent is not old_agent and set_sess.backend == "ollama"
+      and set_sess.model == "m2" and set_sess.max_steps == 7 and set_appr.timeout == 30
+      and set_sess.agent.max_steps == 7 and set_sess.agent.model.model_id == "m2")
+kept = set_sess.agent
+http.post(f"{set_base}/api/settings", json={**good, "timeout": 5}, headers=hdr, timeout=5)
+check("a timeout-only change keeps the agent", set_sess.agent is kept and set_appr.timeout == 5)
+check("models endpoint refuses an unknown backend",
+      http.get(f"{set_base}/api/models?backend=x", headers=hdr, timeout=5).status_code == 404)
+saved_list_models = web.list_models
+web.list_models = lambda backend: ["b-model", "a-model"]
+check("models endpoint returns the server's list",
+      http.get(f"{set_base}/api/models?backend=ollama", headers=hdr, timeout=5).json() == ["b-model", "a-model"])
+web.list_models = saved_list_models
+saved_url = web.BACKENDS["ollama"]["url"]
+web.BACKENDS["ollama"]["url"] = "http://127.0.0.1:1/v1"
+check("an unreachable model server gives an empty list", web.list_models("ollama") == [])
+web.BACKENDS["ollama"]["url"] = saved_url
+set_srv.shutdown()
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

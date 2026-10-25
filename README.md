@@ -132,14 +132,14 @@ Ollama cuts prompts that exceed the loaded context with no error to the client (
 # SmolPaw web [ollama: qwen3.5:9b] at http://<this-machine>:8770/?t=<token>
 ```
 
-Open the printed URL. The page has a box for requests, a card with **Yes / No** (or a reply box) when the agent is waiting on you, the answer with the `[Harness says]` lines, a collapsible **Files** card showing `notes.md`, saved skills and `memory.md` (read-only and secret-redacted), an activity feed with a live run summary, a **Recent runs** card listing past runs and their summaries (start time, model, seconds, tool calls, and input/output tokens for runs from the terminal agent; clicking one shows its feed lines until the next run starts), and a Stop button. One request runs at a time. While a request is running, the page shows a small rotating "Pawing... (12s)"-style line so you can tell it is still working and how long it has taken. The Answer card has a Copy button for the agent's answer text.
+Open the printed URL. The page has a box for requests, a card with **Yes / No** (or a reply box) when the agent is waiting on you, the answer with the `[Harness says]` lines, a collapsible **Settings** card (backend, model, step limit and prompt timeout; the model box suggests the ids the backend's server lists, and a change rebuilds the agent between requests, never during one), a collapsible **Files** card showing `notes.md`, saved skills and `memory.md` (read-only and secret-redacted), an activity feed with a live run summary, a **Recent runs** card listing past runs and their summaries (start time, model, seconds, tool calls, and input/output tokens for runs from the terminal agent; clicking one shows its feed lines until the next run starts), and a Stop button. One request runs at a time. While a request is running, the page shows a small rotating "Pawing... (12s)"-style line so you can tell it is still working and how long it has taken. The Answer card has a Copy button for the agent's answer text.
 
 | Flag | Default | Notes |
 |---|---|---|
 | `--backend`, `--model`, `--max-steps` | as for `agent.py` | Generic toolset only |
 | `--host` | `127.0.0.1` | `0.0.0.0` to reach it from other devices |
 | `--port` | 8770 | |
-| `--timeout` | 0 (wait forever) | Seconds before an unanswered prompt counts as no |
+| `--timeout` | 0 (wait forever) | Seconds before an unanswered prompt counts as no. These flags set the starting values; the Settings card changes them without a restart |
 
 The confirmation rules are the same as in the terminal; only where you answer changes. Every request must carry the access token (random per start, or fixed with `SMOLPAW_WEB_TOKEN` in `.env` so a bookmark keeps working). Only a real Yes approves: a wrong token, a stale prompt or a timeout counts as no. Keys are redacted from everything the page shows. Anyone with the URL can approve shell commands as you, so keep it on a private network and do not forward the port to the internet. The server is plain HTTP; over Tailscale the connection is encrypted by the tunnel.
 
