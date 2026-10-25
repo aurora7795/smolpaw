@@ -505,11 +505,12 @@ check("user facts inlined in prompt instructions", "timezone: Europe/London" in 
 parsed_svcs = g.services()
 check("services() parses valid service URL", "mysvc" in parsed_svcs and parsed_svcs["mysvc"]["url"] == "https://example.com/api")
 check("services() ignores user facts lines", "timezone" not in parsed_svcs and "units" not in parsed_svcs and "owner" not in parsed_svcs)
-
-# token budget check (#25): 3-line user facts block should be under 80 tokens (~320 chars)
-user_facts_block = "## User facts\n- timezone: Europe/London\n- units: metric (Celsius, km)\n- owner: Martin\n"
-check("user facts block fits token budget (< 80 tokens)", len(user_facts_block) < 320)
 g.NOTES = saved_notes
+# The example "## User facts" block's token cost was measured against Qwen 3.5 9B's own tokenizer
+# (Ollama /api/generate, raw prompt, no chat template): 27 tokens, not a char-count/4 guess. See
+# CHANGELOG.md. No test asserts a token *count* here: nothing in this file has access to a real
+# tokenizer, and a char-count proxy (as #27's schema-size check earlier in this file does) tests
+# string length, not tokens -- it would pass or fail for reasons unrelated to what it claims to check.
 
 # secrets
 if os.environ.get("RADARR_URL") and os.environ.get("RADARR_API_KEY"):
