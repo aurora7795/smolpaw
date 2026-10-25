@@ -15,6 +15,7 @@ import os
 import secrets
 import threading
 import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -116,12 +117,24 @@ class Session:
         self.approvals.cancel()
 
 
-def feed() -> list[str]:
-    """Short lines from the current run log (already redacted by generic_tools)."""
-    if not g._log_file or not g._log_file.exists():
+TOOL_KINDS = {
+    "shell", "http", "fetch_page", "openapi_search",
+    "read_file", "write_file", "list_skills", "read_skill", "write_skill",
+    "remember", "recall", "ask",
+}
+
+
+def feed(log_path: Path | None = None) -> list[str]:
+    """Short lines from a run log (default: current run, already redacted by generic_tools)."""
+    target = log_path if log_path is not None else g._log_file
+    if not target or not target.exists():
+        return []
+    try:
+        raw_lines = target.read_text().splitlines()
+    except OSError:
         return []
     lines = []
-    for raw in g._log_file.read_text().splitlines()[-FEED_LINES:]:
+    for raw in raw_lines[-FEED_LINES:]:
         try:
             e = json.loads(raw)
         except json.JSONDecodeError:
@@ -159,7 +172,64 @@ def feed() -> list[str]:
             lines.append(f"{t} recall {e.get('query') or '(all)'} -> {e.get('result')}")
         elif kind in ("start", "final"):
             lines.append(f"{t} {kind}")
-    return lines
+    return [g._redact(line) for line in lines]
+
+
+def _run_summary(path: Path | None) -> str | None:
+    """One-line summary for a run log derived from existing log fields."""
+    if not path or not path.exists():
+        return None
+    try:
+        raw_lines = path.read_text().splitlines()
+    except OSError:
+        return None
+    entries = []
+    for raw in raw_lines:
+        try:
+            entries.append(json.loads(raw))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+    if not entries:
+        return None
+    start = next((e for e in entries if e.get("kind") == "start"), None)
+    if not start:
+        return None
+    start_t = start.get("t", "")
+    model = start.get("model", "")
+    has_final = any(e.get("kind") == "final" for e in entries)
+    if has_final:
+        last_t = entries[-1].get("t", "")
+        try:
+            d = max(0.0, (datetime.fromisoformat(last_t) - datetime.fromisoformat(start_t)).total_seconds())
+            dur = f"{int(round(d))}s"
+        except (ValueError, TypeError):
+            dur = "unfinished"
+    else:
+        dur = "unfinished"
+    tool_calls = sum(1 for e in entries if e.get("kind") in TOOL_KINDS)
+    tool_str = f"{tool_calls} tool call" if tool_calls == 1 else f"{tool_calls} tool calls"
+    return g._redact(f"{start_t} · {model} · {dur} · {tool_str}")
+
+
+def _list_runs() -> list[dict]:
+    """List recent runs from g.LOG_DIR, newest first, capped at 20."""
+    if not g.LOG_DIR.exists() or not g.LOG_DIR.is_dir():
+        return []
+    try:
+        files = sorted(g.LOG_DIR.glob("*.jsonl"), key=lambda f: f.name, reverse=True)
+    except OSError:
+        return []
+    runs = []
+    for f in files:
+        if not f.is_file():
+            continue
+        summary = _run_summary(f)
+        if summary is None:
+            continue
+        runs.append({"id": f.name, "summary": summary})
+        if len(runs) >= 20:
+            break
+    return runs
 
 
 def _files_payload() -> dict:
@@ -220,15 +290,33 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, PAGE.encode(), "text/html; charset=utf-8")
             if path == "/api/state":
                 s = session
+                curr_summary = _run_summary(g._log_file) if g._log_file else ""
                 return self._send(200, {
                     **info, "can_run": s is not None,
                     "status": s.status if s else info.get("status", "running"),
                     "started_at": s.started_at if s and s.status == "running" else None,
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
                     "outcome": s.outcome if s else "", "error": s.error if s else "",
-                    "pending": approvals.pending, "feed": feed()})
+                    "pending": approvals.pending, "feed": feed(),
+                    "summary": curr_summary or ""})
             if path == "/api/files":
                 return self._send(200, _files_payload())
+            if path == "/api/runs":
+                return self._send(200, _list_runs())
+            if path == "/api/run_feed":
+                run_id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+                if not run_id or "/" in run_id or "\\" in run_id:
+                    return self._send(404, {"error": "not found"})
+                if not g.LOG_DIR.exists() or not g.LOG_DIR.is_dir():
+                    return self._send(404, {"error": "not found"})
+                try:
+                    files = list(g.LOG_DIR.glob("*.jsonl"))
+                except OSError:
+                    return self._send(404, {"error": "not found"})
+                matched = next((f for f in files if f.name == run_id), None)
+                if not matched:
+                    return self._send(404, {"error": "not found"})
+                return self._send(200, feed(matched))
             return self._send(404, {"error": "not found"})
 
         def do_POST(self) -> None:
@@ -338,6 +426,8 @@ summary { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:
 summary:focus { outline:none; }
 .filesec { margin-top:12px; }
 .filesec h3 { font-size:12px; font-weight:600; color:var(--muted); margin:8px 0 2px; }
+.runitem { padding:6px 8px; border-radius:6px; cursor:pointer; font-size:12px; font-family:ui-monospace, Menlo, monospace; color:var(--muted); margin-bottom:4px; }
+.runitem:hover { background:var(--bg); color:var(--ink); }
 [hidden] { display:none !important; }
 </style></head><body><main>
 <h1>SmolPaw</h1><div class="meta" id="meta">connecting...</div>
@@ -359,7 +449,10 @@ summary:focus { outline:none; }
     <h2 style="margin-top:12px">Memory (memory.md)</h2>
     <pre id="fmemory">(empty)</pre>
   </div></details>
-<div class="card feed"><h2>Activity</h2><pre id="feed">(nothing yet)</pre></div>
+<div class="card feed"><div class="cardhead"><h2>Activity</h2><button class="copybtn" id="livebtn" hidden>Current run</button></div>
+  <div class="meta" id="actsummary" style="margin-bottom:8px"></div>
+  <pre id="feed">(nothing yet)</pre></div>
+<div class="card" id="recentcard"><h2>Recent runs</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
 </main><script>
 const token = new URLSearchParams(location.search).get("t") || "";
 const $ = id => document.getElementById(id);
@@ -424,6 +517,40 @@ async function loadFiles() {
   } catch (e) {}
 }
 $("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
+let selectedRunId = null;
+async function loadRuns() {
+  try {
+    const runs = await api("/api/runs");
+    const container = $("runslist");
+    while (container.firstChild) container.removeChild(container.firstChild);
+    if (!runs || !runs.length) {
+      const p = document.createElement("pre");
+      p.textContent = "(no runs yet)";
+      container.appendChild(p);
+      return;
+    }
+    for (const r of runs) {
+      const row = document.createElement("div");
+      row.className = "runitem";
+      row.textContent = r.summary;
+      row.onclick = async () => {
+        selectedRunId = r.id;
+        try {
+          const lines = await api("/api/run_feed?id=" + encodeURIComponent(r.id));
+          $("feed").textContent = (lines || []).join("\\n") || "(empty run log)";
+          $("actsummary").textContent = r.summary;
+          $("livebtn").hidden = false;
+        } catch (e) {}
+      };
+      container.appendChild(row);
+    }
+  } catch (e) {}
+}
+$("livebtn").onclick = () => {
+  selectedRunId = null;
+  $("livebtn").hidden = true;
+  refresh();
+};
 async function refresh() {
   let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach SmolPaw"; return; }
   $("meta").textContent = [s.mode, s.backend, s.model, s.status, s.progress].filter(Boolean).join(" · ");
@@ -445,8 +572,13 @@ async function refresh() {
   $("result").hidden = !done && !s.prompt;
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
   $("outcome").textContent = s.outcome || "";
-  $("feed").textContent = (s.feed || []).join("\\n") || "(nothing yet)";
+  if (!selectedRunId) {
+    $("livebtn").hidden = true;
+    $("actsummary").textContent = s.summary || "";
+    $("feed").textContent = (s.feed || []).join("\\n") || "(nothing yet)";
+  }
   if ($("filescard").open) loadFiles();
+  loadRuns();
 }
 refresh(); setInterval(refresh, 1500);
 </script></body></html>

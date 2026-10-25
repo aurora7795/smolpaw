@@ -922,6 +922,102 @@ check("web page contains filescard", 'id="filescard"' in http.get(f"{base}/?t={t
 
 g.NOTES, g.SKILLS, g.MEMORY = saved_notes, saved_skills, saved_memory
 
+# recent runs and run summary (#39)
+saved_log_dir = g.LOG_DIR
+fake_log_dir = tmp / "fake_logs"
+fake_log_dir.mkdir(exist_ok=True)
+g.LOG_DIR = fake_log_dir
+
+f_finished = fake_log_dir / "20261025-100000-model_a.jsonl"
+f_finished.write_text("\n".join([
+    json.dumps({"t": "2026-10-25T10:00:00", "kind": "start", "model": "model_a", "prompt": "do something"}),
+    json.dumps({"t": "2026-10-25T10:00:04", "kind": "shell", "command": "ls", "read_only": True, "exit": 0}),
+    json.dumps({"t": "2026-10-25T10:00:07", "kind": "http", "method": "GET", "url": "http://x", "status": 200}),
+    json.dumps({"t": "2026-10-25T10:00:12", "kind": "final", "answer": "done"}),
+]) + "\n")
+
+f_unfinished = fake_log_dir / "20261025-110000-model_b.jsonl"
+f_unfinished.write_text("\n".join([
+    json.dumps({"t": "2026-10-25T11:00:00", "kind": "start", "model": "model_b", "prompt": "unfinished task"}),
+    json.dumps({"t": "2026-10-25T11:00:05", "kind": "fetch_page", "url": "http://x", "query": "q", "hits": 1}),
+]) + "\n")
+
+f_malformed = fake_log_dir / "20261025-120000-broken.jsonl"
+f_malformed.write_text("corrupted json {bad\n")
+
+# 1. /api/runs returns newest first, correct summaries, skips malformed file
+res_runs = http.get(f"{base}/api/runs", headers=hdr, timeout=5)
+check("/api/runs returns 200 with valid token", res_runs.status_code == 200)
+runs = res_runs.json()
+check("malformed log file is skipped and valid runs returned", len(runs) == 2)
+check("runs list is newest first",
+      runs[0]["id"] == "20261025-110000-model_b.jsonl" and runs[1]["id"] == "20261025-100000-model_a.jsonl")
+check("unfinished run summary has model, 'unfinished', and tool count",
+      "model_b" in runs[0]["summary"] and "unfinished" in runs[0]["summary"] and "1 tool call" in runs[0]["summary"])
+check("finished run summary has model, elapsed seconds, and tool count",
+      "model_a" in runs[1]["summary"] and "12s" in runs[1]["summary"] and "2 tool calls" in runs[1]["summary"])
+
+# 2. /api/run_feed returns lines for a real id, 404 for unknown
+r_feed = http.get(f"{base}/api/run_feed?id={f_finished.name}", headers=hdr, timeout=5)
+check("/api/run_feed returns 200 for real id", r_feed.status_code == 200)
+feed_lines = r_feed.json()
+check("/api/run_feed returns formatted lines",
+      any("$ ls" in fl for fl in feed_lines) and any("GET http://x" in fl for fl in feed_lines))
+check("/api/run_feed returns 404 for unknown id",
+      http.get(f"{base}/api/run_feed?id=unknown.jsonl", headers=hdr, timeout=5).status_code == 404)
+
+# 3. Path traversal attempts return 404
+check("/api/run_feed returns 404 for ?id=../x",
+      http.get(f"{base}/api/run_feed?id=../x", headers=hdr, timeout=5).status_code == 404)
+check("/api/run_feed returns 404 for absolute path",
+      http.get(f"{base}/api/run_feed?id=/etc/passwd", headers=hdr, timeout=5).status_code == 404)
+check("/api/run_feed returns 404 for id with slash",
+      http.get(f"{base}/api/run_feed?id=sub/file.jsonl", headers=hdr, timeout=5).status_code == 404)
+
+# 4. Wrong or missing token gets 403 on both routes; POST gets 404
+check("/api/runs refuses missing token with 403",
+      http.get(f"{base}/api/runs", timeout=5).status_code == 403)
+check("/api/runs refuses wrong token with 403",
+      http.get(f"{base}/api/runs", headers={"X-Token": "bad"}, timeout=5).status_code == 403)
+check("/api/run_feed refuses missing token with 403",
+      http.get(f"{base}/api/run_feed?id={f_finished.name}", timeout=5).status_code == 403)
+check("/api/run_feed refuses wrong token with 403",
+      http.get(f"{base}/api/run_feed?id={f_finished.name}", headers={"X-Token": "bad"}, timeout=5).status_code == 403)
+check("POST to /api/runs returns 404",
+      http.post(f"{base}/api/runs", json={}, headers=hdr, timeout=5).status_code == 404)
+check("POST to /api/run_feed returns 404",
+      http.post(f"{base}/api/run_feed?id={f_finished.name}", json={}, headers=hdr, timeout=5).status_code == 404)
+
+# 5. Secret written into log file comes back masked
+saved_notes = g.NOTES
+g.NOTES = tmp / "notes_for_run_secret.md"
+g.NOTES.write_text("- svc: http://example.com | key_env=MY_RUN_SECRET\n")
+os.environ["MY_RUN_SECRET"] = "super-secret-token-777"
+f_secret = fake_log_dir / "20261025-130000-secret.jsonl"
+f_secret.write_text("\n".join([
+    json.dumps({"t": "2026-10-25T13:00:00", "kind": "start", "model": "m", "prompt": "p"}),
+    json.dumps({"t": "2026-10-25T13:00:01", "kind": "shell", "command": "echo super-secret-token-777", "read_only": False, "exit": 0}),
+]) + "\n")
+sec_feed = http.get(f"{base}/api/run_feed?id={f_secret.name}", headers=hdr, timeout=5).json()
+check("secret in log file comes back masked in run_feed",
+      "super-secret-token-777" not in json.dumps(sec_feed) and "[REDACTED]" in json.dumps(sec_feed))
+del os.environ["MY_RUN_SECRET"]
+g.NOTES = saved_notes
+
+# 6. Current run summary in /api/state and web page contains recentcard
+saved_curr_log = g._log_file
+g._log_file = f_finished
+state_with_summary = http.get(f"{base}/api/state", headers=hdr, timeout=5).json()
+check("/api/state contains summary line for current run",
+      "model_a" in state_with_summary.get("summary", "") and "12s" in state_with_summary.get("summary", ""))
+g._log_file = saved_curr_log
+
+check("web page contains recentcard and runslist",
+      'id="recentcard"' in http.get(f"{base}/?t={token}", timeout=5).text
+      and 'id="runslist"' in http.get(f"{base}/?t={token}", timeout=5).text)
+
+g.LOG_DIR = saved_log_dir
+
 g.CONFIRM = fake_confirm
 srv.shutdown()
 
