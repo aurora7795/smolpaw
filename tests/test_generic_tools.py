@@ -225,6 +225,91 @@ g.requests.request = lambda *a, **k: _Http('{"ok": true}', "application/json")
 check("JSON body passed through", g.http_request("GET", "http://x/api").endswith('{"ok": true}'))
 g.requests.request = _real_request
 
+# fetch_page (#28): on-demand web page text trimmed to query
+check("fetch_page rejects non-http url", g.fetch_page("ftp://example.com").startswith("ERROR: URL must start with"))
+check("fetch_page is in GENERIC_TOOLS", g.fetch_page in g.GENERIC_TOOLS)
+
+
+class _FakeGetResp:
+    def __init__(self, text, ctype="text/html", status=200):
+        self.text = text
+        self.headers = {"content-type": ctype}
+        self.status_code = status
+        self.ok = 200 <= status < 300
+
+
+sample_html = """<!doctype html>
+<html><head><title>Documentation Guide</title></head>
+<body>
+<h1>Welcome</h1>
+<p>Introductory paragraph describing the project.</p>
+<h2>Architecture</h2>
+<p>The system uses SQLite for metadata storage.</p>
+<p>Redis is used for caching session state.</p>
+<h2>Deployment</h2>
+<p>Deploy using Docker containers with compose.</p>
+<p>Kubernetes Helm charts are also supported.</p>
+</body></html>"""
+
+saved_get = g.requests.get
+g.requests.get = lambda *a, **k: _FakeGetResp(sample_html)
+
+# empty query returns title and top of page
+top_res = g.fetch_page("https://example.com/docs")
+check("fetch_page empty query returns top text", "Title: Documentation Guide" in top_res and "Introductory paragraph" in top_res)
+
+# query matching specific section
+arch_res = g.fetch_page("https://example.com/docs", query="SQLite")
+check("fetch_page extracts matching query section", "SQLite for metadata storage" in arch_res)
+check("fetch_page includes context around match", "Architecture" in arch_res)
+check("fetch_page excludes unrelated sections", "Kubernetes Helm charts" not in arch_res)
+
+# query with no match gives clean message
+no_match_res = g.fetch_page("https://example.com/docs", query="Postgres")
+check("fetch_page explains no match with title and preview", "No content matching 'Postgres' found" in no_match_res and "Documentation Guide" in no_match_res)
+
+# HTTP error handling
+g.requests.get = lambda *a, **k: _FakeGetResp("Page Not Found", status=404)
+err_res = g.fetch_page("https://example.com/missing", query="test")
+check("fetch_page reports HTTP error status", err_res.startswith("HTTP 404"))
+
+# Request exception handling
+def _raise_req_err(*a, **k):
+    raise g.requests.RequestException("connection timed out")
+
+
+g.requests.get = _raise_req_err
+net_err_res = g.fetch_page("https://example.com/timeout", query="test")
+check("fetch_page reports request exception", net_err_res.startswith("ERROR: connection timed out"))
+
+# secret redaction
+os.environ["SMOLPAW_TEST_PAGE_KEY"] = "secret-page-token-999"
+saved_notes = g.NOTES
+g.NOTES = tmp / "page-notes.md"
+g.NOTES.write_text("- page_svc: https://example.com | key_env=SMOLPAW_TEST_PAGE_KEY\n")
+g.requests.get = lambda *a, **k: _FakeGetResp("<p>Token secret-page-token-999 is private</p>")
+redacted_res = g.fetch_page("https://example.com/secret", query="Token")
+check("fetch_page redacts secrets", "secret-page-token-999" not in redacted_res and "[REDACTED]" in redacted_res)
+g.NOTES = saved_notes
+
+# logging and feed
+saved_log = g._log_file
+g._log_file = tmp / "fetch-page-log.jsonl"
+g.requests.get = lambda *a, **k: _FakeGetResp(sample_html)
+g.fetch_page("https://example.com/docs", query="Redis")
+g.fetch_page("https://example.com/docs", query="nonexistent")
+log_entries = [g.json.loads(line) for line in g._log_file.read_text().splitlines()]
+check("fetch_page calls are logged", len(log_entries) == 2 and log_entries[0]["kind"] == "fetch_page")
+check("fetch_page log records query and hit count", log_entries[0]["query"] == "Redis" and log_entries[0]["hits"] > 0)
+check("fetch_page log records zero hits on no match", log_entries[1]["hits"] == 0)
+
+saved_feed_log, web.g._log_file = web.g._log_file, g._log_file
+feed_line = web.feed()[0]
+check("web.py feed shows fetch_page query and result", "fetch_page" in feed_line and "Redis" in feed_line and "hits" in feed_line)
+web.g._log_file = saved_feed_log
+g._log_file = saved_log
+g.requests.get = saved_get
+
 # write verification (#19): a follow-up GET checks what a write actually did, beyond its status code
 _real_get = g.requests.get
 
@@ -556,6 +641,7 @@ _l1.write_text("\n".join(json.dumps(e) for e in [
     {"t": "2026-10-25T08:00:00", "kind": "start", "model": "demo-model", "prompt": "rename the reports"},
     {"t": "2026-10-25T08:00:05", "kind": "shell", "command": "mv a.txt a-2026.txt", "read_only": False, "exit": 0},
     {"t": "2026-10-25T08:00:06", "kind": "http", "method": "GET", "url": "http://x/y", "status": 200},
+    {"t": "2026-10-25T08:00:07", "kind": "fetch_page", "url": "http://x/docs", "query": "auth", "result": "2 hits"},
     {"t": "2026-10-25T08:00:10", "kind": "final", "answer": "Renamed a.txt.", "actions": ["shell exit 0: mv a.txt a-2026.txt"]},
 ]))
 _l2 = _findings_dir / "20261025-079000-no-final.jsonl"
@@ -564,6 +650,7 @@ report = ef.render(_l1)
 check("export_findings renders the prompt and model", "rename the reports" in report and "demo-model" in report)
 check("export_findings renders a shell action", "`$ mv a.txt a-2026.txt`" in report)
 check("export_findings renders an http action", "`GET http://x/y` -> 200" in report)
+check("export_findings renders a fetch_page action", "`fetch_page` http://x/docs auth -> 2 hits" in report)
 check("export_findings renders the final answer and duration", "Renamed a.txt." in report and "10s" in report)
 check("a run with no final answer is marked unfinished", "did not finish" in ef.render(_l2))
 _l3 = _findings_dir / "20261025-078000-no-start.jsonl"
