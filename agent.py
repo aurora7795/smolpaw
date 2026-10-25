@@ -175,6 +175,7 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
         api_key=cfg["key"],
     )
     if toolset == "generic":
+        generic_tools.apply_search_provider()  # .env is loaded by now; the import-time call could not see it
         # The generic path is ToolCallingAgent only: Bonsai was far more reliable with JSON tool calls.
         return ToolCallingAgent(tools=GENERIC_TOOLS, model=model, max_steps=max_steps,
                                 instructions=generic_tools.build_instructions(),

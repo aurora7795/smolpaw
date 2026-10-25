@@ -1037,11 +1037,16 @@ GENERIC_TOOLS = [
     run_shell, http_request, fetch_page, openapi_search, read_file, write_file, ask_user,
     list_skills, read_skill, write_skill, remember, recall,
 ]
-try:
-    _configure_search_provider()
-except ValueError as _exc:
-    print(f"WARNING: {_exc} Falling back to ddgs.", file=sys.stderr)
-    _configure_search_provider("ddgs")
+def apply_search_provider() -> str:
+    """Apply SMOLPAW_SEARCH_PROVIDER to GENERIC_TOOLS; a bad value warns and falls back to ddgs."""
+    try:
+        return _configure_search_provider()
+    except ValueError as exc:
+        print(f"WARNING: {exc} Falling back to ddgs.", file=sys.stderr)
+        return _configure_search_provider("ddgs")
+
+
+apply_search_provider()  # build_agent() applies it again once .env is loaded
 
 GUIDANCE = """\
 You are SmolPaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.
