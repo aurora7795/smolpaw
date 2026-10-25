@@ -7,10 +7,10 @@ Status: experimental. See [RESULTS.md](RESULTS.md) for what has been measured, [
 ## How it works
 
 - `agent.py` runs a `ToolCallingAgent` against a model served by LM Studio (`http://127.0.0.1:1234/v1`, the default) or Ollama (`http://127.0.0.1:11434/v1`, with `--backend ollama`).
-- The model gets a small set of generic tools ([generic_tools.py](generic_tools.py)): shell, HTTP, files, skills and a way to ask you a question.
+- The model gets a small set of general-purpose tools ([generic_tools.py](generic_tools.py)): shell, HTTP, web search, page fetching, files, skills, long-term memory and a way to ask you a question. It works out any service you list in `notes.md` from its API description, so nothing is built in for a particular service.
 - Every safety rule is enforced in Python, not in the prompt, so a model cannot talk its way past it.
 - `notes.md` lists the services the agent may use. Short skills in `skills/` are put straight into the prompt; longer ones are listed and read on demand.
-- Two toolsets: `--tools generic` (default) and `--tools radarr`, a hand-written Radarr baseline that hands the model the method ([radarr_tools.py](radarr_tools.py)).
+- The generic toolset is the product. A second, hand-written toolset for one service (`--tools radarr`, [radarr_tools.py](radarr_tools.py)) exists only as a baseline for measuring what the generic tools cost against purpose-built ones.
 
 ## How it compares with OpenClaw
 
@@ -21,7 +21,7 @@ SmolPaw exists to see how much of what OpenClaw does can run on small local mode
 | | OpenClaw (DeepSeek v4 flash, cloud) | SmolPaw (Gemma 4 E4B or Qwen 3.5 9B, local) |
 |---|---|---|
 | First-call prompt | about 24K tokens (system prompt about 68K characters: workspace memory, skills, tool docs) | about 2.2K to 2.9K tokens |
-| "What's in my Radarr queue?" | correct, 11s, 3 model turns | correct, 35 to 71s on LM Studio and 20 to 43s on Ollama, 3 to 7 steps (12 of 12 runs across both runtimes after the harness fixes) |
+| A question about a real service ("What's in my Radarr queue?") | correct, 11s, 3 model turns | correct, 35 to 71s on LM Studio and 20 to 43s on Ollama, 3 to 7 steps (12 of 12 runs across both runtimes after the harness fixes) |
 | An API the model has never seen (invented "Tidepool" API) | not run | 6 of 6, then 17 of 18 on harder variants on LM Studio (404 at the root, details on a second endpoint, pagination); 25 of 30 clean passes on Ollama, weakest on the details variant |
 | Cost per task | about $0.0013, and the prompt goes to a cloud provider | no per-task cost; model inference stays on the machine |
 
@@ -47,8 +47,8 @@ We have not yet measured the prompt any of these harnesses actually sends, so th
 **What this does not show**
 
 - OpenClaw was **not** run on a local model, so "OpenClaw would not work here" is an estimate from prompt size and measured reading speed, not a test. The cloud run also benefited from provider-side prompt caching (about 60K cached tokens), and a local server that caches a stable prompt prefix cuts reading time a lot: measured on SmolPaw's own prompt in RESULTS.md (#29), a whole run took at least 2.4 times shorter than the time just to read its prompts cold on Qwen, on both LM Studio and Ollama.
-- OpenClaw does much more: chat channels, long-term memory, many ready-made skills, and recovery behaviour such as checking a download is really moving. SmolPaw has a shell, HTTP, files, notes and skills, and a safety layer, nothing more.
-- SmolPaw's results are small samples (3 runs per cell) on a few read-only tasks. Real writes through the generic tools are not yet measured: the first supervised attempt (adding a film to Radarr) failed because the model guessed the film's id and the root folder instead of looking them up ([#1](https://github.com/aurora7795/smolpaw/issues/1)).
+- OpenClaw does much more: chat channels, long-term memory, many ready-made skills, and recovery behaviour such as checking a download is really moving. SmolPaw has a shell, HTTP, web search, page fetching, files, notes, skills, long-term memory and a safety layer, nothing more.
+- SmolPaw's results are small samples (3 runs per cell) on a few read-only tasks. Real writes through the generic tools are not yet measured: the first supervised attempt (adding a film to a Radarr server) failed because the model guessed the film's id and the root folder instead of looking them up ([#1](https://github.com/aurora7795/smolpaw/issues/1)).
 - It also needs help a strong model would not: clear tool error messages, short skills placed in the prompt, and a warning when a server returns a web page instead of data. Some small models (Bonsai 8B, Nanbeige 3B) did not work at all.
 
 ## Requirements
@@ -63,8 +63,8 @@ We have not yet measured the prompt any of these harnesses actually sends, so th
 ## Setup
 
 ```bash
-./setup.sh                      # creates .venv and installs smolagents
-cp .env.example .env            # then fill in RADARR_URL / RADARR_API_KEY if you use Radarr
+./setup.sh                      # creates .venv and installs smolagents, openai and ddgs (web search)
+cp .env.example .env            # then add an API key for each service you list in notes.md (Radarr variables are only for the baseline toolset)
 cp notes.example.md notes.md    # then list the services you want the agent to reach
 ```
 
@@ -102,8 +102,8 @@ python3 agent.py --model google/gemma-4-e4b
 |---|---|---|
 | `--backend` | `lmstudio` | `lmstudio` (port 1234) or `ollama` (port 11434) |
 | `--model` | `ternary-bonsai-8b-mlx` on LM Studio, `qwen3.5:9b` on Ollama | Model identifier on the chosen backend (see `lms ls` or `ollama list`) |
-| `--tools` | `generic` | `generic` or `radarr` (hand-written baseline) |
-| `--agent` | `code` | `radarr` toolset only: `code` writes Python, `tool` makes JSON tool calls |
+| `--tools` | `generic` | `generic`, or `radarr` (a hand-written single-service baseline for comparisons) |
+| `--agent` | `code` | `radarr` baseline only: `code` writes Python, `tool` makes JSON tool calls |
 | `--max-steps` | 12 | Also settable as `MAX_STEPS` in `.env` |
 | `--web` | off | Also print a URL; `[y/N]` and `ask_user` prompts can be answered there instead of the terminal, whichever comes first. The terminal still runs the agent and types requests as normal — this only adds a second way to answer prompts, for example from a phone, without needing `web.py` as a separate process. |
 | `--web-host`, `--web-port` | `127.0.0.1`, `web.py`'s default | `--web` only. `0.0.0.0` to reach it from other devices (for example over Tailscale) |
@@ -112,7 +112,7 @@ Type a request and press Enter; `quit` or Ctrl-C exits. After each answer the ha
 
 `[Harness says]` also checks a write's own result, not just its status code: after a POST, PUT, PATCH or DELETE that returns 2xx, a follow-up GET (free, no approval needed) checks what actually happened — a POST is confirmed against its `Location` header or an `id` in the response; a PUT/PATCH's submitted fields are compared against what a GET now returns; a DELETE is confirmed gone (expecting 404). A mismatch or a resource that is still there after a delete is flagged with a loud `WARNING`, not quietly reported as a plain success. This never reaches the model, so it has no prompt cost — it is purely for the human reading the report.
 
-Every run is logged to `logs/` (gitignored, keys redacted), including each file and skill tool call (`read_file`, `write_file`, `list_skills`, `read_skill`, `write_skill`), each `openapi_search` and `fetch_page` call (url, query/keyword, hit count) and each write refused by the pre-flight check, so a model's "I couldn't find it" can be checked against what it actually searched for.
+Every run is logged to `logs/` (gitignored, keys redacted), including each file and skill tool call (`read_file`, `write_file`, `list_skills`, `read_skill`, `write_skill`), each `openapi_search` and `fetch_page` call (url, query/keyword, hit count) and each write refused by the pre-flight check, each shell command with its exit code and the first 500 characters of its output, so a model's "I couldn't find it" can be checked against what it actually searched for.
 
 ### Using Ollama
 
@@ -200,7 +200,7 @@ SEARCH_PROVIDERS = {
 .venv/bin/python tests/test_generic_tools.py
 ```
 
-Checks the confirmation layer, path scoping, secret handling and tool messages. A live Radarr check runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
+Checks the confirmation layer, path scoping, secret handling and tool messages. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
 
 ```bash
 .venv/bin/python tests/fake_api.py 8765 [easy|hint|detail|paged]
@@ -228,7 +228,7 @@ Earlier tool calls and results are sent to the model as native `tool_calls` and 
 agent.py              CLI and agent wiring
 web.py                Web harness: run the agent and answer its prompts from a browser
 generic_tools.py      Tools, confirmation layer, secrets, logging, prompt building
-radarr_tools.py       Hand-written Radarr tools (baseline)
+radarr_tools.py       Hand-written single-service tools (baseline for comparisons)
 skills/               Skills the agent follows or writes (api-discovery.md is hand-written)
 notes.example.md      Template for notes.md (gitignored)
 tests/                Safety tests and the Tidepool test API

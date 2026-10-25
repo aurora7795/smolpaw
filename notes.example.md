@@ -13,5 +13,5 @@ Services you can reach. API keys are added to requests for these hosts automatic
 Format: `- name: URL | key_env=ENV_VAR | header=Header-Name`
 The harness adds the key from .env to requests for these hosts. Never put keys here.
 
-- radarr: http://192.168.1.50:7878 | key_env=RADARR_API_KEY | header=X-Api-Key
-  Movie library manager.
+- myservice: http://192.168.1.50:8080 | key_env=MYSERVICE_API_KEY | header=X-Api-Key
+  One line on what it is, for example "home media library manager".
