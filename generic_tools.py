@@ -21,6 +21,7 @@ import warnings
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any, Callable
 from urllib.parse import parse_qsl, urlparse
 
 import requests
@@ -61,7 +62,18 @@ def _ask_user(question: str) -> str:
 
 ASK = _ask_user
 
-ACTIONS: list[str] = []  # outcomes of side-effecting calls; the harness prints these as ground truth
+_SEARCH_COUNT = 0
+MAX_SEARCHES = 3
+
+
+class _ActionList(list):
+    def clear(self) -> None:
+        super().clear()
+        global _SEARCH_COUNT
+        _SEARCH_COUNT = 0
+
+
+ACTIONS: list[str] = _ActionList()  # outcomes of side-effecting calls; the harness prints these as ground truth
 _log_file: Path | None = None
 
 
@@ -606,6 +618,131 @@ def fetch_page(url: str, query: str = "") -> str:
     return _clip(_redact(result))
 
 
+def _search_ddgs(query: str, limit: int) -> list[dict]:
+    try:
+        from ddgs import DDGS
+        from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
+    except ImportError:
+        raise RuntimeError("The 'ddgs' package is not installed. Re-run ./setup.sh to install it.")
+    try:
+        results = DDGS().text(query, max_results=limit)
+    except RatelimitException as exc:
+        raise RuntimeError(f"DuckDuckGo rate limit exceeded: {exc}. Do not retry the same query.")
+    except TimeoutException as exc:
+        raise RuntimeError(f"DuckDuckGo search timed out: {exc}. Do not retry the same query.")
+    except DDGSException as exc:
+        if "no results found" in str(exc).lower():
+            return []
+        raise RuntimeError(f"DuckDuckGo search error: {exc}. Do not retry the same query.")
+    except Exception as exc:
+        raise RuntimeError(f"DuckDuckGo search failed: {exc}. Do not retry the same query.")
+
+    out = []
+    for r in results or []:
+        url = r.get("href") or r.get("url") or ""
+        snippet = r.get("body") or r.get("snippet") or ""
+        title = r.get("title") or ""
+        out.append({"title": str(title), "url": str(url), "snippet": str(snippet)})
+    return out
+
+
+def _search_searxng(query: str, limit: int) -> list[dict]:
+    url = os.environ.get("SMOLPAW_SEARCH_URL", "").strip()
+    if not url:
+        raise RuntimeError("SMOLPAW_SEARCH_URL is not set. Set it in .env to your SearXNG URL.")
+    try:
+        r = requests.get(
+            f"{url.rstrip('/')}/search",
+            params={"q": query, "format": "json"},
+            headers={"User-Agent": USER_AGENT},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError(f"SearXNG connection error: {exc}. Do not retry the same query.")
+    if r.status_code == 403:
+        raise RuntimeError(
+            "SearXNG returned 403 (JSON format not enabled). "
+            "Add 'json' under 'search: formats:' in settings.yml."
+        )
+    if not r.ok:
+        raise RuntimeError(f"SearXNG returned HTTP {r.status_code}. Do not retry the same query.")
+    try:
+        data = r.json()
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"SearXNG returned malformed JSON: {exc}. Do not retry the same query.")
+    if not isinstance(data, dict) or "results" not in data:
+        raise RuntimeError("SearXNG response missing 'results' field. Do not retry the same query.")
+    raw_results = data.get("results", [])
+    if not isinstance(raw_results, list):
+        raise RuntimeError("SearXNG 'results' field is not a list. Do not retry the same query.")
+    out = []
+    for item in raw_results[:limit]:
+        if not isinstance(item, dict):
+            continue
+        out.append({
+            "title": str(item.get("title", "")),
+            "url": str(item.get("url", "")),
+            "snippet": str(item.get("content", "") or item.get("snippet", "")),
+        })
+    return out
+
+
+SEARCH_PROVIDERS: dict[str, Callable[[str, int], list[dict]]] = {
+    "ddgs": _search_ddgs,
+    "searxng": _search_searxng,
+}
+
+
+@tool
+@_remember
+def web_search(query: str) -> str:
+    """Search the web and return up to 5 results with title, URL and snippet. Use when you need current information or to find URLs to fetch.
+
+    Args:
+        query: Words or phrase to search the web for.
+    """
+    query = query.strip()
+    if not query:
+        return "ERROR: query cannot be empty."
+
+    provider_name = os.environ.get("SMOLPAW_SEARCH_PROVIDER", "").strip().lower() or "ddgs"
+    provider_fn = SEARCH_PROVIDERS.get(provider_name)
+    if not provider_fn:
+        return f"ERROR: unknown search provider '{provider_name}'. Valid choices: {', '.join(sorted(SEARCH_PROVIDERS.keys()))}."
+
+    global _SEARCH_COUNT
+    if _SEARCH_COUNT >= MAX_SEARCHES:
+        _log("web_search", provider=provider_name, query=query, status="limit", hits=0, result="limit reached")
+        return "Search limit reached (maximum 3 searches per request). Please answer using the information you already have."
+    _SEARCH_COUNT += 1
+
+    try:
+        raw_results = provider_fn(query, 5)
+    except Exception as exc:
+        _log("web_search", provider=provider_name, query=query, status="error", hits=0,
+             result=f"error ({type(exc).__name__})")
+        msg = str(exc)
+        err = msg if msg.startswith("ERROR:") else f"ERROR: {msg}"
+        return _clip(_redact(err))
+
+    if not raw_results:
+        _log("web_search", provider=provider_name, query=query, status="ok", hits=0, result="0 hits")
+        return f"No results found for {query!r}. Try different search terms, but do not repeat the same query."
+
+    results = raw_results[:5]
+    formatted = []
+    for i, item in enumerate(results, 1):
+        title = str(item.get("title", "")).strip()
+        url = str(item.get("url", "")).strip()
+        snippet = " ".join(str(item.get("snippet", "")).split())
+        formatted.append(f"{i}. {title}\n   {url}\n   {snippet}")
+
+    out = "\n\n".join(formatted)
+    _log("web_search", provider=provider_name, query=query, status="ok", hits=len(results),
+         result=f"{len(results)} hits")
+    return _clip(_redact(out))
+
+
 _SPECS: dict[str, dict] = {}
 
 
@@ -871,10 +1008,31 @@ def recall(query: str = "") -> str:
     return _clip(_redact("\n".join(hits)))
 
 
+def _configure_search_provider(provider: str | None = None) -> str:
+    """Validate and configure search provider selection, updating GENERIC_TOOLS."""
+    if provider is None:
+        provider = os.environ.get("SMOLPAW_SEARCH_PROVIDER", "").strip().lower() or "ddgs"
+    else:
+        provider = provider.strip().lower()
+    valid = list(SEARCH_PROVIDERS.keys()) + ["none"]
+    if provider not in valid:
+        raise ValueError(
+            f"Invalid SMOLPAW_SEARCH_PROVIDER '{provider}'. Valid choices: {', '.join(sorted(SEARCH_PROVIDERS.keys()))}, none."
+        )
+    if provider == "none":
+        if web_search in GENERIC_TOOLS:
+            GENERIC_TOOLS.remove(web_search)
+    else:
+        if web_search not in GENERIC_TOOLS:
+            GENERIC_TOOLS.append(web_search)
+    return provider
+
+
 GENERIC_TOOLS = [
     run_shell, http_request, fetch_page, openapi_search, read_file, write_file, ask_user,
     list_skills, read_skill, write_skill, remember, recall,
 ]
+_configure_search_provider()
 
 GUIDANCE = """\
 You are SmolPaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.
