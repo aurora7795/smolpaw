@@ -11,6 +11,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time (#14).
 - On Ollama the default MLX builds beat the GGUF ones on speed (Gemma reads prompts about twice as fast) with the same pass rates (#16). With native history at 32K, the earlier Ollama weakness on Tidepool `detail` is gone: 11 of 12 on each runtime (#15).
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
+- Converting web pages to text instead of returning raw HTML turned a 0 of 3 failure (both models, step-capped or giving up on the markup) into 3 of 3, in 2 to 4 steps instead of 7 to 13, and cut input tokens by 6x (Gemma) to 83x (Qwen, which otherwise burns the whole 32K context on one clipped HTML blob) (#23).
 
 ## Rung 1: known API, skill available (Radarr queue)
 
@@ -172,6 +173,19 @@ Prefill (`tests/prefill_timing.py`, one run per size, tokens read per second):
 - GGUF Qwen made more parse errors (13 against 3), spread across all five tasks.
 - So the default MLX tags are the better choice on this Mac; the GGUF builds are smaller (6.6 GB) but slower, with no gain in passes.
 - Caveats: 3 runs per cell; the MLX Tidepool runs were not interleaved with the GGUF ones (a few hours apart); the quantisations differ (`nvfp4` against `Q4_K_M`), so this compares the builds Ollama offers, not the engines alone.
+
+## HTML-to-text in `http_request` (#23, 32K, native history, 3 runs per cell)
+
+Prompt: "What is the latest Python release? Read https://www.python.org/downloads/ to find out." Before the change, `http_request` returned the raw page body (over 49K tokens on the Download Python page, well past the clip limit mid-tag); after, it returns the title and visible text, `<main>` only where the page has one.
+
+| Model | Before (raw HTML) | After (text) |
+|---|---|---|
+| Qwen 3.5 9B | 0/3, 190s mean, 13.0 steps, 49884 input tokens, 3+1+1 parse errors | 3/3, 23s mean, 2.0 steps, 8567 input tokens, 0 parse errors |
+| Gemma 4 E4B | 0/3, 108s mean, 6.7 steps, 23468 input tokens, 0 parse errors | 3/3, 40s mean, 3.7 steps, 16284 input tokens, 1+0+1 parse errors |
+
+- Before: both models failed every run. Qwen hit the step cap each time, burning most of a 32K context on one clipped, still-tag-laden HTML response and retrying `http_request`/`run_shell`/`openapi_search` without ever finding the version number in the markup. Gemma did not hit the cap but gave up, telling the user it could not parse the HTML and had no web-search tool.
+- After: both models pass every run, in 2 to 4 steps, reading the version number straight out of the converted text (`Python 3.15.1`).
+- Caveat: one task, one page, 3 runs per cell; the page happens to have a `<main>` element, which is the easy case for the extractor.
 
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 

@@ -18,6 +18,7 @@ import shlex
 import subprocess
 import warnings
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -37,6 +38,7 @@ READ_ONLY_CMDS = {"ls", "cat", "head", "grep", "find", "wc", "stat", "file"}
 FIND_UNSAFE = {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf"}
 SHELL_META = re.compile(r"[;&|<>`$()\\\n]")
 MAX_OUT = 4000
+USER_AGENT = "SmolPaw/0.1 (local agent; https://github.com/aurora7795/smolpaw)"
 DECLINED = "DECLINED: the user said no. Nothing was done. Try another approach or call ask_user."
 
 
@@ -215,10 +217,74 @@ def _looks_like_html(r: requests.Response) -> bool:
     return "text/html" in r.headers.get("content-type", "") or head.startswith(("<!doctype html", "<html"))
 
 
+def _is_service(url: str) -> bool:
+    u = urlparse(url)
+    return any((u.scheme, u.netloc) == urlparse(s["url"])[:2] for s in services().values())
+
+
+class _TextExtractor(HTMLParser):
+    """Collect a page's visible text, one line per block element, keeping <main> apart."""
+
+    SKIP = {"script", "style", "noscript", "svg", "template", "head", "nav", "aside", "footer", "form"}
+    BLOCK = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section",
+             "article", "header", "footer", "table", "ul", "ol", "pre", "blockquote", "title"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.main: list[str] = []
+        self.title = ""
+        self._skip = 0
+        self._in_main = 0
+        self._in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "title":
+            self._in_title = True
+        elif tag in self.SKIP:
+            self._skip += 1
+        elif tag == "main":
+            self._in_main += 1
+        if tag in self.BLOCK:
+            self._add("\n")
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+        elif tag in self.SKIP and self._skip:
+            self._skip -= 1
+        elif tag == "main" and self._in_main:
+            self._in_main -= 1
+        if tag in self.BLOCK:
+            self._add("\n")
+
+    def _add(self, text: str) -> None:
+        self.parts.append(text)
+        if self._in_main:
+            self.main.append(text)
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title += data
+        elif not self._skip:
+            self._add(re.sub(r"\s+", " ", data))  # line breaks come from block tags only
+
+
+def html_to_text(html: str) -> str:
+    """Reduce an HTML page to its title and visible text (only <main> when it has text)."""
+    p = _TextExtractor()
+    p.feed(html)
+    text = "".join(p.main) if "".join(p.main).strip() else "".join(p.parts)
+    lines = (" ".join(line.split()) for line in text.splitlines())
+    body = "\n".join(line for line in lines if line)
+    title = " ".join(p.title.split())
+    return f"Title: {title}\n{body}" if title else body
+
+
 @tool
 @_remember
 def http_request(method: str, url: str, body: str = "") -> str:
-    """Make an HTTP request. GET runs immediately; any other method asks the user first. API keys for services listed in the notes are added automatically.
+    """Make an HTTP request. GET runs immediately; any other method asks the user first. Web pages come back as plain text. API keys for services listed in the notes are added automatically.
 
     Args:
         method: HTTP method such as GET, POST, PUT or DELETE.
@@ -235,7 +301,8 @@ def http_request(method: str, url: str, body: str = "") -> str:
         if not _approved(f"{method} {url}{preview}"):
             return DECLINED
     try:
-        r = requests.request(method, url, json=data, headers=_auth_headers(url), timeout=30)
+        headers = {"User-Agent": USER_AGENT, **_auth_headers(url)}  # some sites refuse requests without one
+        r = requests.request(method, url, json=data, headers=headers, timeout=30)
     except requests.RequestException as exc:
         if method != "GET":
             ACTIONS.append(f"{method} {url} -> outcome unknown ({type(exc).__name__})")
@@ -243,7 +310,11 @@ def http_request(method: str, url: str, body: str = "") -> str:
     if method != "GET":
         ACTIONS.append(f"{method} {url} -> HTTP {r.status_code}")
     _log("http", method=method, url=url, status=r.status_code)
+    if _looks_like_html(r) and not _is_service(url):
+        # An ordinary web page: give the model its text, not the markup.
+        return _clip(_redact(f"HTTP {r.status_code} (web page converted to text)\n{html_to_text(r.text)}"))
     if _looks_like_html(r):
+        # A service from the notes answering with HTML means a wrong API path (its web UI).
         return (
             f"HTTP {r.status_code} but the body is an HTML web page, not API data. "
             "The path is probably wrong, so this is NOT an answer. Do not read anything into the page. "
