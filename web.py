@@ -138,6 +138,16 @@ def feed() -> list[str]:
             lines.append(f"{t} asked: {first} -> {'yes' if e.get('approved') else 'no'}")
         elif kind == "ask":
             lines.append(f"{t} question: {e.get('question')}")
+        elif kind == "read_file":
+            lines.append(f"{t} read_file {e.get('path')} -> {e.get('result')}")
+        elif kind == "write_file":
+            lines.append(f"{t} write_file {e.get('path')} ({e.get('chars')} chars) -> {e.get('result')}")
+        elif kind == "list_skills":
+            lines.append(f"{t} list_skills -> {e.get('result')}")
+        elif kind == "read_skill":
+            lines.append(f"{t} read_skill {e.get('name')} -> {e.get('result')}")
+        elif kind == "write_skill":
+            lines.append(f"{t} write_skill {e.get('name')} ({e.get('chars')} chars) -> {e.get('result')}")
         elif kind == "openapi_search":
             lines.append(f"{t} openapi_search {e.get('spec_url')} {e.get('keyword') or '(no keyword)'} -> {e.get('result')}")
         elif kind == "fetch_page":

@@ -664,13 +664,18 @@ def read_file(path: str) -> str:
     """
     p = _resolve(path)
     if _is_secret_file(p):
+        _log("read_file", path=path, result="blocked (secrets file)")
         return "BLOCKED: this file holds secrets and cannot be read."
     if not _in_scope(path) and not _approved(f"Read file outside workspace/:\n  {p}"):
+        _log("read_file", path=path, result="declined")
         return DECLINED
     try:
-        return _clip(_redact(p.read_text()))
+        content = p.read_text()
     except (OSError, UnicodeDecodeError) as exc:
+        _log("read_file", path=path, result=f"error ({type(exc).__name__})")
         return f"ERROR: {exc}"
+    _log("read_file", path=path, result="ok")
+    return _clip(_redact(content))
 
 
 @tool
@@ -683,17 +688,21 @@ def write_file(path: str, text: str) -> str:
     """
     p = _resolve(path)
     if _is_secret_file(p):
+        _log("write_file", path=path, chars=len(text), result="blocked (secrets file)")
         return "BLOCKED: secrets files cannot be written."
     where = "" if _in_scope(path) else "  (OUTSIDE workspace/)"
     if not _approved(f"Write {len(text)} chars to {p}{where}:\n{text[:500]}"):
+        _log("write_file", path=path, chars=len(text), result="declined")
         return DECLINED
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text)
     except OSError as exc:
+        _log("write_file", path=path, chars=len(text), result=f"error ({type(exc).__name__})")
         ACTIONS.append(f"write failed: {p}")
         return f"ERROR: {exc}"
     ACTIONS.append(f"wrote {p} ({len(text)} chars)")
+    _log("write_file", path=path, chars=len(text), result="ok")
     return f"SUCCESS: wrote {len(text)} chars to {p}."
 
 
@@ -720,6 +729,7 @@ def _skill_path(name: str) -> Path | None:
 def list_skills() -> str:
     """List saved skills (short how-to notes written from earlier tasks). Check these before starting a task."""
     files = sorted(SKILLS.glob("*.md")) if SKILLS.exists() else []
+    _log("list_skills", result=f"{len(files)} skills")
     if not files:
         return "No skills saved yet."
     return "\n".join(f"{f.stem}: {(f.read_text().splitlines() or [''])[0].lstrip('# ')}" for f in files)
@@ -734,8 +744,15 @@ def read_skill(name: str) -> str:
     """
     p = _skill_path(name)
     if not p or not p.exists():
+        _log("read_skill", name=name, result="not found")
         return "No such skill. Call list_skills."
-    return _clip(_redact(p.read_text()))
+    try:
+        content = p.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        _log("read_skill", name=name, result=f"error ({type(exc).__name__})")
+        raise
+    _log("read_skill", name=name, result="ok")
+    return _clip(_redact(content))
 
 
 @tool
@@ -748,13 +765,20 @@ def write_skill(name: str, text: str) -> str:
     """
     p = _skill_path(name)
     if not p:
+        _log("write_skill", name=name, chars=len(text), result="error (invalid skill name)")
         return "ERROR: invalid skill name."
     verb = "Update" if p.exists() else "Create"
     if not _approved(f"{verb} skill '{p.stem}':\n{text[:1500]}"):
+        _log("write_skill", name=name, chars=len(text), result="declined")
         return DECLINED
-    SKILLS.mkdir(exist_ok=True)
-    p.write_text(_redact(text))
+    try:
+        SKILLS.mkdir(exist_ok=True)
+        p.write_text(_redact(text))
+    except OSError as exc:
+        _log("write_skill", name=name, chars=len(text), result=f"error ({type(exc).__name__})")
+        raise
     ACTIONS.append(f"saved skill {p.stem}")
+    _log("write_skill", name=name, chars=len(text), result="ok")
     return f"SUCCESS: saved skill '{p.stem}'."
 
 

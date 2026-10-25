@@ -146,7 +146,7 @@ Tracked as GitHub issues:
 15. Done: key user facts in `notes.md` ([#25](https://github.com/aurora7795/smolpaw/issues/25)).
 16. Done: `remember` and `recall` on-demand memory tools ([#27](https://github.com/aurora7795/smolpaw/issues/27)).
 17. The roadmap phases 1 to 3 (see Roadmap above): [#19](https://github.com/aurora7795/smolpaw/issues/19) to [#29](https://github.com/aurora7795/smolpaw/issues/29).
-18. Web UI review (web.py): settings the page cannot change without a restart (backend, model, step limit, timeout): [#37](https://github.com/aurora7795/smolpaw/issues/37); a read-only view of `notes.md`, skills and `memory.md`: [#38](https://github.com/aurora7795/smolpaw/issues/38); file and skill reads missing from the activity feed and logs, no per-run stats or past runs: [#39](https://github.com/aurora7795/smolpaw/issues/39).
+18. Web UI review (web.py): settings the page cannot change without a restart (backend, model, step limit, timeout): [#37](https://github.com/aurora7795/smolpaw/issues/37); a read-only view of `notes.md`, skills and `memory.md`: [#38](https://github.com/aurora7795/smolpaw/issues/38); file and skill reads missing from the activity feed and logs (logging half done), no per-run stats or past runs: [#39](https://github.com/aurora7795/smolpaw/issues/39).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 

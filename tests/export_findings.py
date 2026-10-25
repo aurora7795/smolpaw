@@ -34,6 +34,16 @@ def _line(e: dict) -> str:
         return f"- {t} asked: {first} -> {'yes' if e.get('approved') else 'no'}"
     if kind == "ask":
         return f"- {t} question: {e.get('question')}  \n  answer: {e.get('answer')}"
+    if kind == "read_file":
+        return f"- {t} `read_file` {e.get('path')} -> {e.get('result')}"
+    if kind == "write_file":
+        return f"- {t} `write_file` {e.get('path')} ({e.get('chars')} chars) -> {e.get('result')}"
+    if kind == "list_skills":
+        return f"- {t} `list_skills` -> {e.get('result')}"
+    if kind == "read_skill":
+        return f"- {t} `read_skill` {e.get('name')} -> {e.get('result')}"
+    if kind == "write_skill":
+        return f"- {t} `write_skill` {e.get('name')} ({e.get('chars')} chars) -> {e.get('result')}"
     if kind == "openapi_search":
         return f"- {t} `openapi_search` {e.get('spec_url')} {e.get('keyword') or '(no keyword)'} -> {e.get('result')}"
     if kind == "fetch_page":
