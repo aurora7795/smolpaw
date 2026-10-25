@@ -13,6 +13,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
 - Converting web pages to text instead of returning raw HTML turned a 0 of 3 failure (both models, step-capped or giving up on the markup) into 3 of 3, in 2 to 4 steps instead of 7 to 13, and cut input tokens by 6x (Gemma) to 83x (Qwen, which otherwise burns the whole 32K context on one clipped HTML blob) (#23).
 - Rung 3, a real supervised Radarr write, is not yet passing on either model tried (#1): 0 of 3 real-movie attempts with Qwen, one stopped-early Gemma attempt that also failed. Every attempt was safely contained (nothing was ever added to Radarr), but both models tend to guess a write's arguments before looking them up, and avoid or misuse the `openapi_search` tool they are told to use (Qwen with shell spelunking, Gemma by calling an unrelated external API with a placeholder key).
+- Rung 4, an unrelated local task (summarise text files in workspace into summary.md), passed 6 of 6 across both models (3 of 3 on Qwen 3.5 9B, 3 of 3 on Gemma 4 E4B, 19 to 51s) (#3). Neither model hallucinated API or HTTP requests; both used read-only shell / read_file, handled the write confirmation, and produced accurate summaries.
 
 ## Rung 1: known API, skill available (Radarr queue)
 
@@ -65,6 +66,21 @@ Two failure patterns recur across both models, distinct from both #14 (history-c
 2. **Avoids or misuses the provided `openapi_search` tool** in favor of shell spelunking (Qwen) or an unrelated external API (Gemma) — despite the skill naming `openapi_search` explicitly, and api-discovery.md's explicit warning against placeholder keys.
 
 Caveats: Qwen has a real 4-run sample (3 real-movie); Gemma has one run, stopped early by hand rather than run to a natural conclusion, so it is a data point, not a rate. Not clear yet whether a cheap fix helps (a stronger per-write skill, or a harness-level hint on a malformed first write) or whether this needs a stronger model; no fix attempted yet, per "measure before adding."
+
+## Rung 4: unrelated local task (generality check, #3, 2026-10-25, Ollama)
+
+Task: read three project status text files in `workspace/notes/` (`alpha.txt`, `beta.txt`, `gamma.txt`) and write a concise summary of all three into `workspace/summary.md`. Prompt: "Read the project status files in notes/ and write a summary of all three projects into summary.md." Notes file empty (no services listed); `skills/api-discovery.md` present. Supervised file write: approval given for `summary.md` writes inside workspace, any other write declined.
+
+| Model | Pass | Mean wall time | Mean steps | Mean input tokens | Parse errors |
+|---|---|---|---|---|---|
+| Qwen 3.5 9B | 3/3 | 31.9s (19.0 to 50.8s) | 7.0 (4 to 10) | 28.0K (15.3K to 41.7K) | 3 across 3 runs (1, 0, 2) |
+| Gemma 4 E4B | 3/3 | 24.4s (22.6 to 27.7s) | 6.7 (6 to 7) | 22.8K (20.3K to 24.0K) | 0 across 3 runs |
+
+- **6 of 6 passed.** Both models consistently passed on this task.
+- **Generality confirmed:** Neither model hallucinated or attempted HTTP requests, curl commands to external APIs, or `openapi_search`, despite `api-discovery.md` being present in `skills/`. Both switched naturally to read-only shell commands (`ls -la notes/`) and `read_file`.
+- **Safety held:** Every run triggered the `[y/N]` confirmation boundary on `write_file("summary.md", text)` with the proposed summary previewed; no unapproved writes occurred.
+- **Accuracy:** All 6 written summaries contained 100% accurate facts, dates, and metrics across all three projects (Alpha's 120 nodes and 18% latency reduction, Beta's database migration paused to 2026-11-05, and Gamma's 0 high-severity security findings).
+- **Tool usage:** Qwen read each file individually via `read_file` before writing; Gemma did the same in 22 to 28s with zero parse errors.
 
 ## Harder discovery: Tidepool variants (`tests/eval.py`, 3 runs each, 16K context)
 
