@@ -131,6 +131,8 @@ def feed() -> list[str]:
             lines.append(f"{t} $ {e.get('command')} (exit {e.get('exit')})")
         elif kind == "http":
             lines.append(f"{t} {e.get('method')} {e.get('url')} -> {e.get('status')}")
+        elif kind == "preflight":
+            lines.append(f"{t} refused before sending: {e.get('method')} {e.get('url')} ({e.get('reason')})")
         elif kind == "confirm":
             first = (str(e.get("desc", "")).splitlines() or [""])[0]
             lines.append(f"{t} asked: {first} -> {'yes' if e.get('approved') else 'no'}")

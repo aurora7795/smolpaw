@@ -112,7 +112,7 @@ Type a request and press Enter; `quit` or Ctrl-C exits. After each answer the ha
 
 `[Harness says]` also checks a write's own result, not just its status code: after a POST, PUT, PATCH or DELETE that returns 2xx, a follow-up GET (free, no approval needed) checks what actually happened — a POST is confirmed against its `Location` header or an `id` in the response; a PUT/PATCH's submitted fields are compared against what a GET now returns; a DELETE is confirmed gone (expecting 404). A mismatch or a resource that is still there after a delete is flagged with a loud `WARNING`, not quietly reported as a plain success. This never reaches the model, so it has no prompt cost — it is purely for the human reading the report.
 
-Every run is logged to `logs/` (gitignored, keys redacted), including each `openapi_search` and `fetch_page` call (url, query/keyword, hit count), so a model's "I couldn't find it" can be checked against what it actually searched for.
+Every run is logged to `logs/` (gitignored, keys redacted), including each `openapi_search` and `fetch_page` call (url, query/keyword, hit count) and each write refused by the pre-flight check, so a model's "I couldn't find it" can be checked against what it actually searched for.
 
 ### Using Ollama
 

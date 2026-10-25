@@ -274,6 +274,28 @@ check("empty body PATCH returns ERROR without asking",
 
 g.requests.request = saved_req
 
+# rejections are logged, so a run can count them (#36)
+saved_pf_log = g._log_file
+g._log_file = tmp / "preflight-log.jsonl"
+g.requests.request = _fail_network
+g.http_request("POST", "http://127.0.0.1:9/api/v3/movie", "")
+g.http_request("GET", "http://127.0.0.1:9/api/v3/movie/lookup?term=")
+g.requests.request = saved_req
+pf_entries = [g.json.loads(line) for line in g._log_file.read_text().splitlines()]
+check("each pre-flight rejection is logged once, as kind preflight", [e["kind"] for e in pf_entries] == ["preflight", "preflight"])
+check("the log entry has the method, URL and reason",
+      pf_entries[0]["method"] == "POST" and pf_entries[0]["url"].endswith("/api/v3/movie") and "requires a request body" in pf_entries[0]["reason"]
+      and "'term' is empty" in pf_entries[1]["reason"])
+g.http_request("GET", "http://127.0.0.1:9/x")
+check("a request that passes pre-flight logs no preflight entry",
+      [g.json.loads(line)["kind"] for line in g._log_file.read_text().splitlines()].count("preflight") == 2)
+import web  # noqa: E402
+saved_pf_feed, web.g._log_file = web.g._log_file, g._log_file
+check("web.py's feed shows a refused request and why",
+      any("refused before sending" in fl and "POST" in fl and "requires a request body" in fl for fl in web.feed()))
+web.g._log_file = saved_pf_feed
+g._log_file = saved_pf_log
+
 check("DELETE with no body is unaffected", g.http_request("DELETE", "http://127.0.0.1:9/x", "") == g.DECLINED and asked())
 check("?term=matrix is unaffected", "query parameter" not in g.http_request("GET", "http://127.0.0.1:9/api/v3/movie/lookup?term=matrix") and not asked())
 check("URL with no query string is unaffected", "query parameter" not in g.http_request("GET", "http://127.0.0.1:9/api/v3/movie") and not asked())
@@ -821,12 +843,14 @@ _l1.write_text("\n".join(json.dumps(e) for e in [
     {"t": "2026-10-25T08:00:07", "kind": "fetch_page", "url": "http://x/docs", "query": "auth", "result": "2 hits"},
     {"t": "2026-10-25T08:00:08", "kind": "remember", "fact": "User prefers dark mode"},
     {"t": "2026-10-25T08:00:09", "kind": "recall", "query": "dark mode", "result": "1 hits"},
+    {"t": "2026-10-25T08:00:09", "kind": "preflight", "method": "POST", "url": "http://x/api/v3/movie", "reason": "POST http://x/api/v3/movie requires a request body."},
     {"t": "2026-10-25T08:00:10", "kind": "final", "answer": "Renamed a.txt.", "actions": ["shell exit 0: mv a.txt a-2026.txt"]},
 ]))
 _l2 = _findings_dir / "20261025-079000-no-final.jsonl"
 _l2.write_text(json.dumps({"t": "2026-10-25T07:50:00", "kind": "start", "model": "x", "prompt": "unfinished"}))
 report = ef.render(_l1)
 check("export_findings renders the prompt and model", "rename the reports" in report and "demo-model" in report)
+check("export_findings renders a refused pre-flight request", "refused before sending: `POST http://x/api/v3/movie`" in report)
 check("export_findings renders a shell action", "`$ mv a.txt a-2026.txt`" in report)
 check("export_findings renders an http action", "`GET http://x/y` -> 200" in report)
 check("export_findings renders a fetch_page action", "`fetch_page` http://x/docs auth -> 2 hits" in report)
