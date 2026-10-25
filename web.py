@@ -479,16 +479,47 @@ summary:focus { outline:none; }
 select, input { width:100%; font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line);
                 background:var(--bg); color:var(--ink); }
 [hidden] { display:none !important; }
-</style></head><body><main>
-<h1>SmolPaw</h1><div class="meta" id="meta">connecting...</div>
-<div class="card pending" id="pending" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
+.nav { display:none; }
+aside { padding:16px 16px 0; }
+main { display:flex; flex-direction:column; }
+#content, .col { display:contents; }
+#recentcard { order:1; }
+@media (min-width:900px) {
+  body { display:grid; grid-template-columns:220px minmax(0,1fr); min-height:100vh; }
+  aside { position:sticky; top:0; height:100vh; padding:20px 14px; border-right:1px solid var(--line);
+          background:var(--card); display:flex; flex-direction:column; gap:6px; overflow-y:auto; }
+  aside h1 { font-size:22px; margin:0 0 12px 8px; }
+  aside .meta { margin:auto 8px 0; font-size:12px; }
+  .nav { display:block; text-align:left; background:transparent; color:var(--muted); font-weight:600;
+         padding:10px 12px; border-radius:8px; flex:none; }
+  .nav:hover { background:var(--bg); color:var(--ink); }
+  .nav.on { background:var(--bg); color:var(--accent); }
+  main { display:block; max-width:none; width:100%; padding:24px 32px; }
+  #content { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:0 24px; align-items:start; }
+  .col { display:block; }
+  .side { position:sticky; top:24px; }
+  [data-views] { display:none; }
+  body[data-view=chat] [data-views~=chat], body[data-view=runs] [data-views~=runs],
+  body[data-view=files] [data-views~=files], body[data-view=settings] [data-views~=settings] { display:block; }
+  body[data-view=files] #content, body[data-view=settings] #content { grid-template-columns:minmax(0,760px); }
+  #setcard > summary, #filescard > summary { display:none; }
+  #prompt { min-height:120px; }
+  .feed pre, #recentcard .runitem { font-size:13px; }
+}
+</style></head><body data-view="chat">
+<aside><h1>SmolPaw</h1>
+  <button class="nav on" data-view="chat">Chat</button><button class="nav" data-view="runs">Runs</button>
+  <button class="nav" data-view="files">Files</button><button class="nav" data-view="settings">Settings</button>
+  <div class="meta" id="meta">connecting...</div></aside>
+<main><div id="content"><div class="col">
+<div class="card pending" id="pending" data-views="chat runs files settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
   <div class="row" id="yesno"><button class="yes" id="yes">Yes</button><button class="no" id="no">No</button></div>
   <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
     <div class="row"><button id="send">Send answer</button></div></div></div>
-<div class="card" id="runcard" hidden><h2>Request</h2><textarea id="prompt" placeholder="What should the agent do?"></textarea>
+<div class="card" id="runcard" data-views="chat" hidden><h2>Request</h2><textarea id="prompt" placeholder="What should the agent do?"></textarea>
   <div class="row"><button id="run">Run</button><button class="ghost" id="stop">Stop</button></div>
   <div class="meta" id="working" hidden></div></div>
-<details class="card" id="setcard" hidden><summary>Settings</summary>
+<details class="card" id="setcard" data-views="settings" hidden><summary>Settings</summary>
   <div class="filesec">
     <h3>Backend</h3><select id="sbackend"></select>
     <h3>Model</h3><input id="smodel" list="smodels" autocomplete="off"><datalist id="smodels"></datalist>
@@ -497,9 +528,9 @@ select, input { width:100%; font:inherit; padding:8px; border-radius:8px; border
     <div class="row"><button id="sapply">Apply</button></div>
     <div class="meta" id="smsg"></div>
   </div></details>
-<div class="card" id="result" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
+<div class="card" id="result" data-views="chat" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
   <pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
-<details class="card" id="filescard"><summary>Files</summary>
+<details class="card" id="filescard" data-views="files"><summary>Files</summary>
   <div class="filesec">
     <h2>Notes (notes.md)</h2>
     <pre id="fnotes">(empty)</pre>
@@ -508,11 +539,12 @@ select, input { width:100%; font:inherit; padding:8px; border-radius:8px; border
     <h2 style="margin-top:12px">Memory (memory.md)</h2>
     <pre id="fmemory">(empty)</pre>
   </div></details>
-<div class="card feed"><div class="cardhead"><h2>Activity</h2><button class="copybtn" id="livebtn" hidden>Current run</button></div>
+<div class="card" id="recentcard" data-views="runs"><h2>Recent runs</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
+</div><div class="col side">
+<div class="card feed" data-views="chat runs"><div class="cardhead"><h2>Activity</h2><button class="copybtn" id="livebtn" hidden>Current run</button></div>
   <div class="meta" id="actsummary" style="margin-bottom:8px"></div>
   <pre id="feed">(nothing yet)</pre></div>
-<div class="card" id="recentcard"><h2>Recent runs</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
-</main><script>
+</div></div></div></main><script>
 const token = new URLSearchParams(location.search).get("t") || "";
 const $ = id => document.getElementById(id);
 let pendingId = null;
@@ -675,6 +707,16 @@ async function refresh() {
   const key = [s.run_id, s.status, s.summary].join("|");
   if (key !== runsKey) { runsKey = key; loadRuns(); }
 }
+const wide = window.matchMedia("(min-width:900px)");
+function openPanels() { if (wide.matches) { $("setcard").open = true; $("filescard").open = true; } }
+function setView(v) {
+  document.body.dataset.view = v;
+  for (const b of document.querySelectorAll(".nav")) b.classList.toggle("on", b.dataset.view === v);
+  try { localStorage.setItem("smolpawView", v); } catch (e) {}
+}
+for (const b of document.querySelectorAll(".nav")) b.onclick = () => setView(b.dataset.view);
+try { const v = localStorage.getItem("smolpawView"); if (["chat", "runs", "files", "settings"].includes(v)) setView(v); } catch (e) {}
+wide.onchange = openPanels; openPanels();
 refresh(); setInterval(refresh, 1500);
 </script></body></html>
 """
