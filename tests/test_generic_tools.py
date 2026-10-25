@@ -68,6 +68,43 @@ check("cat .env asks (not free)", g.run_shell("cat .env") == g.DECLINED and aske
 answer["value"] = True
 check("approved write command runs", "exit code 0" in g.run_shell("echo hi > b.txt") and asked())
 check("approved write took effect", (g.WORKSPACE / "b.txt").read_text() == "hi\n")
+answer["value"] = False
+
+# Windows support (#33): both paths route through PowerShell there, not a bare exec / cmd.exe
+saved_windows, saved_run = g.WINDOWS, g.subprocess.run
+captured = {}
+
+
+def _fake_run(*a, **k):
+    captured["argv"] = a[0]
+    return type("R", (), {"returncode": 0, "stdout": "ok\n", "stderr": ""})()
+
+
+g.subprocess.run = _fake_run
+g.WINDOWS = True
+g.run_shell("ls")
+check("read-only commands route through PowerShell on Windows",
+      captured["argv"][:4] == ["powershell", "-NoProfile", "-NonInteractive", "-Command"]
+      and captured["argv"][4] == "ls")
+answer["value"] = True
+g.run_shell("rm something")
+check("confirm-required commands also route through PowerShell on Windows",
+      captured["argv"][:4] == ["powershell", "-NoProfile", "-NonInteractive", "-Command"]
+      and captured["argv"][4] == "rm something")
+answer["value"] = False
+g.WINDOWS = saved_windows
+
+
+def _raise_oserror(*a, **k):
+    raise FileNotFoundError("[WinError 2] The system cannot find the file specified")
+
+
+g.subprocess.run = _raise_oserror
+res = g.run_shell("ls")
+check("a command that cannot run returns a clean ERROR instead of crashing",
+      res.startswith("ERROR") and "could not run" in res)
+g.subprocess.run = saved_run
+prompts.clear()  # the "rm something" confirm above isn't what later "was anything asked?" checks care about
 
 # files
 check(".env read blocked without asking", g.read_file(".env").startswith("BLOCKED") and not asked())

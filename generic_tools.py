@@ -13,6 +13,7 @@ safety rule lives here, not in the prompt, so the model cannot talk its way past
 import functools
 import json
 import os
+import platform
 import re
 import shlex
 import subprocess
@@ -204,6 +205,27 @@ def _read_only_argv(cmd: str) -> list[str] | None:
     return argv
 
 
+WINDOWS = platform.system() == "Windows"
+
+
+def _run_argv(argv: list[str]) -> subprocess.CompletedProcess:
+    """Run a pre-validated read-only argv. PowerShell on Windows, since ls/cat are its own aliases
+    (#33); there is no ls.exe/cat.exe on PATH by default, so a bare exec crashes with WinError 2."""
+    if WINDOWS:
+        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", shlex.join(argv)],
+                              cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+    return subprocess.run(argv, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+
+
+def _run_shell_string(command: str) -> subprocess.CompletedProcess:
+    """Run an already-approved command line. PowerShell on Windows: shell=True there means cmd.exe,
+    which does not understand ls/cat either (those are PowerShell aliases, not cmd.exe built-ins)."""
+    if WINDOWS:
+        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+                              cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+    return subprocess.run(command, shell=True, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+
+
 @tool
 @_remember
 def run_shell(command: str) -> str:
@@ -215,17 +237,22 @@ def run_shell(command: str) -> str:
     WORKSPACE.mkdir(exist_ok=True)
     argv = _read_only_argv(command)
     if argv:
-        proc = lambda: subprocess.run(argv, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)  # noqa: E731
+        proc = lambda: _run_argv(argv)  # noqa: E731
     else:
         if not _approved(f"Run shell command in workspace/:\n  {command}"):
             return DECLINED
-        proc = lambda: subprocess.run(command, shell=True, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)  # noqa: E731
+        proc = lambda: _run_shell_string(command)  # noqa: E731
     try:
         r = proc()
     except subprocess.TimeoutExpired:
         if not argv:
             ACTIONS.append(f"shell timed out, outcome unknown: {command}")
         return "ERROR: command timed out after 60s. If it changes anything, its outcome is unknown."
+    except OSError as exc:
+        # e.g. the command does not exist on this platform (#33): report cleanly, do not crash the tool call.
+        if not argv:
+            ACTIONS.append(f"shell could not run, outcome unknown: {command}")
+        return f"ERROR: could not run that command ({exc}). It may not exist on this platform."
     if not argv:
         ACTIONS.append(f"shell exit {r.returncode}: {command}")
     out = f"exit code {r.returncode}\n{r.stdout}{('[stderr] ' + r.stderr) if r.stderr else ''}"

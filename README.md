@@ -58,6 +58,7 @@ We have not yet measured the prompt any of these harnesses actually sends, so th
   - [LM Studio](https://lmstudio.ai/) with its local server on port 1234 (default). Load the model with a context length of at least 16384 and one parallel slot.
   - Or [Ollama](https://ollama.com/) on port 11434. See [Using Ollama](#using-ollama) for the context setting.
 - Models tried so far: on LM Studio `google/gemma-4-e4b`, `qwen3.5-9b-mlx`, `ternary-bonsai-8b-mlx`; on Ollama `qwen3.5:9b`, `gemma4:e4b`. See [RESULTS.md](RESULTS.md).
+- Developed on macOS; tested on Windows too. `run_shell` runs commands through PowerShell there (it knows `ls`/`cat` as its own aliases); some of the read-only allow-list (`head`, `grep`, `find`, `wc`, `stat`, `file`) has no native PowerShell equivalent and will ask for approval rather than run free, same as any other command PowerShell does not recognise.
 
 ## Setup
 

@@ -16,6 +16,12 @@ You need a local model server with at least one tool-using model loaded — see
 [Requirements](README.md#requirements) in the README for LM Studio or Ollama setup. Any of the
 models listed there is fine; smaller/faster is a more interesting test than bigger/slower.
 
+On Windows, `./setup.sh` needs a bash-capable shell (Git Bash or WSL) to run; PowerShell can run
+everything after that (`.venv\Scripts\python agent.py ...`). The agent's own shell commands go
+through PowerShell there — it knows `ls`/`cat` natively, but a few of the read-only allow-list
+(`head`, `grep`, `find`, `wc`, `stat`, `file`) have no PowerShell equivalent and will ask for
+approval instead of running free, same as any other command PowerShell does not recognise.
+
 Run it:
 
 ```bash
