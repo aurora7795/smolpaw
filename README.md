@@ -143,9 +143,12 @@ The confirmation rules are the same as in the terminal; only where you answer ch
 | Reading outside `workspace/` and `skills/` | Ask first. |
 | Writing any file or skill | Ask first, showing the text. |
 | `.env` files | Never readable or writable by the file tools. |
+| An `ask_user` answer that looks like a credential (a GitHub/AWS/OpenAI/Slack token, a JWT, or any other long opaque token) | Redacted before it reaches the model, the log, or anything the model repeats back. |
 | Declined action | The model is told and may try another way. |
 
 An approved shell command runs with your user's permissions, so read the prompt, in the terminal or on the web page. See [PLAN.md](PLAN.md) for the reasoning.
+
+The model is told never to ask for a password, token or API key directly — a service's key belongs in `notes.md`/`.env`, where it is injected automatically and the model never sees it. It can still get asked anyway (small models do not always follow instructions), so the credential redaction above is the real backstop, not the instruction.
 
 ## Tools
 

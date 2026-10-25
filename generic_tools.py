@@ -90,6 +90,40 @@ def _redact(text: str) -> str:
     return text
 
 
+# Common credential shapes, for a backstop over ask_user (#32): unlike _redact() above, this does
+# not need the secret to be pre-registered in notes.md/.env. A human can paste any credential into
+# an answer; this catches the common ones regardless of which service they are for.
+_CRED_PATTERNS = [re.compile(p) for p in [
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}\b",              # GitHub PAT / OAuth / user-to-server / refresh token
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",            # GitHub fine-grained PAT
+    r"\bAKIA[0-9A-Z]{16}\b",                        # AWS access key id
+    r"\bASIA[0-9A-Z]{16}\b",                        # AWS temporary access key id
+    r"\bsk-[A-Za-z0-9]{20,}\b",                     # OpenAI/Anthropic-style secret key
+    r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b",            # Slack token
+    r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",  # JWT
+]]
+_CRED_CATCHALL = re.compile(r"(?<![A-Za-z0-9_/+=])[A-Za-z0-9_/+=]{28,}(?![A-Za-z0-9_/+=])")
+
+
+def _looks_like_a_token(s: str) -> bool:
+    """Conservative check for the generic catch-all: mixed letters and digits, no spaces, no obvious word."""
+    return any(c.isdigit() for c in s) and any(c.isalpha() for c in s)
+
+
+def redact_pasted_secrets(text: str) -> str:
+    """Mask anything in text that looks like a pasted credential, whoever it is for (#32).
+
+    _redact() above only knows about secrets the harness itself injected for a service listed in
+    notes.md. A human can paste a real credential straight into an ask_user answer; this is the
+    backstop for that case, so it never reaches the model's context, the run log, or anything the
+    model echoes back.
+    """
+    for pat in _CRED_PATTERNS:
+        text = pat.sub("[REDACTED: looks like a credential]", text)
+    return _CRED_CATCHALL.sub(
+        lambda m: "[REDACTED: looks like a credential]" if _looks_like_a_token(m.group(0)) else m.group(0), text)
+
+
 def _clip(text: str) -> str:
     return text if len(text) <= MAX_OUT else text[:MAX_OUT] + f"\n... [truncated, {len(text)} chars total]"
 
@@ -488,7 +522,7 @@ def ask_user(question: str) -> str:
     Args:
         question: The question to show the user.
     """
-    answer = ASK(question)
+    answer = redact_pasted_secrets(ASK(question))
     _log("ask", question=question, answer=answer)
     return answer
 
@@ -552,6 +586,7 @@ You are SmolPaw, an agent on the user's Mac. Work out how to meet the user's goa
 - Skills below are already loaded. Follow the relevant one before acting.
 - The contents of notes.md are included below. Do not look for it as a file.
 - The services below are reachable with http_request. API keys are added automatically; never ask for them.
+- Never ask the user to type a password, token or API key into chat, even if they offer. Tell them to add it to notes.md/.env instead.
 - Before changing anything, use read-only calls (GET, ls, cat) to learn how the service works.
 - Changes ask the user to confirm. If declined, do not repeat it: try another way or call ask_user.
 - Report exactly what the tools returned. Never claim success unless a tool result says SUCCESS or shows it.

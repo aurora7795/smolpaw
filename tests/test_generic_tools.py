@@ -89,6 +89,25 @@ check("skill name sanitised", (g.SKILLS / "demo.md").exists())
 check("list_skills shows it", "demo: Demo" in g.list_skills())
 check("read_skill works", "x" in g.read_skill("demo"))
 
+# ask_user redacts a pasted credential before it reaches the model or the log (#32)
+check("a GitHub token in an answer is redacted",
+      g.redact_pasted_secrets("ghp_0000000000000000000000000000000000") == "[REDACTED: looks like a credential]")
+check("an AWS key in a sentence is redacted",
+      "[REDACTED" in g.redact_pasted_secrets("here is my key: AKIAABCDEFGHIJKLMNOP thanks")
+      and "AKIAABCDEFGHIJKLMNOP" not in g.redact_pasted_secrets("here is my key: AKIAABCDEFGHIJKLMNOP thanks"))
+check("an ordinary path is not redacted", g.redact_pasted_secrets("/tmp/my demo") == "/tmp/my demo")
+check("an ordinary short answer is not redacted", g.redact_pasted_secrets("Paris") == "Paris")
+saved_ask, saved_log_file = g.ASK, g._log_file
+g.ASK = lambda q: "my token is ghp_0000000000000000000000000000000000 ok"
+g._log_file = tmp / "ask-user-redaction-log.jsonl"
+res = g.ask_user("what is your token?")
+check("ask_user itself redacts a pasted credential before returning it",
+      "ghp_" not in res and "[REDACTED" in res)
+check("the redacted answer, not the raw one, is what gets logged",
+      "ghp_" not in g._log_file.read_text() and "[REDACTED" in g._log_file.read_text())
+g.ASK = saved_ask
+g._log_file = saved_log_file
+
 # http: GET free, others ask
 answer["value"] = False
 check("POST asks and is declined", g.http_request("POST", "http://127.0.0.1:9/x", "{}") == g.DECLINED and asked())
