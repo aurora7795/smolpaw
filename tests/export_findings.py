@@ -48,6 +48,8 @@ def _line(e: dict) -> str:
         return f"- {t} `openapi_search` {e.get('spec_url')} {e.get('keyword') or '(no keyword)'} -> {e.get('result')}"
     if kind == "fetch_page":
         return f"- {t} `fetch_page` {e.get('url')} {e.get('query') or '(no query)'} -> {e.get('result')}"
+    if kind == "web_search":
+        return f"- {t} `web_search` {e.get('query')} ({e.get('provider')}) -> {e.get('result')}"
     if kind == "remember":
         return f"- {t} `remember` {e.get('fact')}"
     if kind == "recall":

@@ -10,7 +10,7 @@ python3 -m venv .venv
 
 echo "→ Installing dependencies..."
 .venv/bin/pip install --upgrade pip --quiet
-.venv/bin/pip install smolagents openai --quiet
+.venv/bin/pip install smolagents openai 'ddgs>=9' --quiet
 
 echo ""
 echo "✓ Done. To run:"

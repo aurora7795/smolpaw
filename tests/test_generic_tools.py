@@ -617,6 +617,310 @@ web.g._log_file = saved_feed_log
 g._log_file = saved_log
 g.requests.get = saved_get
 
+# --- web_search (#24) -----------------------------------------------------------
+
+# 1. Shared behaviour (against a fake provider in SEARCH_PROVIDERS)
+def _fake_search(query: str, limit: int) -> list[dict]:
+    if query == "error":
+        raise ValueError("simulated provider error")
+    return [
+        {"title": f"Title {i}", "url": f"https://example.com/{i}", "snippet": f"Snippet {i} line1\nline2"}
+        for i in range(1, 9)
+    ]
+
+g.SEARCH_PROVIDERS["fake"] = _fake_search
+saved_provider = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake"
+g.ACTIONS.clear()
+
+# 5-result cap
+res_cap = g.web_search("test")
+check("web_search caps results at 5", "5. Title 5" in res_cap and "6. Title 6" not in res_cap)
+
+# Formatting
+check("web_search formats title, url and one-line snippet",
+      "1. Title 1\n   https://example.com/1\n   Snippet 1 line1 line2" in res_cap)
+
+# Redaction
+saved_notes = g.NOTES
+g.NOTES = tmp / "search-notes.md"
+os.environ["SMOLPAW_SEARCH_SECRET"] = "secret-search-token-999"
+g.NOTES.write_text("- search_svc: https://example.com | key_env=SMOLPAW_SEARCH_SECRET\n")
+
+def _secret_search(query: str, limit: int) -> list[dict]:
+    return [{"title": "Secret", "url": "https://example.com/secret", "snippet": "Found secret-search-token-999 in text"}]
+
+g.SEARCH_PROVIDERS["secret_fake"] = _secret_search
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "secret_fake"
+g.ACTIONS.clear()
+res_redacted = g.web_search("secret")
+check("web_search redacts secrets from results",
+      "secret-search-token-999" not in res_redacted and "[REDACTED]" in res_redacted)
+g.NOTES = saved_notes
+
+# Logging fields with no result contents
+saved_log = g._log_file
+g._log_file = tmp / "web-search-log.jsonl"
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake"
+g.ACTIONS.clear()
+g.web_search("test_query")
+ws_log = [g.json.loads(line) for line in g._log_file.read_text().splitlines()][-1]
+check("web_search logs kind web_search", ws_log.get("kind") == "web_search")
+check("web_search logs provider and query", ws_log.get("provider") == "fake" and ws_log.get("query") == "test_query")
+check("web_search logs status and hit count", ws_log.get("status") == "ok" and ws_log.get("hits") == 5 and ws_log.get("result") == "5 hits")
+check("web_search log entry never contains result contents",
+      "Title 1" not in str(ws_log) and "Snippet 1" not in str(ws_log) and "https://example.com" not in str(ws_log))
+
+# Error handling
+g.ACTIONS.clear()
+err_out = g.web_search("error")
+check("web_search turns provider failure into ERROR string", err_out.startswith("ERROR: simulated provider error"))
+ws_err_log = [g.json.loads(line) for line in g._log_file.read_text().splitlines()][-1]
+check("web_search error logged with error status and hit count 0",
+      ws_err_log.get("status") == "error" and ws_err_log.get("hits") == 0 and "ValueError" in ws_err_log.get("result", ""))
+
+# Web feed line for web_search
+saved_feed_log, web.g._log_file = web.g._log_file, g._log_file
+ws_feed_line = web.feed()[-2]  # the success log entry
+check("web.py feed shows web_search query, provider and hits",
+      "web_search" in ws_feed_line and "test_query" in ws_feed_line and "fake" in ws_feed_line and "5 hits" in ws_feed_line)
+web.g._log_file = saved_feed_log
+g._log_file = saved_log
+
+# 2. ddgs provider
+import types
+mock_ddgs_mod = types.ModuleType("ddgs")
+mock_exc_mod = types.ModuleType("ddgs.exceptions")
+class MockDDGSException(Exception): pass
+class MockRatelimitException(MockDDGSException): pass
+class MockTimeoutException(MockDDGSException): pass
+mock_exc_mod.DDGSException = MockDDGSException
+mock_exc_mod.RatelimitException = MockRatelimitException
+mock_exc_mod.TimeoutException = MockTimeoutException
+mock_ddgs_mod.exceptions = mock_exc_mod
+mock_ddgs_mod.DDGSException = MockDDGSException
+mock_ddgs_mod.RatelimitException = MockRatelimitException
+mock_ddgs_mod.TimeoutException = MockTimeoutException
+
+saved_ddgs = sys.modules.get("ddgs")
+saved_ddgs_exc = sys.modules.get("ddgs.exceptions")
+sys.modules["ddgs"] = mock_ddgs_mod
+sys.modules["ddgs.exceptions"] = mock_exc_mod
+
+class FakeDDGS:
+    def __init__(self, mode="ok"):
+        self.mode = mode
+    def text(self, query, max_results=10):
+        if self.mode == "ok":
+            return [
+                {"title": "DDG 1", "href": "https://ddg.example/1", "body": "Snippet 1"},
+                {"title": "DDG 2", "url": "https://ddg.example/2", "snippet": "Snippet 2"},
+            ]
+        elif self.mode == "empty":
+            return []
+        elif self.mode == "empty_exc":
+            raise MockDDGSException("No results found.")
+        elif self.mode == "ratelimit":
+            raise MockRatelimitException("Ratelimit 202")
+        elif self.mode == "timeout":
+            raise MockTimeoutException("search timed out")
+        elif self.mode == "lib_exc":
+            raise MockDDGSException("internal ddgs exception")
+
+# result mapping
+mock_ddgs_mod.DDGS = lambda: FakeDDGS("ok")
+mapped = g._search_ddgs("ddgs test", 5)
+check("ddgs maps results with title, url, snippet",
+      len(mapped) == 2 and mapped[0]["title"] == "DDG 1" and mapped[0]["url"] == "https://ddg.example/1"
+      and mapped[0]["snippet"] == "Snippet 1" and mapped[1]["url"] == "https://ddg.example/2")
+
+# empty results (list and exception)
+mock_ddgs_mod.DDGS = lambda: FakeDDGS("empty")
+check("ddgs returns empty list on empty results", g._search_ddgs("empty", 5) == [])
+mock_ddgs_mod.DDGS = lambda: FakeDDGS("empty_exc")
+check("ddgs returns empty list on No results found exception", g._search_ddgs("empty", 5) == [])
+
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "ddgs"
+g.ACTIONS.clear()
+empty_msg = g.web_search("empty_query")
+check("web_search returns clean no-results message telling not to repeat query",
+      "No results found" in empty_msg and "Try different" in empty_msg and "do not repeat" in empty_msg)
+
+# library exception
+mock_ddgs_mod.DDGS = lambda: FakeDDGS("lib_exc")
+g.ACTIONS.clear()
+lib_err = g.web_search("lib_query")
+check("ddgs library exception returns ERROR and tells not to retry",
+      lib_err.startswith("ERROR:") and "internal ddgs exception" in lib_err and "Do not retry" in lib_err)
+
+# rate-limit exception
+mock_ddgs_mod.DDGS = lambda: FakeDDGS("ratelimit")
+g.ACTIONS.clear()
+rate_err = g.web_search("rate_query")
+check("ddgs rate-limit exception returns ERROR and tells not to retry",
+      rate_err.startswith("ERROR:") and "rate limit" in rate_err.lower() and "Do not retry" in rate_err)
+
+# missing-library case
+sys.modules["ddgs"] = None
+g.ACTIONS.clear()
+missing_err = g.web_search("missing_lib")
+check("ddgs missing library returns ERROR saying to re-run setup.sh",
+      missing_err.startswith("ERROR:") and "./setup.sh" in missing_err)
+
+# restore ddgs sys.modules
+if saved_ddgs is not None:
+    sys.modules["ddgs"] = saved_ddgs
+else:
+    sys.modules.pop("ddgs", None)
+if saved_ddgs_exc is not None:
+    sys.modules["ddgs.exceptions"] = saved_ddgs_exc
+else:
+    sys.modules.pop("ddgs.exceptions", None)
+
+# 3. searxng provider
+class _FakeSearxngResp:
+    def __init__(self, status_code=200, json_data=None, ok=True):
+        self.status_code = status_code
+        self._json_data = json_data
+        self.ok = ok
+    def json(self):
+        if isinstance(self._json_data, Exception):
+            raise self._json_data
+        return self._json_data
+
+saved_get = g.requests.get
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "searxng"
+os.environ["SMOLPAW_SEARCH_URL"] = "http://searxng.local:8080"
+
+# JSON mapping
+g.requests.get = lambda *a, **k: _FakeSearxngResp(
+    200,
+    {"results": [
+        {"title": "SearX 1", "url": "https://searx.example/1", "content": "Content 1"},
+        {"title": "SearX 2", "url": "https://searx.example/2", "snippet": "Snippet 2"},
+    ]}
+)
+sx_mapped = g._search_searxng("searx test", 5)
+check("searxng maps JSON results to title, url, snippet",
+      len(sx_mapped) == 2 and sx_mapped[0]["title"] == "SearX 1" and sx_mapped[0]["url"] == "https://searx.example/1"
+      and sx_mapped[0]["snippet"] == "Content 1" and sx_mapped[1]["snippet"] == "Snippet 2")
+
+# 403 "JSON format not enabled" case
+g.requests.get = lambda *a, **k: _FakeSearxngResp(403, ok=False)
+g.ACTIONS.clear()
+sx_403_err = g.web_search("403 test")
+check("searxng 403 returns ERROR naming the fix (search: formats: in settings.yml)",
+      sx_403_err.startswith("ERROR:") and "403" in sx_403_err and "settings.yml" in sx_403_err and "search: formats:" in sx_403_err)
+
+# connection error
+def _raise_conn_err(*a, **k):
+    raise g.requests.RequestException("SearXNG unreachable")
+g.requests.get = _raise_conn_err
+g.ACTIONS.clear()
+sx_conn_err = g.web_search("conn test")
+check("searxng connection error returns ERROR telling not to retry",
+      sx_conn_err.startswith("ERROR:") and "SearXNG unreachable" in sx_conn_err and "Do not retry" in sx_conn_err)
+
+# malformed JSON
+g.requests.get = lambda *a, **k: _FakeSearxngResp(200, json_data=ValueError("bad json syntax"))
+g.ACTIONS.clear()
+sx_json_err = g.web_search("malformed json")
+check("searxng malformed JSON returns ERROR",
+      sx_json_err.startswith("ERROR:") and "malformed JSON" in sx_json_err)
+
+# restore requests.get and unset SMOLPAW_SEARCH_URL
+g.requests.get = saved_get
+os.environ.pop("SMOLPAW_SEARCH_URL", None)
+
+# 4. Selection
+# unset gives ddgs
+os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
+check("unset SMOLPAW_SEARCH_PROVIDER gives ddgs",
+      g._configure_search_provider() == "ddgs" and g.web_search in g.GENERIC_TOOLS)
+
+# none removes the tool
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "none"
+check("SMOLPAW_SEARCH_PROVIDER=none removes web_search from GENERIC_TOOLS",
+      g._configure_search_provider() == "none" and g.web_search not in g.GENERIC_TOOLS)
+
+# searxng works with URL set
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "searxng"
+check("SMOLPAW_SEARCH_PROVIDER=searxng configures provider and keeps tool in GENERIC_TOOLS",
+      g._configure_search_provider() == "searxng" and g.web_search in g.GENERIC_TOOLS)
+
+# unknown value is a clear startup error
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "unknown_engine"
+startup_err_raised = False
+try:
+    g._configure_search_provider()
+except ValueError as exc:
+    startup_err_raised = "ddgs" in str(exc) and "searxng" in str(exc) and "none" in str(exc)
+check("unknown SMOLPAW_SEARCH_PROVIDER raises startup error naming valid choices", startup_err_raised)
+
+# restore SMOLPAW_SEARCH_PROVIDER
+if saved_provider is not None:
+    os.environ["SMOLPAW_SEARCH_PROVIDER"] = saved_provider
+    g._configure_search_provider()
+else:
+    os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
+    g._configure_search_provider()
+
+# An invalid provider in the environment warns and falls back to ddgs at import (does not crash)
+import subprocess as _sp
+_r = _sp.run([sys.executable, "-c", "import generic_tools as g; print(g.web_search in g.GENERIC_TOOLS)"],
+             cwd=str(Path(__file__).parent.parent), capture_output=True, text=True,
+             env={**os.environ, "SMOLPAW_SEARCH_PROVIDER": "typo_engine"})
+check("invalid SMOLPAW_SEARCH_PROVIDER at import warns and keeps web_search on ddgs",
+      _r.returncode == 0 and "WARNING" in _r.stderr and "typo_engine" in _r.stderr and _r.stdout.strip() == "True")
+
+# The per-request search cap resets through ACTIONS.clear(), which agent.run_request must call
+check("agent.run_request clears ACTIONS (this resets the web_search cap)",
+      "generic_tools.ACTIONS.clear()" in (Path(__file__).parent.parent / "agent.py").read_text())
+
+# Long snippets are clipped
+g.SEARCH_PROVIDERS["long_fake"] = lambda q, n: [{"title": "T", "url": "https://e.com", "snippet": "word " * 500}]
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "long_fake"
+g.ACTIONS.clear()
+check("web_search clips each snippet to 300 characters", len(g.web_search("long").splitlines()[2].strip()) <= 300)
+
+# 5. 3-searches-per-request cap and its reset
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake"
+g.ACTIONS.clear()
+r1 = g.web_search("query 1")
+r2 = g.web_search("query 2")
+r3 = g.web_search("query 3")
+r4 = g.web_search("query 4")
+check("first 3 searches succeed", "1. Title 1" in r1 and "1. Title 1" in r2 and "1. Title 1" in r3)
+check("4th search hit the 3-search limit", "limit reached" in r4.lower() and "maximum 3 searches" in r4)
+
+# reset: ACTIONS.clear() resets the count
+g.ACTIONS.clear()
+r5 = g.web_search("query after reset")
+check("ACTIONS.clear() resets search count allowing new searches", "1. Title 1" in r5)
+
+# 6. A provider added to the dict works with no other code changes
+def _custom_provider(query: str, limit: int) -> list[dict]:
+    return [{"title": "Custom Result", "url": "https://custom.example", "snippet": "Custom snippet for " + query}]
+
+g.SEARCH_PROVIDERS["my_custom"] = _custom_provider
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "my_custom"
+g.ACTIONS.clear()
+custom_res = g.web_search("pluggable test")
+check("provider added to SEARCH_PROVIDERS works with no other code changes",
+      "Custom Result" in custom_res and "https://custom.example" in custom_res and "Custom snippet for pluggable test" in custom_res)
+
+# Clean up fake providers and restore
+g.SEARCH_PROVIDERS.pop("fake", None)
+g.SEARCH_PROVIDERS.pop("secret_fake", None)
+g.SEARCH_PROVIDERS.pop("my_custom", None)
+if saved_provider is not None:
+    os.environ["SMOLPAW_SEARCH_PROVIDER"] = saved_provider
+    g._configure_search_provider()
+else:
+    os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
+    g._configure_search_provider()
+g.ACTIONS.clear()
+
 # write verification (#19): a follow-up GET checks what a write actually did, beyond its status code
 _real_get = g.requests.get
 
@@ -1164,6 +1468,7 @@ _l1.write_text("\n".join(json.dumps(e) for e in [
     {"t": "2026-10-25T08:00:05", "kind": "shell", "command": "mv a.txt a-2026.txt", "read_only": False, "exit": 0},
     {"t": "2026-10-25T08:00:06", "kind": "http", "method": "GET", "url": "http://x/y", "status": 200},
     {"t": "2026-10-25T08:00:07", "kind": "fetch_page", "url": "http://x/docs", "query": "auth", "result": "2 hits"},
+    {"t": "2026-10-25T08:00:07", "kind": "web_search", "query": "auth docs", "provider": "ddgs", "result": "2 hits"},
     {"t": "2026-10-25T08:00:08", "kind": "remember", "fact": "User prefers dark mode"},
     {"t": "2026-10-25T08:00:09", "kind": "recall", "query": "dark mode", "result": "1 hits"},
     {"t": "2026-10-25T08:00:09", "kind": "preflight", "method": "POST", "url": "http://x/api/v3/movie", "reason": "POST http://x/api/v3/movie requires a request body."},
@@ -1182,6 +1487,7 @@ check("export_findings renders a refused pre-flight request", "refused before se
 check("export_findings renders a shell action", "`$ mv a.txt a-2026.txt`" in report)
 check("export_findings renders an http action", "`GET http://x/y` -> 200" in report)
 check("export_findings renders a fetch_page action", "`fetch_page` http://x/docs auth -> 2 hits" in report)
+check("export_findings renders a web_search action", "`web_search` auth docs (ddgs) -> 2 hits" in report)
 check("export_findings renders a remember action", "`remember` User prefers dark mode" in report)
 check("export_findings renders a recall action", "`recall` dark mode -> 1 hits" in report)
 check("export_findings renders a read_file action", "`read_file` a.txt -> ok" in report)

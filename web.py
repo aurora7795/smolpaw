@@ -146,7 +146,7 @@ def list_models(backend: str) -> list[str]:
 TOOL_KINDS = {
     "shell", "http", "fetch_page", "openapi_search",
     "read_file", "write_file", "list_skills", "read_skill", "write_skill",
-    "remember", "recall", "ask",
+    "remember", "recall", "ask", "web_search",
 }
 
 
@@ -192,6 +192,8 @@ def feed(log_path: Path | None = None) -> list[str]:
             lines.append(f"{t} openapi_search {e.get('spec_url')} {e.get('keyword') or '(no keyword)'} -> {e.get('result')}")
         elif kind == "fetch_page":
             lines.append(f"{t} fetch_page {e.get('url')} {e.get('query') or '(no query)'} -> {e.get('result')}")
+        elif kind == "web_search":
+            lines.append(f"{t} web_search {e.get('query')} ({e.get('provider')}) -> {e.get('result')}")
         elif kind == "remember":
             lines.append(f"{t} remember {e.get('fact')}")
         elif kind == "recall":

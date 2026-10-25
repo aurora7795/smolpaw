@@ -157,6 +157,7 @@ The confirmation rules are the same as in the terminal; only where you answer ch
 | Reading outside `workspace/` and `skills/` | Ask first. |
 | Writing any file or skill | Ask first, showing the text. |
 | `.env` files | Never readable or writable by the file tools. |
+| Web search (`web_search`) | Runs freely (read-only). Search queries leave your machine (to DuckDuckGo, or to your SearXNG instance) and need no approval, so the model could put text from your files into a query; set `SMOLPAW_SEARCH_PROVIDER=none` if that matters to you. Search results are untrusted web text and may contain prompt injections or instructions aimed at the model; the confirmation layer protects against acting on them. |
 | An `ask_user` answer that looks like a credential (a GitHub/AWS/OpenAI/Slack token, a JWT, or any other long opaque token) | Redacted before it reaches the model, the log, or anything the model repeats back. |
 | Declined action | The model is told and may try another way. |
 
@@ -166,7 +167,32 @@ The model is told never to ask for a password, token or API key directly — a s
 
 ## Tools
 
-`run_shell`, `http_request`, `fetch_page` (fetch a web page and return text trimmed to match a query), `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`, `remember` (save a fact to long-term memory with user approval), `recall` (search long-term memory for previously remembered facts). `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. `fetch_page` trims large web pages to excerpts matching a query with surrounding context, so long pages do not flood memory. `remember` and `recall` provide on-demand memory without inlining stored facts into the prompt: facts stay in `memory.md` until the model asks for them. Pre-flight validation in `http_request` catches empty required query parameters (`term`, `query`, `q`) and empty-body writes before sending. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
+`run_shell`, `http_request`, `fetch_page` (fetch a web page and return text trimmed to match a query), `web_search` (search the web for up to 5 results with title, URL and snippet), `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`, `remember` (save a fact to long-term memory with user approval), `recall` (search long-term memory for previously remembered facts). `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. `fetch_page` trims large web pages to excerpts matching a query with surrounding context, so long pages do not flood memory. `remember` and `recall` provide on-demand memory without inlining stored facts into the prompt: facts stay in `memory.md` until the model asks for them. Pre-flight validation in `http_request` catches empty required query parameters (`term`, `query`, `q`) and empty-body writes before sending. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
+
+### Web search
+
+`web_search(query)` works out of the box with no configuration beyond `./setup.sh`. The default backend uses the `ddgs` package to query DuckDuckGo without requiring an API key or external service. Because `ddgs` is an unofficial scraper, DuckDuckGo searches can be patchy, rate-limited, or encounter timeouts; clear error messages instruct the model not to retry the same failed query. Searches are capped at 3 calls per request to avoid runaway loops; failed searches count towards the cap. An invalid `SMOLPAW_SEARCH_PROVIDER` prints a warning and falls back to `ddgs`.
+
+Search provider selection is controlled by `SMOLPAW_SEARCH_PROVIDER` in `.env`:
+- Unset or `ddgs` (default): uses DuckDuckGo via the `ddgs` package.
+- `searxng`: queries a SearXNG instance configured by `SMOLPAW_SEARCH_URL` (e.g. `http://localhost:8080`). Note that SearXNG requires `json` listed under `search: formats:` in its `settings.yml`, otherwise its JSON endpoint returns HTTP 403.
+- `none`: unregisters `web_search`, removing it from the model's tool schema so it costs 0 prompt tokens.
+
+Search results are untrusted web text and can contain prompt injections or instructions aimed at the model. The confirmation layer (`_approved`, path scoping, `.env` blocking) is what protects against acting on them.
+
+#### Adding a search provider
+
+Providers follow a single minimal shape: a function `(query: str, limit: int) -> list[dict]`, where each dictionary contains string keys `title`, `url`, and `snippet`. Adding a provider requires only writing this fetching function and registering it in `SEARCH_PROVIDERS` in `generic_tools.py`:
+
+```python
+SEARCH_PROVIDERS = {
+    "ddgs": _search_ddgs,
+    "searxng": _search_searxng,
+    "my_provider": _search_my_provider,
+}
+```
+
+`web_search` handles all shared logic: capping to 5 results, formatting, secret redaction, clipping, per-request search limits, error reporting, and logging.
 
 ## Tests
 
