@@ -15,6 +15,7 @@ import os
 import secrets
 import threading
 import time
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -89,8 +90,10 @@ class Approvals:
 class Session:
     """Runs one agent request at a time in a background thread."""
 
-    def __init__(self, agent, model: str, approvals: Approvals):
+    def __init__(self, agent, model: str, approvals: Approvals, backend: str = "lmstudio",
+                 max_steps: int = MAX_STEPS):
         self.agent, self.model, self.approvals = agent, model, approvals
+        self.backend, self.max_steps = backend, max_steps
         self._lock = threading.Lock()
         self.status, self.prompt, self.answer, self.outcome, self.error = "idle", "", "", "", ""
         self.started_at = 0.0
@@ -115,6 +118,29 @@ class Session:
     def stop(self) -> None:
         self.agent.interrupt()
         self.approvals.cancel()
+
+    def configure(self, backend: str, model: str, max_steps: int, timeout: float) -> bool:
+        """Switch backend, model, step limit and prompt timeout between requests; refused while one runs."""
+        with self._lock:
+            if self.status == "running":
+                return False
+            if (backend, model, max_steps) != (self.backend, self.model, self.max_steps):
+                self.agent = build_agent(model, "tool", max_steps, "generic", backend)
+                self.backend, self.model, self.max_steps = backend, model, max_steps
+            self.approvals.timeout = timeout
+            return True
+
+
+def list_models(backend: str) -> list[str]:
+    """Model ids the backend's server lists (both expose the OpenAI-style /models); empty if unreachable."""
+    try:
+        req = urllib.request.Request(BACKENDS[backend]["url"] + "/models",
+                                     headers={"Authorization": f"Bearer {BACKENDS[backend]['key']}"})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            data = json.loads(r.read(1_000_000))
+        return sorted(str(m["id"]) for m in data.get("data", []) if isinstance(m, dict) and "id" in m)
+    except (OSError, ValueError, KeyError, AttributeError):
+        return []
 
 
 TOOL_KINDS = {
@@ -297,12 +323,19 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 curr_summary = _run_summary(g._log_file) if g._log_file else ""
                 return self._send(200, {
                     **info, "can_run": s is not None,
+                    **({"backends": sorted(BACKENDS), "backend": s.backend, "model": s.model,
+                        "max_steps": s.max_steps, "timeout": approvals.timeout} if s else {}),
                     "status": s.status if s else info.get("status", "running"),
                     "started_at": s.started_at if s and s.status == "running" else None,
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
                     "outcome": s.outcome if s else "", "error": s.error if s else "",
                     "pending": approvals.pending, "feed": feed(),
                     "summary": curr_summary or "", "run_id": g._log_file.name if g._log_file else ""})
+            if path == "/api/models":
+                backend = parse_qs(urlparse(self.path).query).get("backend", [""])[0]
+                if backend not in BACKENDS:
+                    return self._send(404, {"error": "unknown backend"})
+                return self._send(200, list_models(backend))
             if path == "/api/files":
                 return self._send(200, _files_payload())
             if path == "/api/runs":
@@ -345,6 +378,16 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                     return self._send(400, {"error": "empty or too long"})
                 ok = session.start(prompt)
                 return self._send(200 if ok else 409, {"ok": ok})
+            if path == "/api/settings" and session:
+                backend, model = body.get("backend"), body.get("model")
+                steps, timeout = body.get("max_steps"), body.get("timeout")
+                if (backend not in BACKENDS or not isinstance(model, str) or not model.strip()
+                        or len(model) > 200 or isinstance(steps, bool) or not isinstance(steps, int)
+                        or not 1 <= steps <= 50 or isinstance(timeout, bool)
+                        or not isinstance(timeout, (int, float)) or not 0 <= timeout <= 3600):
+                    return self._send(400, {"error": "invalid settings"})
+                ok = session.configure(backend, model.strip(), steps, float(timeout))
+                return self._send(200 if ok else 409, {"ok": ok})
             if path == "/api/stop" and session:
                 session.stop()
                 return self._send(200, {"ok": True})
@@ -384,7 +427,8 @@ def main() -> None:
     token = os.environ.get("SMOLPAW_WEB_TOKEN") or secrets.token_urlsafe(18)
     approvals = Approvals(args.timeout)
     approvals.install()
-    session = Session(build_agent(model, "tool", max_steps, "generic", args.backend), model, approvals)
+    session = Session(build_agent(model, "tool", max_steps, "generic", args.backend), model, approvals,
+                      args.backend, max_steps)
     server = serve(args.host, args.port, token, approvals, session,
                    {"mode": "agent", "backend": args.backend, "model": model})
     print(f"SmolPaw web [{args.backend}: {model}] at {url(args.host, args.port, token)}  (Ctrl-C to stop)")
@@ -432,6 +476,8 @@ summary:focus { outline:none; }
 .filesec h3 { font-size:12px; font-weight:600; color:var(--muted); margin:8px 0 2px; }
 .runitem { padding:6px 8px; border-radius:6px; cursor:pointer; font-size:12px; font-family:ui-monospace, Menlo, monospace; color:var(--muted); margin-bottom:4px; }
 .runitem:hover { background:var(--bg); color:var(--ink); }
+select, input { width:100%; font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line);
+                background:var(--bg); color:var(--ink); }
 [hidden] { display:none !important; }
 </style></head><body><main>
 <h1>SmolPaw</h1><div class="meta" id="meta">connecting...</div>
@@ -442,6 +488,15 @@ summary:focus { outline:none; }
 <div class="card" id="runcard" hidden><h2>Request</h2><textarea id="prompt" placeholder="What should the agent do?"></textarea>
   <div class="row"><button id="run">Run</button><button class="ghost" id="stop">Stop</button></div>
   <div class="meta" id="working" hidden></div></div>
+<details class="card" id="setcard" hidden><summary>Settings</summary>
+  <div class="filesec">
+    <h3>Backend</h3><select id="sbackend"></select>
+    <h3>Model</h3><input id="smodel" list="smodels" autocomplete="off"><datalist id="smodels"></datalist>
+    <h3>Step limit</h3><input id="ssteps" type="number" min="1" max="50">
+    <h3>Prompt timeout (seconds, 0 waits forever)</h3><input id="stimeout" type="number" min="0" max="3600">
+    <div class="row"><button id="sapply">Apply</button></div>
+    <div class="meta" id="smsg"></div>
+  </div></details>
 <div class="card" id="result" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
   <pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
 <details class="card" id="filescard"><summary>Files</summary>
@@ -520,6 +575,36 @@ async function loadFiles() {
     }
   } catch (e) {}
 }
+let setLoaded = false;
+async function loadModels() {
+  try {
+    const models = await api("/api/models?backend=" + encodeURIComponent($("sbackend").value));
+    const dl = $("smodels");
+    while (dl.firstChild) dl.removeChild(dl.firstChild);
+    for (const m of models) { const o = document.createElement("option"); o.value = m; dl.appendChild(o); }
+    $("smsg").textContent = models.length ? "" : "Could not list models from this server; type an id.";
+  } catch (e) {}
+}
+function fillSettings(s) {
+  if (setLoaded) return;
+  setLoaded = true;
+  const sel = $("sbackend");
+  for (const b of s.backends || [s.backend]) {
+    const o = document.createElement("option"); o.value = o.textContent = b; sel.appendChild(o);
+  }
+  sel.value = s.backend; $("smodel").value = s.model;
+  $("ssteps").value = s.max_steps; $("stimeout").value = s.timeout;
+}
+$("sbackend").onchange = () => { $("smodel").value = ""; loadModels(); };
+$("setcard").ontoggle = () => { if ($("setcard").open) loadModels(); };
+$("sapply").onclick = async () => {
+  const r = await fetch("/api/settings", {method: "POST", cache: "no-store",
+    headers: {"X-Token": token, "Content-Type": "application/json"},
+    body: JSON.stringify({backend: $("sbackend").value, model: $("smodel").value,
+      max_steps: parseInt($("ssteps").value, 10), timeout: Number($("stimeout").value)})});
+  $("smsg").textContent = r.ok ? "Applied." : r.status === 409 ? "A request is running; try again when it finishes." : "Invalid settings.";
+  refresh();
+};
 $("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
 let selectedRunId = null, lastRunId = null, runsKey = null;
 async function loadRuns() {
@@ -568,6 +653,9 @@ async function refresh() {
   }
   if (!p) pendingId = null;
   $("runcard").hidden = !s.can_run;
+  $("setcard").hidden = !s.can_run;
+  if (s.can_run) fillSettings(s);
+  $("sapply").disabled = s.status === "running";
   $("run").disabled = s.status === "running"; $("stop").disabled = s.status !== "running";
   $("working").hidden = s.status !== "running";
   if (s.status === "running") { startedAt = s.started_at ? s.started_at * 1000 : (startedAt || Date.now()); tick(); }
