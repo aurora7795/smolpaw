@@ -875,6 +875,23 @@ else:
     os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
     g._configure_search_provider()
 
+import subprocess as _sp  # noqa: E402
+# The setting is read after .env is loaded: import first, set the variable afterwards, then build_agent()
+_code = (
+    "import os, generic_tools as g\n"
+    "from agent import build_agent\n"
+    "def names(): return [t.name for t in build_agent('m', 'tool', 3, 'generic', 'lmstudio').tools.values()]\n"
+    "os.environ['SMOLPAW_SEARCH_PROVIDER'] = 'none'; a = 'web_search' in names()\n"
+    "os.environ['SMOLPAW_SEARCH_PROVIDER'] = 'ddgs'; b = 'web_search' in names()\n"
+    "os.environ['SMOLPAW_SEARCH_PROVIDER'] = 'bogus'; c = 'web_search' in names()\n"
+    "print(a, b, c)"
+)
+_env = {k: v for k, v in os.environ.items() if k != "SMOLPAW_SEARCH_PROVIDER"}
+_r2 = _sp.run([sys.executable, "-c", _code], capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent,
+              env=_env)
+check("build_agent applies SMOLPAW_SEARCH_PROVIDER set after import (none removes, ddgs adds, bad value falls back)",
+      _r2.stdout.strip() == "False True True" and "Falling back to ddgs" in _r2.stderr)
+
 # An invalid provider in the environment warns and falls back to ddgs at import (does not crash)
 import subprocess as _sp
 _r = _sp.run([sys.executable, "-c", "import generic_tools as g; print(g.web_search in g.GENERIC_TOOLS)"],
