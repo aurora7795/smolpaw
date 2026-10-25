@@ -288,8 +288,14 @@ saved_notes = g.NOTES
 g.NOTES = tmp / "page-notes.md"
 g.NOTES.write_text("- page_svc: https://example.com | key_env=SMOLPAW_TEST_PAGE_KEY\n")
 g.requests.get = lambda *a, **k: _FakeGetResp("<p>Token secret-page-token-999 is private</p>")
-redacted_res = g.fetch_page("https://example.com/secret", query="Token")
+redacted_res = g.fetch_page("https://unregistered-page.example/secret", query="Token")
 check("fetch_page redacts secrets", "secret-page-token-999" not in redacted_res and "[REDACTED]" in redacted_res)
+
+# a registered service answering with HTML means a wrong API path, same warning as http_request (not silently trimmed)
+g.requests.get = lambda *a, **k: _FakeGetResp(sample_html)
+wrong_path_res = g.fetch_page("https://example.com/secret", query="SQLite")
+check("fetch_page warns on a service's HTML instead of trimming it",
+      "NOT an answer" in wrong_path_res and "SQLite" not in wrong_path_res)
 g.NOTES = saved_notes
 
 # logging and feed

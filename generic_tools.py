@@ -534,6 +534,14 @@ def fetch_page(url: str, query: str = "") -> str:
         _log("fetch_page", url=url, query=query, status=r.status_code, hits=0, result=f"HTTP {r.status_code}")
         return _clip(_redact(f"HTTP {r.status_code}\n{r.text[:500]}"))
 
+    if _looks_like_html(r) and _is_service(url):
+        # A service from the notes answering with HTML means a wrong API path (its web UI), same as http_request.
+        _log("fetch_page", url=url, query=query, status=r.status_code, hits=0, result="wrong path (service HTML)")
+        return (
+            f"HTTP {r.status_code} but the body is an HTML web page, not API data. "
+            "The path is probably wrong, so this is NOT an answer. Do not read anything into the page. "
+            "Find the real endpoint (see the api-discovery skill)."
+        )
     text = html_to_text(r.text) if _looks_like_html(r) else r.text
     result, hits = _trim_to_query(text, query)
     _log("fetch_page", url=url, query=query, status=r.status_code, hits=hits,
