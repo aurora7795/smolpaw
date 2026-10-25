@@ -278,6 +278,10 @@ button { flex:1; font:inherit; font-weight:600; padding:12px; border-radius:10px
 button.yes { background:var(--yes); } button.no { background:var(--no); }
 button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
 button:disabled { opacity:.45; }
+.cardhead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.cardhead h2 { margin:0; }
+.copybtn { font:12px inherit; font-weight:600; padding:4px 10px; border-radius:6px; border:1px solid var(--line);
+           background:transparent; color:var(--muted); }
 .feed pre { font-size:12px; color:var(--muted); }
 [hidden] { display:none !important; }
 </style></head><body><main>
@@ -289,7 +293,8 @@ button:disabled { opacity:.45; }
 <div class="card" id="runcard" hidden><h2>Request</h2><textarea id="prompt" placeholder="What should the agent do?"></textarea>
   <div class="row"><button id="run">Run</button><button class="ghost" id="stop">Stop</button></div>
   <div class="meta" id="working" hidden></div></div>
-<div class="card" id="result" hidden><h2>Answer</h2><pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
+<div class="card" id="result" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
+  <pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
 <div class="card feed"><h2>Activity</h2><pre id="feed">(nothing yet)</pre></div>
 </main><script>
 const token = new URLSearchParams(location.search).get("t") || "";
@@ -316,6 +321,21 @@ $("no").onclick = () => answer(false);
 $("send").onclick = () => { answer($("reply").value); $("reply").value = ""; };
 $("run").onclick = async () => { const p = $("prompt").value.trim(); if (p) { await api("/api/run", {prompt: p}); refresh(); } };
 $("stop").onclick = () => api("/api/stop", {});
+$("copy").onclick = async () => {
+  const text = $("answer").textContent;
+  const flash = msg => { $("copy").textContent = msg; setTimeout(() => { $("copy").textContent = "Copy"; }, 1500); };
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand("copy"); document.body.removeChild(ta);
+    }
+    flash("Copied!");
+  } catch (e) { flash("Copy failed"); }
+};
 async function refresh() {
   let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach SmolPaw"; return; }
   $("meta").textContent = [s.mode, s.backend, s.model, s.status, s.progress].filter(Boolean).join(" · ");
