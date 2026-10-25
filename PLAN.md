@@ -128,7 +128,7 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 
 Tracked as GitHub issues:
 
-1. Rung 3, a supervised real Radarr add with the `[y/N]` prompt: [#1](https://github.com/aurora7795/smolpaw/issues/1). Measured via `web.py` on Qwen 3.5 9B (2026-10-25): 0 of 3 real-movie passes, nothing ever actually added (see RESULTS.md). Recurring pattern: guessing a write's arguments before looking them up, and shell-spelunking the spec instead of using `openapi_search`. Gemma not yet tried.
+1. Rung 3, a supervised real Radarr add with the `[y/N]` prompt: [#1](https://github.com/aurora7795/smolpaw/issues/1). Measured via `web.py` (2026-10-25): Qwen 3.5 9B 0 of 3 real-movie passes over 4 runs; Gemma 4 E4B one stopped-early run, also failed. Nothing ever actually added (see RESULTS.md). Recurring pattern on both models: guessing a write's arguments before looking them up, and avoiding or misusing `openapi_search` (Qwen via shell spelunking, Gemma by calling an unrelated external API with a placeholder key). Found along the way: `openapi_search` calls are not logged, unlike `http_request`/`run_shell`, making discovery claims hard to audit: [#30](https://github.com/aurora7795/smolpaw/issues/30).
 2. Done: harder Tidepool (no root index, a detail-only field, pagination): [#2](https://github.com/aurora7795/smolpaw/issues/2).
 3. Rung 4, an unrelated local task: [#3](https://github.com/aurora7795/smolpaw/issues/3).
 4. Rung 5, can a model write a useful skill and reuse it ("discover once, then run cheaply"): [#4](https://github.com/aurora7795/smolpaw/issues/4).
