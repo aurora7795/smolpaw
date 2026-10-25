@@ -169,6 +169,82 @@ g.requests.request = lambda *a, **k: _Http('{"ok": true}', "application/json")
 check("JSON body passed through", g.http_request("GET", "http://x/api").endswith('{"ok": true}'))
 g.requests.request = _real_request
 
+# write verification (#19): a follow-up GET checks what a write actually did, beyond its status code
+_real_get = g.requests.get
+
+
+class _VResp:
+    def __init__(self, status, json_body=None, headers=None):
+        self.status_code, self.headers = status, {"content-type": "application/json", **(headers or {})}
+        self._json = json_body
+        self.text = g.json.dumps(json_body) if json_body is not None else ""
+
+    def json(self):
+        if self._json is None:
+            raise ValueError("no json body")
+        return self._json
+
+
+# POST, verified via Location header, fields match
+g.requests.request = lambda *a, **k: _VResp(201, {"id": 5, "monitored": True}, {"Location": "http://x/items/5"})
+g.requests.get = lambda *a, **k: _VResp(200, {"id": 5, "monitored": True})
+answer["value"] = True
+res = g.http_request("POST", "http://x/items", '{"monitored": true}')
+check("POST verified via Location, fields match", "verified: now exists, fields match" in g.ACTIONS[-1])
+
+# POST, verified via an id in the body (no Location), with a field mismatch
+g.requests.request = lambda *a, **k: _VResp(201, {"id": 7, "monitored": True})
+g.requests.get = lambda *a, **k: _VResp(200, {"id": 7, "monitored": False})
+g.http_request("POST", "http://x/items", '{"monitored": true}')
+check("POST verified via id, mismatch reported",
+      "mismatched: monitored: sent True, got False" in g.ACTIONS[-1])
+
+# POST with nothing to verify against
+g.requests.request = lambda *a, **k: _VResp(201, {"ok": True})
+g.http_request("POST", "http://x/items", '{"monitored": true}')
+check("POST with no Location/id says so", "not verified: no Location header or id" in g.ACTIONS[-1])
+
+# PUT, fields match
+g.requests.request = lambda *a, **k: _VResp(200)
+g.requests.get = lambda *a, **k: _VResp(200, {"monitored": True})
+g.http_request("PUT", "http://x/items/5", '{"monitored": true}')
+check("PUT verified, fields match", "verified: fields match" in g.ACTIONS[-1])
+
+# PUT, fields do not match (the write did not really take)
+g.requests.get = lambda *a, **k: _VResp(200, {"monitored": False})
+g.http_request("PUT", "http://x/items/5", '{"monitored": true}')
+check("PUT mismatch reported", "mismatched: monitored: sent True, got False" in g.ACTIONS[-1])
+
+# DELETE, verified gone
+g.requests.request = lambda *a, **k: _VResp(204)
+g.requests.get = lambda *a, **k: _VResp(404)
+g.http_request("DELETE", "http://x/items/5")
+check("DELETE verified gone", "verified: now returns 404" in g.ACTIONS[-1])
+
+# DELETE, NOT actually gone — the loud case this is meant to catch
+g.requests.get = lambda *a, **k: _VResp(200, {"id": 5})
+g.http_request("DELETE", "http://x/items/5")
+check("DELETE still present is flagged as a WARNING",
+      "WARNING" in g.ACTIONS[-1] and "may not actually be deleted" in g.ACTIONS[-1])
+
+# a failed write (non-2xx) is never verified; behaviour is unchanged
+g.requests.request = lambda *a, **k: _VResp(400)
+g.http_request("POST", "http://x/items", '{"monitored": true}')
+check("a failed write is not verified", g.ACTIONS[-1] == "POST http://x/items -> HTTP 400")
+
+# a verification GET that itself fails is reported, not raised
+g.requests.request = lambda *a, **k: _VResp(201, {"id": 9})
+def _raise(*a, **k):
+    raise g.requests.RequestException("boom")
+g.requests.get = _raise
+g.http_request("POST", "http://x/items", '{"monitored": true}')
+check("a verification failure is reported, not raised", "could not verify: RequestException" in g.ACTIONS[-1])
+
+g.requests.request = _real_request
+g.requests.get = _real_get
+answer["value"] = False
+prompts.clear()  # the approvals above aren't what later "was anything asked?" checks care about
+
 # last tool result is remembered for the step-cap fallback
 g.LAST_RESULT = ""
 g.run_shell("ls")
@@ -459,14 +535,14 @@ threading.Thread(target=terminal_relay, args=(_relay_approvals,), daemon=True).s
 _confirm_result = {}
 _th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Do a thing?")))
 _th.start()
-time.sleep(0.4)  # let the relay thread see the pending prompt and start reading
+time.sleep(0.8)  # let the relay thread see the pending prompt and start reading
 os.write(_w, b"y\n")
 _th.join(3)
 check("terminal 'y' approves a confirm prompt", _confirm_result.get("v") is True)
 
 _th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Do another thing?")))
 _th.start()
-time.sleep(0.4)
+time.sleep(0.8)
 os.write(_w, b"n\n")
 _th.join(3)
 check("terminal 'n' declines a confirm prompt", _confirm_result.get("v") is False)
@@ -474,7 +550,7 @@ check("terminal 'n' declines a confirm prompt", _confirm_result.get("v") is Fals
 _ask_result = {}
 _th = threading.Thread(target=lambda: _ask_result.update(v=_relay_approvals.ask("What is the path?")))
 _th.start()
-time.sleep(0.4)
+time.sleep(0.8)
 os.write(_w, b"/tmp/demo\n")
 _th.join(3)
 check("terminal free text answers an ask prompt", _ask_result.get("v") == "/tmp/demo")
@@ -482,7 +558,7 @@ check("terminal free text answers an ask prompt", _ask_result.get("v") == "/tmp/
 # a stale terminal line arriving just after the web page already answered must not flip the result
 _th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Race me?")))
 _th.start()
-time.sleep(0.4)
+time.sleep(0.8)
 _pending_id = _relay_approvals.pending["id"]
 _relay_approvals.answer(_pending_id, True)  # the "web page" answers first
 os.write(_w, b"n\n")  # a stale terminal line, typed before the user saw the web had already answered

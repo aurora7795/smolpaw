@@ -281,6 +281,71 @@ def html_to_text(html: str) -> str:
     return f"Title: {title}\n{body}" if title else body
 
 
+def _diff_fields(sent: dict, got: dict) -> list[str]:
+    """Fields present in both dicts whose values differ, as 'key: sent X, got Y' strings."""
+    return [f"{k}: sent {v!r}, got {got[k]!r}" for k, v in sent.items() if k in got and got[k] != v]
+
+
+def _verify_write(method: str, url: str, data, r: requests.Response) -> str:
+    """Best-effort check of what a write actually did (#19), beyond the status code it returned.
+
+    A follow-up GET only; never asks for approval (GET already runs freely) and never reaches the
+    model, only the human-readable [Harness says] report, so it has no prompt cost. Best-effort:
+    any failure here is reported, never raised, since the original write's own result still stands.
+    """
+    if r.status_code // 100 != 2:
+        return ""
+    headers = _auth_headers(url)
+    try:
+        if method == "DELETE":
+            check = requests.get(url, headers=headers, timeout=10)
+            if check.status_code == 404:
+                return " (verified: now returns 404)"
+            return f" (WARNING: a follow-up GET still returns HTTP {check.status_code} — may not actually be deleted)"
+
+        if method == "POST":
+            target = r.headers.get("Location")
+            if not target:
+                try:
+                    body = r.json()
+                except ValueError:
+                    body = None
+                if isinstance(body, dict) and "id" in body:
+                    target = f"{url.rstrip('/')}/{body['id']}"
+            if not target:
+                return " (not verified: no Location header or id in the response)"
+            check = requests.get(target, headers=headers, timeout=10)
+            if check.status_code // 100 != 2:
+                return f" (WARNING: created but a follow-up GET to {target} returned HTTP {check.status_code})"
+            note = " (verified: now exists"
+            if isinstance(data, dict):
+                try:
+                    got = check.json()
+                except ValueError:
+                    got = None
+                if isinstance(got, dict):
+                    diffs = _diff_fields(data, got)
+                    note += f", but mismatched: {'; '.join(diffs)}" if diffs else ", fields match"
+            return note + ")"
+
+        if method in ("PUT", "PATCH"):
+            check = requests.get(url, headers=headers, timeout=10)
+            if check.status_code // 100 != 2:
+                return f" (WARNING: a follow-up GET returned HTTP {check.status_code} — may not have taken effect)"
+            if isinstance(data, dict):
+                try:
+                    got = check.json()
+                except ValueError:
+                    got = None
+                if isinstance(got, dict):
+                    diffs = _diff_fields(data, got)
+                    return f" (mismatched: {'; '.join(diffs)})" if diffs else " (verified: fields match)"
+            return " (verified: still exists)"
+    except requests.RequestException as exc:
+        return f" (could not verify: {type(exc).__name__})"
+    return ""
+
+
 @tool
 @_remember
 def http_request(method: str, url: str, body: str = "") -> str:
@@ -308,7 +373,7 @@ def http_request(method: str, url: str, body: str = "") -> str:
             ACTIONS.append(f"{method} {url} -> outcome unknown ({type(exc).__name__})")
         return _clip(_redact(f"ERROR: {exc}. For a write, the outcome is unknown, not failed."))
     if method != "GET":
-        ACTIONS.append(f"{method} {url} -> HTTP {r.status_code}")
+        ACTIONS.append(_redact(f"{method} {url} -> HTTP {r.status_code}{_verify_write(method, url, data, r)}"))
     _log("http", method=method, url=url, status=r.status_code)
     if _looks_like_html(r) and not _is_service(url):
         # An ordinary web page: give the model its text, not the markup.
