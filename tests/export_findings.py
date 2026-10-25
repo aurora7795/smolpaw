@@ -27,6 +27,8 @@ def _line(e: dict) -> str:
         return f"- {t} `$ {e.get('command')}` (exit {e.get('exit')})"
     if kind == "http":
         return f"- {t} `{e.get('method')} {e.get('url')}` -> {e.get('status')}"
+    if kind == "preflight":
+        return f"- {t} refused before sending: `{e.get('method')} {e.get('url')}` ({e.get('reason')})"
     if kind == "confirm":
         first = (str(e.get("desc", "")).splitlines() or [""])[0]
         return f"- {t} asked: {first} -> {'yes' if e.get('approved') else 'no'}"

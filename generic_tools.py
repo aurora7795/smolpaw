@@ -445,6 +445,19 @@ def _is_action_endpoint(url: str) -> bool:
     return any(seg in _ACTION_PATH_KEYWORDS for seg in segments)
 
 
+def _preflight_problem(method: str, url: str, body: str) -> str | None:
+    """Return why a request is obviously wrong and not worth sending, or None."""
+    for key, val in parse_qsl(urlparse(url).query, keep_blank_values=True):
+        if key.lower() in _REQUIRED_QUERY_PARAMS and not val.strip():
+            return f"query parameter '{key}' is empty; please provide a value for '{key}'."
+    if method in ("POST", "PUT", "PATCH") and not (body or "").strip() and (method != "POST" or not _is_action_endpoint(url)):
+        return (
+            f"{method} {url} requires a request body. "
+            "Look up the endpoint's required body first (see the api-discovery skill and openapi_search)."
+        )
+    return None
+
+
 @tool
 @_remember
 def http_request(method: str, url: str, body: str = "") -> str:
@@ -456,17 +469,10 @@ def http_request(method: str, url: str, body: str = "") -> str:
         body: Optional JSON text to send as the request body.
     """
     method = method.upper()
-    parsed = urlparse(url)
-    if parsed.query:
-        for key, val in parse_qsl(parsed.query, keep_blank_values=True):
-            if key.lower() in _REQUIRED_QUERY_PARAMS and not val.strip():
-                return _redact(f"ERROR: query parameter '{key}' is empty; please provide a value for '{key}'.")
-    if method in ("POST", "PUT", "PATCH") and (not body or not body.strip()):
-        if method != "POST" or not _is_action_endpoint(url):
-            return _redact(
-                f"ERROR: {method} {url} requires a request body. "
-                "Look up the endpoint's required body first (see the api-discovery skill and openapi_search)."
-            )
+    problem = _preflight_problem(method, url, body)
+    if problem:
+        _log("preflight", method=method, url=url, reason=problem)
+        return _redact(f"ERROR: {problem}")
     try:
         data = json.loads(body) if body else None
     except ValueError:
