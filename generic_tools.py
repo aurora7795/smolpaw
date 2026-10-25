@@ -72,7 +72,7 @@ def services() -> dict[str, dict]:
     if not NOTES.exists():
         return found
     for line in NOTES.read_text().splitlines():
-        m = re.match(r"^- (\w+): (\S+)((?: \| \w+=\S+)*)\s*$", line)
+        m = re.match(r"^- (\w+): (https?://\S+)((?: \| \w+=\S+)*)\s*$", line)
         if not m:
             continue
         opts = dict(kv.split("=", 1) for kv in m.group(3).split(" | ") if kv)
@@ -711,7 +711,7 @@ GENERIC_TOOLS = [
 GUIDANCE = """\
 You are SmolPaw, an agent on the user's Mac. Work out how to meet the user's goal with your tools.
 - Skills below are already loaded. Follow the relevant one before acting.
-- The contents of notes.md are included below. Do not look for it as a file.
+- The contents of notes.md are included below (services, key user preferences). Do not look for it as a file.
 - The services below are reachable with http_request. API keys are added automatically; never ask for them.
 - Never ask the user to type a password, token or API key into chat, even if they offer. Tell them to add it to notes.md/.env instead.
 - Before changing anything, use read-only calls (GET, ls, cat) to learn how the service works.

@@ -72,6 +72,18 @@ cp notes.example.md notes.md    # then list the services you want the agent to r
 
 ### notes.md format
 
+`notes.md` is inlined into every model call, so keep it short.
+
+#### User facts
+Key preferences that shape answers (time zone, measurement units, ownership), replacing OpenClaw-style persona files. Keep to 2–3 lines:
+
+```markdown
+- timezone: Europe/London
+- units: metric (Celsius, km)
+- owner: Martin
+```
+
+#### Services
 ```
 - name: http://host:port | key_env=ENV_VAR | header=Header-Name
   A one-line description.
