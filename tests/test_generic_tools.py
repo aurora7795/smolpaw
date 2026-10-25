@@ -135,6 +135,139 @@ check("skill name sanitised", (g.SKILLS / "demo.md").exists())
 check("list_skills shows it", "demo: Demo" in g.list_skills())
 check("read_skill works", "x" in g.read_skill("demo"))
 
+# file and skill tools logging (#39)
+import web  # noqa: E402
+fs_log = tmp / "file-skill-log.jsonl"
+saved_log_file = g._log_file
+g._log_file = fs_log
+
+# 1. read_file logging
+(g.WORKSPACE / "distinctive_read.txt").write_text("DISTINCTIVE_READ_PAYLOAD_12345\n")
+g.read_file("distinctive_read.txt")
+entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
+check("read_file writes one entry of kind read_file", len(entries) == 1 and entries[0]["kind"] == "read_file")
+check("read_file entry has path and result fields", entries[0]["path"] == "distinctive_read.txt" and entries[0]["result"] == "ok")
+check("read_file log entry never contains file contents", "DISTINCTIVE_READ_PAYLOAD_12345" not in fs_log.read_text())
+
+# blocked secret read
+fs_log.unlink()
+res_secret = g.read_file(".env")
+entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
+check("blocked secrets-file read is logged as blocked",
+      len(entries) == 1 and entries[0]["kind"] == "read_file" and entries[0]["result"] == "blocked (secrets file)")
+check("blocked secrets-file read returned string is unchanged",
+      res_secret == "BLOCKED: this file holds secrets and cannot be read.")
+
+# declined read (outside workspace)
+fs_log.unlink()
+answer["value"] = False
+res_read_declined = g.read_file("../../outside")
+prompts.clear()
+rf_entries = [json.loads(line) for line in fs_log.read_text().splitlines() if json.loads(line).get("kind") == "read_file"]
+check("declined read is logged as declined",
+      len(rf_entries) == 1 and rf_entries[0]["result"] == "declined" and res_read_declined == g.DECLINED)
+
+# read error
+fs_log.unlink()
+res_read_err = g.read_file("nonexistent_file.txt")
+entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
+check("missing file read is logged with exception class name",
+      len(entries) == 1 and entries[0]["kind"] == "read_file" and entries[0]["result"] == "error (FileNotFoundError)")
+
+# 2. write_file logging
+fs_log.unlink()
+answer["value"] = True
+distinctive_text = "SECRET_DISTINCTIVE_BODY_ABCXYZ123456"
+res_write = g.write_file("distinctive.txt", distinctive_text)
+prompts.clear()
+wf_entries = [json.loads(line) for line in fs_log.read_text().splitlines() if json.loads(line).get("kind") == "write_file"]
+check("write_file writes one entry with path, chars, result",
+      len(wf_entries) == 1 and wf_entries[0]["path"] == "distinctive.txt"
+      and wf_entries[0]["chars"] == len(distinctive_text) and wf_entries[0]["result"] == "ok")
+check("write_file log entry never contains file contents",
+      distinctive_text not in json.dumps(wf_entries[0]))
+
+# declined write
+fs_log.unlink()
+answer["value"] = False
+res_write_dec = g.write_file("declined.txt", "declined text")
+prompts.clear()
+wf_entries = [json.loads(line) for line in fs_log.read_text().splitlines() if json.loads(line).get("kind") == "write_file"]
+check("declined write is logged as declined",
+      len(wf_entries) == 1 and wf_entries[0]["result"] == "declined" and res_write_dec == g.DECLINED)
+
+# blocked secret write
+fs_log.unlink()
+res_write_sec = g.write_file(".env", "SECRET=1")
+entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
+check("blocked secrets-file write is logged as blocked",
+      len(entries) == 1 and entries[0]["kind"] == "write_file" and entries[0]["result"] == "blocked (secrets file)")
+
+# 3. list_skills logging
+fs_log.unlink()
+g.list_skills()
+entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
+check("list_skills writes one entry with result",
+      len(entries) == 1 and entries[0]["kind"] == "list_skills" and "skills" in entries[0]["result"])
+
+# 4. read_skill logging
+fs_log.unlink()
+g.read_skill("demo")
+entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
+check("read_skill writes one entry with name and result",
+      len(entries) == 1 and entries[0]["kind"] == "read_skill" and entries[0]["name"] == "demo" and entries[0]["result"] == "ok")
+
+fs_log.unlink()
+res_sk_missing = g.read_skill("nonexistent_skill")
+entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
+check("nonexistent read_skill logged as not found",
+      len(entries) == 1 and entries[0]["kind"] == "read_skill" and entries[0]["result"] == "not found"
+      and res_sk_missing == "No such skill. Call list_skills.")
+
+# 5. write_skill logging
+fs_log.unlink()
+answer["value"] = True
+distinctive_skill = "# Unique Skill\nUNIQUE_SKILL_BODY_QWERTY987"
+g.write_skill("unique_skill", distinctive_skill)
+prompts.clear()
+ws_entries = [json.loads(line) for line in fs_log.read_text().splitlines() if json.loads(line).get("kind") == "write_skill"]
+check("write_skill writes one entry with name, chars, result",
+      len(ws_entries) == 1 and ws_entries[0]["name"] == "unique_skill"
+      and ws_entries[0]["chars"] == len(distinctive_skill) and ws_entries[0]["result"] == "ok")
+check("write_skill log entry never contains skill contents",
+      distinctive_skill not in json.dumps(ws_entries[0]) and "UNIQUE_SKILL_BODY_QWERTY987" not in json.dumps(ws_entries[0]))
+
+# declined write_skill
+fs_log.unlink()
+answer["value"] = False
+res_sk_dec = g.write_skill("declined_sk", "# Decl\ntext")
+prompts.clear()
+ws_entries = [json.loads(line) for line in fs_log.read_text().splitlines() if json.loads(line).get("kind") == "write_skill"]
+check("declined write_skill logged as declined",
+      len(ws_entries) == 1 and ws_entries[0]["result"] == "declined" and res_sk_dec == g.DECLINED)
+
+# 6. web.feed() renders all 5 new kinds
+fs_log.unlink()
+answer["value"] = True
+g.read_file("a.txt")
+g.write_file("feed_w.txt", "hello")
+prompts.clear()
+g.list_skills()
+g.read_skill("demo")
+g.write_skill("feed_sk", "# Sk\ncontent")
+prompts.clear()
+
+saved_feed_log, web.g._log_file = web.g._log_file, fs_log
+feed_lines = web.feed()
+web.g._log_file = saved_feed_log
+g._log_file = saved_log_file
+
+check("web.feed() shows read_file", any("read_file a.txt -> ok" in fl for fl in feed_lines))
+check("web.feed() shows write_file with chars", any("write_file feed_w.txt (5 chars) -> ok" in fl for fl in feed_lines))
+check("web.feed() shows list_skills", any("list_skills ->" in fl for fl in feed_lines))
+check("web.feed() shows read_skill", any("read_skill demo -> ok" in fl for fl in feed_lines))
+check("web.feed() shows write_skill with chars", any("write_skill feed_sk" in fl and "chars) -> ok" in fl for fl in feed_lines))
+
 # memory: remember and recall (#27)
 check("remember is in GENERIC_TOOLS", g.remember in g.GENERIC_TOOLS)
 check("recall is in GENERIC_TOOLS", g.recall in g.GENERIC_TOOLS)
@@ -849,6 +982,11 @@ _l1.write_text("\n".join(json.dumps(e) for e in [
     {"t": "2026-10-25T08:00:08", "kind": "remember", "fact": "User prefers dark mode"},
     {"t": "2026-10-25T08:00:09", "kind": "recall", "query": "dark mode", "result": "1 hits"},
     {"t": "2026-10-25T08:00:09", "kind": "preflight", "method": "POST", "url": "http://x/api/v3/movie", "reason": "POST http://x/api/v3/movie requires a request body."},
+    {"t": "2026-10-25T08:00:09", "kind": "read_file", "path": "a.txt", "result": "ok"},
+    {"t": "2026-10-25T08:00:09", "kind": "write_file", "path": "out.txt", "chars": 42, "result": "ok"},
+    {"t": "2026-10-25T08:00:09", "kind": "list_skills", "result": "3 skills"},
+    {"t": "2026-10-25T08:00:09", "kind": "read_skill", "name": "radarr", "result": "ok"},
+    {"t": "2026-10-25T08:00:09", "kind": "write_skill", "name": "radarr", "chars": 150, "result": "ok"},
     {"t": "2026-10-25T08:00:10", "kind": "final", "answer": "Renamed a.txt.", "actions": ["shell exit 0: mv a.txt a-2026.txt"]},
 ]))
 _l2 = _findings_dir / "20261025-079000-no-final.jsonl"
@@ -861,6 +999,11 @@ check("export_findings renders an http action", "`GET http://x/y` -> 200" in rep
 check("export_findings renders a fetch_page action", "`fetch_page` http://x/docs auth -> 2 hits" in report)
 check("export_findings renders a remember action", "`remember` User prefers dark mode" in report)
 check("export_findings renders a recall action", "`recall` dark mode -> 1 hits" in report)
+check("export_findings renders a read_file action", "`read_file` a.txt -> ok" in report)
+check("export_findings renders a write_file action", "`write_file` out.txt (42 chars) -> ok" in report)
+check("export_findings renders a list_skills action", "`list_skills` -> 3 skills" in report)
+check("export_findings renders a read_skill action", "`read_skill` radarr -> ok" in report)
+check("export_findings renders a write_skill action", "`write_skill` radarr (150 chars) -> ok" in report)
 check("export_findings renders the final answer and duration", "Renamed a.txt." in report and "10s" in report)
 check("a run with no final answer is marked unfinished", "did not finish" in ef.render(_l2))
 _l3 = _findings_dir / "20261025-078000-no-start.jsonl"
