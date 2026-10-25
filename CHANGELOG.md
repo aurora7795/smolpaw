@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- [TESTING.md](TESTING.md): a guide for exploratory testing on a second machine (setup with no services needed, a list of generic agentic tasks to try, how to send findings back), and `tests/export_findings.py`, which bundles every run log in `logs/` into one readable Markdown report for exactly that. Tests cover rendering, an unfinished run, a log with no start entry, and the combined report.
 - `openapi_search` calls are now logged (spec URL, keyword, hit count or error), matching `http_request` and `run_shell`; `web.py`'s activity feed shows them too. Found as a real gap during rung 3 testing, where a model's "could not find it" claims could not be checked against the log (#30).
 - `web.py`: a small rotating "Pawing... (12s)"-style line while a request is running, so the page shows it is still working and how long it has taken (standard library only, ticks client-side off the run's start time, no extra polling).
 - `web.py`: a Copy button on the Answer card, using the Clipboard API where the page is a secure context, with a `document.execCommand` fallback for plain-HTTP access over Tailscale.

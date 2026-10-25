@@ -130,7 +130,7 @@ Tracked as GitHub issues:
 
 1. Rung 3, a supervised real Radarr add with the `[y/N]` prompt: [#1](https://github.com/aurora7795/smolpaw/issues/1). Measured via `web.py` (2026-10-25): Qwen 3.5 9B 0 of 3 real-movie passes over 4 runs; Gemma 4 E4B one stopped-early run, also failed. Nothing ever actually added (see RESULTS.md). Recurring pattern on both models: guessing a write's arguments before looking them up, and avoiding or misusing `openapi_search` (Qwen via shell spelunking, Gemma by calling an unrelated external API with a placeholder key). Found along the way: `openapi_search` calls are not logged, unlike `http_request`/`run_shell`, making discovery claims hard to audit: [#30](https://github.com/aurora7795/smolpaw/issues/30).
 2. Done: harder Tidepool (no root index, a detail-only field, pagination): [#2](https://github.com/aurora7795/smolpaw/issues/2).
-3. Rung 4, an unrelated local task: [#3](https://github.com/aurora7795/smolpaw/issues/3).
+3. Rung 4, an unrelated local task: [#3](https://github.com/aurora7795/smolpaw/issues/3). [TESTING.md](TESTING.md) and `tests/export_findings.py` (2026-10-25) support exploratory testing on a second machine, including file-renaming tasks that double as this rung; findings not yet in.
 4. Rung 5, can a model write a useful skill and reuse it ("discover once, then run cheaply"): [#4](https://github.com/aurora7795/smolpaw/issues/4).
 5. Done: a small eval script so runs are comparable and token counts are recorded: [#5](https://github.com/aurora7795/smolpaw/issues/5).
 6. Done: prefill time on this Mac, to quantify OpenClaw's overhead locally: [#6](https://github.com/aurora7795/smolpaw/issues/6).
