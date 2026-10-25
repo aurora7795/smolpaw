@@ -92,6 +92,13 @@ check("confirm-required commands also route through PowerShell on Windows",
       captured["argv"][:4] == ["powershell", "-NoProfile", "-NonInteractive", "-Command"]
       and captured["argv"][4] == "rm something")
 answer["value"] = False
+
+# a filename with an apostrophe must be quoted PowerShell-style ('' ), not shlex's POSIX '"'"' escape
+check("_ps_quote escapes an embedded single quote for PowerShell",
+      g._ps_quote("O'Brien's notes.txt") == "'O''Brien''s notes.txt'")
+g.run_shell('cat "O\'Brien\'s notes.txt"')
+check("read-only args with an apostrophe are quoted PowerShell-style on Windows",
+      "'\"'\"'" not in captured["argv"][4] and "O''Brien''s notes.txt" in captured["argv"][4])
 g.WINDOWS = saved_windows
 
 

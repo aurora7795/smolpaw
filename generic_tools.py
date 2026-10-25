@@ -208,11 +208,20 @@ def _read_only_argv(cmd: str) -> list[str] | None:
 WINDOWS = platform.system() == "Windows"
 
 
+def _ps_quote(arg: str) -> str:
+    """Quote one argument for PowerShell's single-quoted string syntax (double an embedded quote)."""
+    return "'" + arg.replace("'", "''") + "'"
+
+
 def _run_argv(argv: list[str]) -> subprocess.CompletedProcess:
     """Run a pre-validated read-only argv. PowerShell on Windows, since ls/cat are its own aliases
     (#33); there is no ls.exe/cat.exe on PATH by default, so a bare exec crashes with WinError 2."""
     if WINDOWS:
-        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", shlex.join(argv)],
+        # argv[0] is always a bare name from READ_ONLY_CMDS: quoting it would make PowerShell treat
+        # it as a string literal instead of invoking it. shlex.join's POSIX quoting ('"'"') is also
+        # not how PowerShell escapes an embedded quote, so arguments are quoted PowerShell-style.
+        command = argv[0] + "".join(" " + _ps_quote(a) for a in argv[1:])
+        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
                               cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
     return subprocess.run(argv, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
 
