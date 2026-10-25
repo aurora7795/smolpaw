@@ -641,7 +641,7 @@ def _fake_search(query: str, limit: int) -> list[dict]:
 g.SEARCH_PROVIDERS["fake"] = _fake_search
 saved_provider = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake"
-g.ACTIONS.clear()
+g.reset_search_count()
 
 # 5-result cap
 res_cap = g.web_search("test")
@@ -662,7 +662,7 @@ def _secret_search(query: str, limit: int) -> list[dict]:
 
 g.SEARCH_PROVIDERS["secret_fake"] = _secret_search
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "secret_fake"
-g.ACTIONS.clear()
+g.reset_search_count()
 res_redacted = g.web_search("secret")
 check("web_search redacts secrets from results",
       "secret-search-token-999" not in res_redacted and "[REDACTED]" in res_redacted)
@@ -672,7 +672,7 @@ g.NOTES = saved_notes
 saved_log = g._log_file
 g._log_file = tmp / "web-search-log.jsonl"
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake"
-g.ACTIONS.clear()
+g.reset_search_count()
 g.web_search("test_query")
 ws_log = [g.json.loads(line) for line in g._log_file.read_text().splitlines()][-1]
 check("web_search logs kind web_search", ws_log.get("kind") == "web_search")
@@ -682,7 +682,7 @@ check("web_search log entry never contains result contents",
       "Title 1" not in str(ws_log) and "Snippet 1" not in str(ws_log) and "https://example.com" not in str(ws_log))
 
 # Error handling
-g.ACTIONS.clear()
+g.reset_search_count()
 err_out = g.web_search("error")
 check("web_search turns provider failure into ERROR string", err_out.startswith("ERROR: simulated provider error"))
 ws_err_log = [g.json.loads(line) for line in g._log_file.read_text().splitlines()][-1]
@@ -751,28 +751,28 @@ mock_ddgs_mod.DDGS = lambda: FakeDDGS("empty_exc")
 check("ddgs returns empty list on No results found exception", g._search_ddgs("empty", 5) == [])
 
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "ddgs"
-g.ACTIONS.clear()
+g.reset_search_count()
 empty_msg = g.web_search("empty_query")
 check("web_search returns clean no-results message telling not to repeat query",
       "No results found" in empty_msg and "Try different" in empty_msg and "do not repeat" in empty_msg)
 
 # library exception
 mock_ddgs_mod.DDGS = lambda: FakeDDGS("lib_exc")
-g.ACTIONS.clear()
+g.reset_search_count()
 lib_err = g.web_search("lib_query")
 check("ddgs library exception returns ERROR and tells not to retry",
       lib_err.startswith("ERROR:") and "internal ddgs exception" in lib_err and "Do not retry" in lib_err)
 
 # rate-limit exception
 mock_ddgs_mod.DDGS = lambda: FakeDDGS("ratelimit")
-g.ACTIONS.clear()
+g.reset_search_count()
 rate_err = g.web_search("rate_query")
 check("ddgs rate-limit exception returns ERROR and tells not to retry",
       rate_err.startswith("ERROR:") and "rate limit" in rate_err.lower() and "Do not retry" in rate_err)
 
 # missing-library case
 sys.modules["ddgs"] = None
-g.ACTIONS.clear()
+g.reset_search_count()
 missing_err = g.web_search("missing_lib")
 check("ddgs missing library returns ERROR saying to re-run setup.sh",
       missing_err.startswith("ERROR:") and "./setup.sh" in missing_err)
@@ -817,7 +817,7 @@ check("searxng maps JSON results to title, url, snippet",
 
 # 403 "JSON format not enabled" case
 g.requests.get = lambda *a, **k: _FakeSearxngResp(403, ok=False)
-g.ACTIONS.clear()
+g.reset_search_count()
 sx_403_err = g.web_search("403 test")
 check("searxng 403 returns ERROR naming the fix (search: formats: in settings.yml)",
       sx_403_err.startswith("ERROR:") and "403" in sx_403_err and "settings.yml" in sx_403_err and "search: formats:" in sx_403_err)
@@ -826,14 +826,14 @@ check("searxng 403 returns ERROR naming the fix (search: formats: in settings.ym
 def _raise_conn_err(*a, **k):
     raise g.requests.RequestException("SearXNG unreachable")
 g.requests.get = _raise_conn_err
-g.ACTIONS.clear()
+g.reset_search_count()
 sx_conn_err = g.web_search("conn test")
 check("searxng connection error returns ERROR telling not to retry",
       sx_conn_err.startswith("ERROR:") and "SearXNG unreachable" in sx_conn_err and "Do not retry" in sx_conn_err)
 
 # malformed JSON
 g.requests.get = lambda *a, **k: _FakeSearxngResp(200, json_data=ValueError("bad json syntax"))
-g.ACTIONS.clear()
+g.reset_search_count()
 sx_json_err = g.web_search("malformed json")
 check("searxng malformed JSON returns ERROR",
       sx_json_err.startswith("ERROR:") and "malformed JSON" in sx_json_err)
@@ -900,19 +900,42 @@ _r = _sp.run([sys.executable, "-c", "import generic_tools as g; print(g.web_sear
 check("invalid SMOLPAW_SEARCH_PROVIDER at import warns and keeps web_search on ddgs",
       _r.returncode == 0 and "WARNING" in _r.stderr and "typo_engine" in _r.stderr and _r.stdout.strip() == "True")
 
-# The per-request search cap resets through ACTIONS.clear(), which agent.run_request must call
-check("agent.run_request clears ACTIONS (this resets the web_search cap)",
-      "generic_tools.ACTIONS.clear()" in (Path(__file__).parent.parent / "agent.py").read_text())
+# The per-request search cap resets when a request's run log starts, and ACTIONS.clear() no longer does it
+g.SEARCH_PROVIDERS["fake_reset"] = lambda q, n: [{"title": "R", "url": "https://r.example", "snippet": "s"}]
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake_reset"
+g.reset_search_count()
+for _i in range(3):
+    g.web_search(f"q{_i}")
+g.ACTIONS.clear()
+check("ACTIONS.clear() does not reset the search cap", "limit reached" in g.web_search("q3").lower())
+_saved_logdir = g.LOG_DIR
+g.LOG_DIR = Path(tempfile.mkdtemp())
+g.start_log("m", "next request")
+g.LOG_DIR = _saved_logdir
+check("start_log() resets the search cap for a new request", "limit reached" not in g.web_search("q4").lower())
+g.SEARCH_PROVIDERS.pop("fake_reset", None)
+
+# Parallel searches cannot slip past the cap
+import threading as _th  # noqa: E402
+g.SEARCH_PROVIDERS["fake_par"] = lambda q, n: (time.sleep(0.05), [{"title": "P", "url": "https://p.example", "snippet": "s"}])[1]
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake_par"
+g.reset_search_count()
+_outs: list[str] = []
+_ts = [_th.Thread(target=lambda: _outs.append(g.web_search("par"))) for _ in range(10)]
+[x.start() for x in _ts]
+[x.join() for x in _ts]
+check("10 parallel searches let exactly 3 through", sum("limit reached" not in o.lower() for o in _outs) == 3)
+g.SEARCH_PROVIDERS.pop("fake_par", None)
 
 # Long snippets are clipped
 g.SEARCH_PROVIDERS["long_fake"] = lambda q, n: [{"title": "T", "url": "https://e.com", "snippet": "word " * 500}]
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "long_fake"
-g.ACTIONS.clear()
+g.reset_search_count()
 check("web_search clips each snippet to 300 characters", len(g.web_search("long").splitlines()[2].strip()) <= 300)
 
 # 5. 3-searches-per-request cap and its reset
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake"
-g.ACTIONS.clear()
+g.reset_search_count()
 r1 = g.web_search("query 1")
 r2 = g.web_search("query 2")
 r3 = g.web_search("query 3")
@@ -920,10 +943,10 @@ r4 = g.web_search("query 4")
 check("first 3 searches succeed", "1. Title 1" in r1 and "1. Title 1" in r2 and "1. Title 1" in r3)
 check("4th search hit the 3-search limit", "limit reached" in r4.lower() and "maximum 3 searches" in r4)
 
-# reset: ACTIONS.clear() resets the count
-g.ACTIONS.clear()
+# reset_search_count() gives a new allowance
+g.reset_search_count()
 r5 = g.web_search("query after reset")
-check("ACTIONS.clear() resets search count allowing new searches", "1. Title 1" in r5)
+check("reset_search_count() allows new searches", "1. Title 1" in r5)
 
 # 6. A provider added to the dict works with no other code changes
 def _custom_provider(query: str, limit: int) -> list[dict]:
@@ -931,7 +954,7 @@ def _custom_provider(query: str, limit: int) -> list[dict]:
 
 g.SEARCH_PROVIDERS["my_custom"] = _custom_provider
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "my_custom"
-g.ACTIONS.clear()
+g.reset_search_count()
 custom_res = g.web_search("pluggable test")
 check("provider added to SEARCH_PROVIDERS works with no other code changes",
       "Custom Result" in custom_res and "https://custom.example" in custom_res and "Custom snippet for pluggable test" in custom_res)
@@ -946,7 +969,7 @@ if saved_provider is not None:
 else:
     os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
     g._configure_search_provider()
-g.ACTIONS.clear()
+g.reset_search_count()
 
 # write verification (#19): a follow-up GET checks what a write actually did, beyond its status code
 _real_get = g.requests.get

@@ -18,6 +18,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import warnings
 from datetime import datetime
 from html.parser import HTMLParser
@@ -63,18 +64,19 @@ def _ask_user(question: str) -> str:
 
 ASK = _ask_user
 
-_SEARCH_COUNT = 0  # reset by ACTIONS.clear(), which agent.py's run_request() calls at the start of every request
+_SEARCH_COUNT = 0
+_SEARCH_LOCK = threading.Lock()  # tools can run in parallel threads: check and count together
 MAX_SEARCHES = 3
 
 
-class _ActionList(list):
-    def clear(self) -> None:
-        super().clear()
-        global _SEARCH_COUNT
+def reset_search_count() -> None:
+    """Start a new per-request search allowance (start_log() calls this once per request)."""
+    global _SEARCH_COUNT
+    with _SEARCH_LOCK:
         _SEARCH_COUNT = 0
 
 
-ACTIONS: list[str] = _ActionList()  # outcomes of side-effecting calls; the harness prints these as ground truth
+ACTIONS: list[str] = []  # outcomes of side-effecting calls; the harness prints these as ground truth
 _log_file: Path | None = None
 
 
@@ -155,6 +157,7 @@ def _log(kind: str, **fields) -> None:
 
 def start_log(model: str, prompt: str) -> Path:
     global _log_file
+    reset_search_count()
     LOG_DIR.mkdir(exist_ok=True)
     _log_file = LOG_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{model.replace('/', '_')}.jsonl"
     _log("start", model=model, prompt=prompt)
@@ -716,10 +719,13 @@ def web_search(query: str) -> str:
         return f"ERROR: unknown search provider '{provider_name}'. Valid choices: {', '.join(sorted(SEARCH_PROVIDERS.keys()))}."
 
     global _SEARCH_COUNT
-    if _SEARCH_COUNT >= MAX_SEARCHES:
+    with _SEARCH_LOCK:
+        allowed = _SEARCH_COUNT < MAX_SEARCHES
+        if allowed:
+            _SEARCH_COUNT += 1
+    if not allowed:
         _log("web_search", provider=provider_name, query=query, status="limit", hits=0, result="limit reached")
         return "Search limit reached (maximum 3 searches per request). Please answer using the information you already have."
-    _SEARCH_COUNT += 1
 
     try:
         raw_results = provider_fn(query, 5)
