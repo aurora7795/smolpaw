@@ -152,6 +152,8 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "steps": len(steps),
         "hit_cap": hit_cap,
         "parse_errors": sum(isinstance(s.error, AgentParsingError) for s in steps),
+        # text of each parse error, to see which failure mode recurs (#14) instead of only a count
+        "parse_error_detail": [str(s.error)[:300] for s in steps if isinstance(s.error, AgentParsingError)],
         "input_tokens": tokens_in,
         "output_tokens": tokens_out,
         "tools": [tc.name for s in steps for tc in (s.tool_calls or [])],
