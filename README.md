@@ -92,6 +92,8 @@ python3 agent.py --model google/gemma-4-e4b
 | `--tools` | `generic` | `generic` or `radarr` (hand-written baseline) |
 | `--agent` | `code` | `radarr` toolset only: `code` writes Python, `tool` makes JSON tool calls |
 | `--max-steps` | 12 | Also settable as `MAX_STEPS` in `.env` |
+| `--web` | off | Also print a URL; `[y/N]` and `ask_user` prompts can be answered there instead of the terminal, whichever comes first. The terminal still runs the agent and types requests as normal — this only adds a second way to answer prompts, for example from a phone, without needing `web.py` as a separate process. |
+| `--web-host`, `--web-port` | `127.0.0.1`, `web.py`'s default | `--web` only. `0.0.0.0` to reach it from other devices (for example over Tailscale) |
 
 Type a request and press Enter; `quit` or Ctrl-C exits. After each answer the harness prints `[Harness says]`: what was actually changed or declined, so you do not have to trust the model's summary. If the agent hits the step cap, the harness says so and shows the last tool result. It also stops early, the same way, if the model makes the same tool call with the same arguments three times running and each attempt fails (an `ERROR:`/`DECLINED:` result, an HTTP 4xx/5xx response, or a parsing error) — no point letting it keep retrying something that is not going to start working.
 
@@ -108,7 +110,7 @@ Ollama cuts prompts that exceed the loaded context with no error to the client (
 
 ### Web harness: answer prompts from your phone
 
-`web.py` runs the same agent and puts every `[y/N]` prompt and `ask_user` question on a web page, so you can approve or decline from another device (for example over Tailscale) while a task runs.
+`web.py` runs the same agent and puts every `[y/N]` prompt and `ask_user` question on a web page, so you can approve or decline from another device (for example over Tailscale) while a task runs. Typing requests also happens on the page, not the terminal — for a terminal session that can *also* be answered from a browser (not just run from one), use `agent.py --web` instead (see [Run](#run)).
 
 ```bash
 .venv/bin/python web.py --backend ollama --host 0.0.0.0

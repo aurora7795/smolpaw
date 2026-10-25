@@ -23,6 +23,13 @@ Run it:
 .venv/bin/python agent.py --backend ollama --model <id>     # Ollama
 ```
 
+Add `--web` to also print a URL — approval prompts can then be answered either in the terminal
+or on that page, whichever you prefer at the time (requests are still typed in the terminal).
+Add `--web-host 0.0.0.0` too if you want to reach it from your phone. If you would rather run the
+whole thing from a browser, including typing requests, use `web.py --backend ollama --host
+0.0.0.0` instead (see the README's [Web harness](README.md#web-harness-answer-prompts-from-your-phone)
+section) — pick whichever fits how you are testing.
+
 Every `run_shell` command beyond a few read-only ones (`ls`, `cat`, `grep`, `find`, `wc`, `stat`,
 `file`) asks you `[y/N]` before running — read the command before you approve it, the same as you
 would for Radarr writes. `run_shell` runs with your own account's permissions: it can touch

@@ -7,7 +7,10 @@ import ast
 import json
 import os
 import re
+import secrets
+import select
 import sys
+import threading
 from pathlib import Path
 
 from smolagents import CodeAgent, OpenAIServerModel, ToolCallingAgent
@@ -210,6 +213,36 @@ def run_request(agent, model: str, toolset: str, user_input: str) -> tuple[str, 
     return str(response), f"[Radarr says] {radarr_tools.LAST_ACTION}" if radarr_tools.LAST_ACTION else ""
 
 
+def terminal_relay(approvals) -> None:
+    """Let the terminal answer a pending web-style prompt too, racing the browser; first answer wins.
+
+    Only touches stdin while a prompt is actually pending, so it never steals input meant for the
+    normal "You:" loop (which only reads stdin between requests, never while one is running).
+    """
+    announced = None
+    while True:
+        p = approvals.pending
+        if not p:
+            announced = None
+            threading.Event().wait(0.2)
+            continue
+        if p["id"] != announced:
+            announced = p["id"]
+            hint = "> " if p["kind"] == "ask" else "[y/N] "
+            print(f"\n[also answerable on the web page] {p['text']}\n{hint}", end="", flush=True)
+        ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+        if not ready:
+            continue
+        raw = sys.stdin.readline()
+        if not raw:  # EOF (stdin closed)
+            return
+        current = approvals.pending
+        if not current or current["id"] != p["id"]:
+            continue  # already answered elsewhere while we were reading; drop this stale line
+        value = raw.rstrip("\n") if p["kind"] == "ask" else raw.strip().lower() == "y"
+        approvals.answer(p["id"], value)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio",
@@ -222,6 +255,11 @@ def main() -> None:
                         help="radarr toolset only. code = write Python; tool = JSON tool calls")
     parser.add_argument("--max-steps", type=int, default=None,
                         help="step cap per request (default: MAX_STEPS env var, else 12)")
+    parser.add_argument("--web", action="store_true",
+                        help="also print a web URL; [y/N] and ask_user prompts can be answered there "
+                             "instead of the terminal, whichever comes first")
+    parser.add_argument("--web-host", default="127.0.0.1", help="--web only: 0.0.0.0 for other devices")
+    parser.add_argument("--web-port", type=int, default=None, help="--web only: default is web.py's own default")
     args = parser.parse_args()
 
     load_env()
@@ -232,6 +270,17 @@ def main() -> None:
     label = args.tools if args.tools == "generic" else f"radarr, {args.agent}"
     print(f"SmolPaw [{args.backend}: {args.model}, {label}] — type your message, Ctrl-C or 'quit' to exit.\n")
     agent = build_agent(args.model, args.agent, max_steps, args.tools, args.backend)
+
+    if args.web:
+        import web  # deferred: web.py imports from this module, so import only once it is fully loaded
+        approvals = web.Approvals()
+        approvals.install()
+        token = os.environ.get("SMOLPAW_WEB_TOKEN") or secrets.token_urlsafe(18)
+        port = args.web_port or web.PORT
+        web.serve(args.web_host, port, token, approvals, info={"mode": "agent", "backend": args.backend,
+                                                               "model": args.model})
+        print(f"Also answerable at {web.url(args.web_host, port, token)}\n")
+        threading.Thread(target=terminal_relay, args=(approvals,), daemon=True).start()
 
     while True:
         try:
