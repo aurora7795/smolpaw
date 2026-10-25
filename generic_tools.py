@@ -145,8 +145,10 @@ def start_log(model: str, prompt: str) -> Path:
     return _log_file
 
 
-def log_final(answer: object) -> None:
-    _log("final", answer=str(answer), actions=list(ACTIONS))
+def log_final(answer: object, input_tokens: int | None = None, output_tokens: int | None = None) -> None:
+    """Close the run log; token totals (when the caller has them) feed the web page's run summary."""
+    extra = {} if input_tokens is None else {"input_tokens": input_tokens, "output_tokens": output_tokens or 0}
+    _log("final", answer=str(answer), actions=list(ACTIONS), **extra)
 
 
 LAST_RESULT = ""  # most recent tool output, shown by the harness if the agent hits the step cap

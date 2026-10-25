@@ -933,7 +933,8 @@ f_finished.write_text("\n".join([
     json.dumps({"t": "2026-10-25T10:00:00", "kind": "start", "model": "model_a", "prompt": "do something"}),
     json.dumps({"t": "2026-10-25T10:00:04", "kind": "shell", "command": "ls", "read_only": True, "exit": 0}),
     json.dumps({"t": "2026-10-25T10:00:07", "kind": "http", "method": "GET", "url": "http://x", "status": 200}),
-    json.dumps({"t": "2026-10-25T10:00:12", "kind": "final", "answer": "done"}),
+    json.dumps({"t": "2026-10-25T10:00:12", "kind": "final", "answer": "done",
+                "input_tokens": 12345, "output_tokens": 678}),
 ]) + "\n")
 
 f_unfinished = fake_log_dir / "20261025-110000-model_b.jsonl"
@@ -955,7 +956,8 @@ check("runs list is newest first",
 check("unfinished run summary has model, 'unfinished', and tool count",
       "model_b" in runs[0]["summary"] and "unfinished" in runs[0]["summary"] and "1 tool call" in runs[0]["summary"])
 check("finished run summary has model, elapsed seconds, and tool count",
-      "model_a" in runs[1]["summary"] and "12s" in runs[1]["summary"] and "2 tool calls" in runs[1]["summary"])
+      "model_a" in runs[1]["summary"] and "12s" in runs[1]["summary"] and "2 tool calls" in runs[1]["summary"]
+      and "12,345 in / 678 out tokens" in runs[1]["summary"] and "tokens" not in runs[0]["summary"])
 
 # 2. /api/run_feed returns lines for a real id, 404 for unknown
 r_feed = http.get(f"{base}/api/run_feed?id={f_finished.name}", headers=hdr, timeout=5)
@@ -1010,7 +1012,15 @@ g._log_file = f_finished
 state_with_summary = http.get(f"{base}/api/state", headers=hdr, timeout=5).json()
 check("/api/state contains summary line for current run",
       "model_a" in state_with_summary.get("summary", "") and "12s" in state_with_summary.get("summary", ""))
+check("/api/state names the current run's log file as run_id", state_with_summary.get("run_id") == f_finished.name)
+g._log_file = None
+check("/api/state run_id is empty before any run has started",
+      http.get(f"{base}/api/state", headers=hdr, timeout=5).json().get("run_id") == "")
 g._log_file = saved_curr_log
+_page = http.get(f"{base}/?t={token}", timeout=5).text
+check("page returns to the live feed when the run changes and reloads the list only when it changes",
+      "s.run_id !== lastRunId) selectedRunId = null" in _page and "key !== runsKey" in _page
+      and _page.count("loadRuns();") == 1)  # only the gated call, not an unconditional one per refresh
 
 check("web page contains recentcard and runslist",
       'id="recentcard"' in http.get(f"{base}/?t={token}", timeout=5).text
@@ -1110,6 +1120,8 @@ class _StubAgent:
     def __init__(self, reason):
         self.memory = type("M", (), {"steps": []})()
         self._reason = reason
+        self.monitor = type("Mon", (), {"get_total_token_counts": lambda s: type("T", (), {
+            "input_tokens": 1500, "output_tokens": 40})()})()
 
     def run(self, _task):
         g.LAST_RESULT = "openapi_search: no matching endpoints."  # as a real tool call would set it
@@ -1121,6 +1133,9 @@ class _StubAgent:
 saved_log_dir, saved_log_file = g.LOG_DIR, g._log_file
 g.LOG_DIR = tmp / "stub-run-logs"
 resp, _ = run_request(_StubAgent("the same call failed 3 times in a row"), "m", "generic", "task")
+_final = [json.loads(x) for x in g._log_file.read_text().splitlines()][-1]
+check("the run log's final entry records the run's token totals",
+      _final["kind"] == "final" and _final["input_tokens"] == 1500 and _final["output_tokens"] == 40)
 check("a stall is reported as the answer, with the last tool result",
       resp.startswith("STOPPED EARLY: the same call failed 3 times in a row")
       and "no matching endpoints" in resp)

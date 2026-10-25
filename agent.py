@@ -207,7 +207,8 @@ def run_request(agent, model: str, toolset: str, user_input: str) -> tuple[str, 
                     f"{str(response).strip() or '(none)'}\nLast tool result -> "
                     f"{generic_tools.LAST_RESULT or '(no tool results)'}")
     if toolset == "generic":
-        generic_tools.log_final(response)
+        used = agent.monitor.get_total_token_counts()
+        generic_tools.log_final(response, getattr(used, "input_tokens", None), getattr(used, "output_tokens", None))
         actions = "\n  ".join(generic_tools.ACTIONS) or "no changes made"
         return str(response), f"[Harness says]\n  {actions}"
     return str(response), f"[Radarr says] {radarr_tools.LAST_ACTION}" if radarr_tools.LAST_ACTION else ""
