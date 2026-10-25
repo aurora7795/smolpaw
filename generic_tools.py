@@ -422,7 +422,6 @@ _REQUIRED_QUERY_PARAMS = {"term", "query", "q"}
 _ACTION_PATH_KEYWORDS = {
     "action", "actions",
     "cancel",
-    "command", "commands",
     "execute",
     "refresh",
     "reload",

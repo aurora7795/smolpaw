@@ -151,7 +151,7 @@ The confirmation rules are the same as in the terminal; only where you answer ch
 |---|---|
 | HTTP GET | Runs freely (after pre-flight query check). |
 | Other HTTP methods | Ask `[y/N]` first (after pre-flight validation). |
-| HTTP pre-flight validation | Empty required query parameters (`term=`, `query=`, `q=`) and empty `POST`/`PUT`/`PATCH` bodies (except action/command triggers) return `ERROR:` before any confirmation prompt or network call. |
+| HTTP pre-flight validation | Empty required query parameters (`term=`, `query=`, `q=`) and empty `POST`/`PUT`/`PATCH` bodies (except action triggers) return `ERROR:` before any confirmation prompt or network call. |
 | Read-only shell commands on `workspace/` or `skills/` (`ls`, `cat`, `head`, `grep`, `find`, `wc`, `stat`, `file`) | Run freely. |
 | Any other shell command, pipes, redirects, `find -exec/-delete` | Ask first. |
 | Reading outside `workspace/` and `skills/` | Ask first. |
