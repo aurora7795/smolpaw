@@ -6,12 +6,14 @@ import argparse
 import ast
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from smolagents import CodeAgent, OpenAIServerModel, ToolCallingAgent
+from smolagents.memory import ActionStep
 from smolagents.models import ChatMessage, MessageRole
-from smolagents.utils import AgentMaxStepsError
+from smolagents.utils import AgentError, AgentMaxStepsError
 
 import generic_tools
 import radarr_tools
@@ -116,6 +118,39 @@ class NativeHistoryModel(OpenAIServerModel):
         return prepared
 
 
+STALL_WINDOW = 3  # consecutive identical, failing calls before the harness steps in
+
+
+def _tool_calls_key(tool_calls) -> tuple | None:
+    """A comparable signature for a step's tool call(s), order-independent for parallel calls."""
+    if not tool_calls:
+        return None
+    return tuple(sorted((tc.name, json.dumps(tc.arguments, sort_keys=True, default=str)) for tc in tool_calls))
+
+
+def _is_failure(step: ActionStep) -> bool:
+    """A tool's own ERROR:/DECLINED: text, an HTTP 4xx/5xx response, or a smolagents-level error."""
+    if step.error is not None:
+        return True
+    text = step.observations or ""
+    return text.startswith(("ERROR", "DECLINED")) or bool(re.match(r"^HTTP [45]\d\d\b", text))
+
+
+def check_stall(step, agent) -> None:
+    """Step callback (#19): stop early when the same call fails the same way several times running.
+
+    Pure bookkeeping over agent.memory.steps; no prompt cost. Registered on every build_agent() call.
+    """
+    steps = [s for s in agent.memory.steps if isinstance(s, ActionStep)]
+    window = steps[-STALL_WINDOW:]
+    if len(window) < STALL_WINDOW:
+        return
+    keys = {_tool_calls_key(s.tool_calls) for s in window}
+    if len(keys) == 1 and None not in keys and all(_is_failure(s) for s in window):
+        agent.stall_reason = f"the same call failed {STALL_WINDOW} times in a row"
+        agent.interrupt()
+
+
 def load_env(path: str = ".env") -> None:
     """Load KEY=VALUE lines from a .env file without overriding the real environment."""
     p = Path(__file__).parent / path
@@ -139,11 +174,12 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
     if toolset == "generic":
         # The generic path is ToolCallingAgent only: Bonsai was far more reliable with JSON tool calls.
         return ToolCallingAgent(tools=GENERIC_TOOLS, model=model, max_steps=max_steps,
-                                instructions=generic_tools.build_instructions())
+                                instructions=generic_tools.build_instructions(),
+                                step_callbacks=[check_stall])
     cls = ToolCallingAgent if agent_type == "tool" else CodeAgent
     kwargs = {} if agent_type == "tool" else {"add_base_tools": False}
     return cls(tools=RADARR_TOOLS, model=model, max_steps=max_steps,
-               instructions=RADARR_INSTRUCTIONS, **kwargs)
+               instructions=RADARR_INSTRUCTIONS, step_callbacks=[check_stall], **kwargs)
 
 
 def run_request(agent, model: str, toolset: str, user_input: str) -> tuple[str, str]:
@@ -153,7 +189,14 @@ def run_request(agent, model: str, toolset: str, user_input: str) -> tuple[str, 
     generic_tools.LAST_RESULT = ""
     if toolset == "generic":
         print(f"[log] {generic_tools.start_log(model, user_input)}")
-    response = agent.run(user_input)
+    agent.stall_reason = None
+    try:
+        response = agent.run(user_input)
+    except AgentError:
+        if not agent.stall_reason:
+            raise  # a genuine interrupt (the web harness's Stop button), not a stall
+        last = generic_tools.LAST_RESULT if toolset == "generic" else radarr_tools.LAST_ACTION
+        response = f"STOPPED EARLY: {agent.stall_reason}. Last tool result -> {last or '(no tool results)'}"
     hit_cap = any(isinstance(getattr(step, "error", None), AgentMaxStepsError)
                   for step in agent.memory.steps)
     if hit_cap and toolset == "generic":
