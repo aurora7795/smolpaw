@@ -124,9 +124,27 @@ class _Http:
 
 
 _real_request = g.requests.request
+saved_notes = g.NOTES
+g.NOTES = tmp / "html-notes.md"
+g.NOTES.write_text("- svc: http://x:7878 | key_env=SMOLPAW_TEST_HTML_KEY\n")
 g.requests.request = lambda *a, **k: _Http("<!doctype html><html>login</html>", "text/html")
-res = g.http_request("GET", "http://x/DownloadQueue")
-check("HTML body flagged as not an answer", "HTML web page" in res and "login" not in res)
+res = g.http_request("GET", "http://x:7878/DownloadQueue")
+check("HTML from a known service flagged as not an answer", "HTML web page" in res and "login" not in res)
+page = ("<!doctype html><html><head><title>Release &amp; notes</title><style>p{x:1}</style>"
+        "<script>var secret=1</script></head><body><nav>Home</nav><h1>Python 3.14</h1>"
+        "<p>Released   in\n October.</p><ul><li>one</li><li>two</li></ul></body></html>")
+g.requests.request = lambda *a, **k: _Http(page, "text/html; charset=utf-8")
+res = g.http_request("GET", "https://www.example.org/news")
+check("other web pages converted to text",
+      res.startswith("HTTP 200 (web page converted to text)") and "Title: Release & notes" in res
+      and "Python 3.14\nReleased in October.\none\ntwo" in res)
+check("scripts, styles and tags dropped", "secret" not in res and "x:1" not in res and "<" not in res)
+check("only <main> kept when it has text",
+      g.html_to_text("<div>Menu</div><main><p>Body</p></main><div>Links</div>") == "Body")
+os.environ["SMOLPAW_TEST_HTML_KEY"] = "html-key-12345678"
+g.requests.request = lambda *a, **k: _Http("<p>key html-key-12345678</p>", "text/html")
+check("converted page text is redacted", "html-key-12345678" not in g.http_request("GET", "http://other/"))
+g.NOTES = saved_notes
 g.requests.request = lambda *a, **k: _Http('{"ok": true}', "application/json")
 check("JSON body passed through", g.http_request("GET", "http://x/api").endswith('{"ok": true}'))
 g.requests.request = _real_request

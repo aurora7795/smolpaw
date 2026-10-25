@@ -145,7 +145,7 @@ An approved shell command runs with your user's permissions, so read the prompt,
 
 ## Tools
 
-`run_shell`, `http_request`, `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`. `http_request` also warns when a response is an HTML page instead of API data, because small models read those as answers.
+`run_shell`, `http_request`, `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`. `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
 
 ## Tests
 

@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- `http_request` converts web pages to plain text (title and visible text, `<main>` only when present, no scripts, menus or footers), standard library only. HTML from a service listed in `notes.md` still gets the wrong-path warning. Requests send a `SmolPaw` user agent. Tests cover conversion, the service warning and redaction ([#23](https://github.com/aurora7795/smolpaw/issues/23)).
 - `web.py`: a web harness that runs the agent and puts its `[y/N]` prompts and `ask_user` questions on a phone-friendly page, with an access token, key redaction, an optional timeout (unanswered counts as no) and a Stop button. Standard library only. `tests/eval.py --confirm web` uses the same page. Tests cover tokens, stale and non-boolean answers, timeouts, redaction and the harness's decline record.
 - Ollama as a second model backend: `agent.py --backend ollama` (port 11434, default model `qwen3.5:9b`). `build_agent()` takes a `backend` argument; LM Studio stays the default. Tests cover the backend selection ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
 - `--backend` for `tests/eval.py` and `tests/prefill_timing.py`. On Ollama they load the model, read its context from `/api/ps` and warn if it differs from `--ctx` ([#13](https://github.com/aurora7795/smolpaw/issues/13)).
