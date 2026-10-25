@@ -447,5 +447,50 @@ finally:
 check("export_findings writes a combined report file",
       _out.exists() and "2 run(s)" in _out.read_text() and "unfinished" in _out.read_text())
 
+# terminal_relay (--web on the CLI): the terminal can answer too, racing the web page
+from agent import terminal_relay  # noqa: E402
+
+_relay_approvals = web.Approvals(timeout=5)
+_r, _w = os.pipe()
+_saved_stdin = sys.stdin
+sys.stdin = os.fdopen(_r)
+threading.Thread(target=terminal_relay, args=(_relay_approvals,), daemon=True).start()
+
+_confirm_result = {}
+_th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Do a thing?")))
+_th.start()
+time.sleep(0.4)  # let the relay thread see the pending prompt and start reading
+os.write(_w, b"y\n")
+_th.join(3)
+check("terminal 'y' approves a confirm prompt", _confirm_result.get("v") is True)
+
+_th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Do another thing?")))
+_th.start()
+time.sleep(0.4)
+os.write(_w, b"n\n")
+_th.join(3)
+check("terminal 'n' declines a confirm prompt", _confirm_result.get("v") is False)
+
+_ask_result = {}
+_th = threading.Thread(target=lambda: _ask_result.update(v=_relay_approvals.ask("What is the path?")))
+_th.start()
+time.sleep(0.4)
+os.write(_w, b"/tmp/demo\n")
+_th.join(3)
+check("terminal free text answers an ask prompt", _ask_result.get("v") == "/tmp/demo")
+
+# a stale terminal line arriving just after the web page already answered must not flip the result
+_th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Race me?")))
+_th.start()
+time.sleep(0.4)
+_pending_id = _relay_approvals.pending["id"]
+_relay_approvals.answer(_pending_id, True)  # the "web page" answers first
+os.write(_w, b"n\n")  # a stale terminal line, typed before the user saw the web had already answered
+_th.join(3)
+check("a stale terminal answer after the web already answered does not flip the result",
+      _confirm_result.get("v") is True and _relay_approvals.pending is None)
+
+sys.stdin = _saved_stdin
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
