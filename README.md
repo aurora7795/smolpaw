@@ -171,6 +171,8 @@ Repeatable runs and measurements:
 
 Both take `--backend lmstudio|ollama` and first unload every model on both servers, since only one fits on 16GB. On LM Studio they load the model through `lms` with `--ctx`. Ollama sets the context on its server, so there they load the model, read the context it got from `/api/ps`, and warn if it differs from `--ctx`. `--no-load` (formerly `--no-lms`, still accepted) uses whatever is loaded. Results go to `logs/`, with the backend in the filename and the JSON.
 
+`tests/export_findings.py` bundles every run log in `logs/` into one readable Markdown report (prompt, every action, the final answer), for sending exploratory testing results from another machine — see [TESTING.md](TESTING.md) for a guide aimed at a second tester with their own setup.
+
 Earlier tool calls and results are sent to the model as native `tool_calls` and `tool` messages, because small models copy smolagents' `Calling tools: [...]` text instead of making a real call ([#14](https://github.com/aurora7795/smolpaw/issues/14)). `tests/eval.py --text-history` (or `build_agent(native_history=False)`) sends smolagents' original text format, so the two can be compared; the eval JSON records which was used. Across 48 Ollama runs (both models, all four Tidepool variants) it cut parse errors from 19 to 5 and raised passes from 19 to 23 of 24; an LM Studio sample on Gemma agrees. A recheck with the actual error text (`tests/eval.py` now records it, not just a count) found the history-copying bug itself is gone; the rare remaining errors are the model skipping a tool call, a different and much rarer issue. Samples are 3 to 14 runs per cell, see [RESULTS.md](RESULTS.md).
 
 ## Layout

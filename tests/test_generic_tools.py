@@ -412,5 +412,40 @@ try:
 except AgentError:
     check("a non-stall interrupt (Stop button) is not swallowed", True)
 
+# export_findings.py: bundling run logs into one shareable report
+sys.path.insert(0, str(Path(__file__).parent))
+import export_findings as ef  # noqa: E402
+
+_findings_dir = tmp / "efindings"
+_findings_dir.mkdir()
+ef.LOG_DIR = _findings_dir
+_l1 = _findings_dir / "20261025-080000-demo-model.jsonl"
+_l1.write_text("\n".join(json.dumps(e) for e in [
+    {"t": "2026-10-25T08:00:00", "kind": "start", "model": "demo-model", "prompt": "rename the reports"},
+    {"t": "2026-10-25T08:00:05", "kind": "shell", "command": "mv a.txt a-2026.txt", "read_only": False, "exit": 0},
+    {"t": "2026-10-25T08:00:06", "kind": "http", "method": "GET", "url": "http://x/y", "status": 200},
+    {"t": "2026-10-25T08:00:10", "kind": "final", "answer": "Renamed a.txt.", "actions": ["shell exit 0: mv a.txt a-2026.txt"]},
+]))
+_l2 = _findings_dir / "20261025-079000-no-final.jsonl"
+_l2.write_text(json.dumps({"t": "2026-10-25T07:50:00", "kind": "start", "model": "x", "prompt": "unfinished"}))
+report = ef.render(_l1)
+check("export_findings renders the prompt and model", "rename the reports" in report and "demo-model" in report)
+check("export_findings renders a shell action", "`$ mv a.txt a-2026.txt`" in report)
+check("export_findings renders an http action", "`GET http://x/y` -> 200" in report)
+check("export_findings renders the final answer and duration", "Renamed a.txt." in report and "10s" in report)
+check("a run with no final answer is marked unfinished", "did not finish" in ef.render(_l2))
+_l3 = _findings_dir / "20261025-078000-no-start.jsonl"
+_l3.write_text(json.dumps({"t": "2026-10-25T07:00:00", "kind": "shell", "command": "ls", "read_only": True, "exit": 0}))
+check("render returns None for a file with no start entry", ef.render(_l3) is None)
+_out = tmp / "report.md"
+sys_argv_saved = sys.argv
+sys.argv = ["export_findings.py", "--out", str(_out)]
+try:
+    ef.main()
+finally:
+    sys.argv = sys_argv_saved
+check("export_findings writes a combined report file",
+      _out.exists() and "2 run(s)" in _out.read_text() and "unfinished" in _out.read_text())
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
