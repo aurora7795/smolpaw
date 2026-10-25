@@ -31,7 +31,7 @@ Build, run and workflow rules for this repository. Several rules are adapted fro
 * Deleting branches on GitHub, or any other action that cannot be undone.
 * Installing new software (for example another agent harness).
 * Any change to the confirmation layer (see section 6).
-* Never commit `.env`, `notes.md`, `logs/`, or the contents of `workspace/` (all gitignored). The repository is public: no keys, private addresses or personal data in commits, issues or docs.
+* Never commit `.env`, `notes.md`, `memory.md`, `logs/`, or the contents of `workspace/` (all gitignored). The repository is public: no keys, private addresses or personal data in commits, issues or docs.
 
 ## 3. Issue tracking (GitHub CLI)
 
