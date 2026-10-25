@@ -13,8 +13,10 @@ safety rule lives here, not in the prompt, so the model cannot talk its way past
 import functools
 import json
 import os
+import platform
 import re
 import shlex
+import shutil
 import subprocess
 import warnings
 from datetime import datetime
@@ -40,6 +42,7 @@ SHELL_META = re.compile(r"[;&|<>`$()\\\n]")
 MAX_OUT = 4000
 USER_AGENT = "SmolPaw/0.1 (local agent; https://github.com/aurora7795/smolpaw)"
 DECLINED = "DECLINED: the user said no. Nothing was done. Try another approach or call ask_user."
+IS_WINDOWS = platform.system() == "Windows"
 
 
 def _ask(prompt: str) -> bool:
@@ -214,14 +217,12 @@ def run_shell(command: str) -> str:
     """
     WORKSPACE.mkdir(exist_ok=True)
     argv = _read_only_argv(command)
-    if argv:
-        proc = lambda: subprocess.run(argv, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)  # noqa: E731
-    else:
-        if not _approved(f"Run shell command in workspace/:\n  {command}"):
-            return DECLINED
-        proc = lambda: subprocess.run(command, shell=True, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)  # noqa: E731
+    if not argv and not _approved(f"Run shell command in workspace/:\n  {command}"):
+        return DECLINED
     try:
-        r = proc()
+        r = _shell_proc(command, argv)
+    except FileNotFoundError:
+        return "ERROR: no shell could run that command here (is PowerShell installed?). Try another approach."
     except subprocess.TimeoutExpired:
         if not argv:
             ACTIONS.append(f"shell timed out, outcome unknown: {command}")
@@ -231,6 +232,30 @@ def run_shell(command: str) -> str:
     out = f"exit code {r.returncode}\n{r.stdout}{('[stderr] ' + r.stderr) if r.stderr else ''}"
     _log("shell", command=command, read_only=bool(argv), exit=r.returncode)
     return _clip(_redact(out))
+
+
+POWERSHELL = "pwsh" if shutil.which("pwsh") else "powershell"
+# PowerShell 5.1 writes its console output in the OEM code page; UTF-8 there keeps the
+# captured text decodable on any Windows locale.
+PS_PREFIX = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
+
+
+def _shell_proc(command: str, argv: list[str] | None) -> subprocess.CompletedProcess:
+    """Run a validated read-only argv, or a confirmed command line.
+
+    Windows has no POSIX binaries on PATH and ``shell=True`` there is cmd.exe, which knows none of
+    the ls/cat aliases a model writes, so both paths go through PowerShell instead (#33). The
+    read-only guard has already rejected shell metacharacters and out-of-scope paths, so the
+    validated command line is what PowerShell runs.
+    """
+    if IS_WINDOWS:
+        return subprocess.run(
+            [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", PS_PREFIX + command],
+            cwd=WORKSPACE, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+    if argv:
+        return subprocess.run(argv, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+    return subprocess.run(command, shell=True, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
 
 
 # --- http -------------------------------------------------------------------------

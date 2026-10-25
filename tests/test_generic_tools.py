@@ -4,6 +4,7 @@ The Radarr GET test is live and skipped if RADARR_URL/RADARR_API_KEY are unset.
 """
 
 import os
+import platform
 import sys
 import tempfile
 from pathlib import Path
@@ -65,9 +66,38 @@ check("find -delete asks", g.run_shell("find . -delete") == g.DECLINED and asked
 check("find -exec asks", g.run_shell("find . -exec rm {} ;") == g.DECLINED and asked())
 check("cat .env asks (not free)", g.run_shell("cat .env") == g.DECLINED and asked())
 
+# Windows: both paths go through PowerShell, since cmd.exe knows no ls/cat and there are no
+# POSIX binaries on PATH (#33)
+if platform.system() == "Windows":
+    saved_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join(
+        p for p in saved_path.split(os.pathsep) if "\\git\\" not in p.lower())
+    try:
+        check("ls runs free on Windows without the POSIX tools on PATH",
+              "a.txt" in g.run_shell("ls") and not asked())
+        check("cat runs free on Windows without the POSIX tools on PATH",
+              "hello" in g.run_shell("cat a.txt") and not asked())
+    finally:
+        os.environ["PATH"] = saved_path
+    answer["value"] = True
+    out = g.run_shell("Get-ChildItem a.txt")
+    check("the Windows confirm path runs in PowerShell, not cmd.exe",
+          "a.txt" in out and "not recognized" not in out and asked())
+    os.environ["PATH"] = str(tmp / "no-shell-here")
+    try:
+        try:
+            out = g.run_shell("ls")
+        except OSError:
+            out = ""
+        check("a shell that cannot start is a clean ERROR", out.startswith("ERROR:"))
+    finally:
+        os.environ["PATH"] = saved_path
+
 answer["value"] = True
 check("approved write command runs", "exit code 0" in g.run_shell("echo hi > b.txt") and asked())
-check("approved write took effect", (g.WORKSPACE / "b.txt").read_text() == "hi\n")
+# the redirect encoding belongs to the shell (cmd writes 'hi \r\n', PowerShell 5.1 UTF-16):
+# what matters is that the text landed
+check("approved write took effect", b"hi" in (g.WORKSPACE / "b.txt").read_bytes().replace(b"\x00", b""))
 
 # files
 check(".env read blocked without asking", g.read_file(".env").startswith("BLOCKED") and not asked())

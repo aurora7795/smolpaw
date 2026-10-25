@@ -148,6 +148,8 @@ The confirmation rules are the same as in the terminal; only where you answer ch
 
 An approved shell command runs with your user's permissions, so read the prompt, in the terminal or on the web page. See [PLAN.md](PLAN.md) for the reasoning.
 
+On Windows both kinds of shell command run in PowerShell (`pwsh` when it is installed, otherwise `powershell`): there are no POSIX binaries on `PATH` by default, and `cmd.exe` knows none of the `ls`/`cat` aliases the model writes. PowerShell aliases `ls` and `cat`, so the common read-only calls resolve; other names in the allow-list (`grep`, `find`, `file`) may not exist there, and an approved command behaves as it would in a PowerShell prompt.
+
 The model is told never to ask for a password, token or API key directly — a service's key belongs in `notes.md`/`.env`, where it is injected automatically and the model never sees it. It can still get asked anyway (small models do not always follow instructions), so the credential redaction above is the real backstop, not the instruction.
 
 ## Tools
