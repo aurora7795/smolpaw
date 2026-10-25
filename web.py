@@ -140,6 +140,10 @@ def feed() -> list[str]:
             lines.append(f"{t} openapi_search {e.get('spec_url')} {e.get('keyword') or '(no keyword)'} -> {e.get('result')}")
         elif kind == "fetch_page":
             lines.append(f"{t} fetch_page {e.get('url')} {e.get('query') or '(no query)'} -> {e.get('result')}")
+        elif kind == "remember":
+            lines.append(f"{t} remember {e.get('fact')}")
+        elif kind == "recall":
+            lines.append(f"{t} recall {e.get('query') or '(all)'} -> {e.get('result')}")
         elif kind in ("start", "final"):
             lines.append(f"{t} {kind}")
     return lines

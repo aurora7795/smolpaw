@@ -23,6 +23,7 @@ build/
 
 # SmolPaw runtime
 notes.md
+memory.md
 logs/
 workspace/*
 !workspace/.gitkeep

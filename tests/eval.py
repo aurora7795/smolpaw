@@ -209,6 +209,7 @@ def main() -> None:
     if not prompt:
         ap.error("--prompt is required unless --tidepool is used")
     g.NOTES = tmp / "notes.md"
+    g.MEMORY = tmp / "memory.md"
     web_server, web_info = None, {}
     if args.confirm == "web":
         import web  # noqa: PLC0415 - only needed for this mode

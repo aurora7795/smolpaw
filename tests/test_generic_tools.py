@@ -3,6 +3,7 @@ Safety tests for generic_tools. Run with: .venv/bin/python tests/test_generic_to
 The Radarr GET test is live and skipped if RADARR_URL/RADARR_API_KEY are unset.
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -27,6 +28,7 @@ g.CONFIRM = fake_confirm
 tmp = Path(tempfile.mkdtemp())
 g.WORKSPACE = tmp / "workspace"
 g.SKILLS = tmp / "skills"
+g.MEMORY = tmp / "memory.md"
 g.WORKSPACE.mkdir()
 (g.WORKSPACE / "a.txt").write_text("hello world\n")
 (g.WORKSPACE / ".env").write_text("SECRET=1\n")
@@ -133,6 +135,76 @@ check("skill name sanitised", (g.SKILLS / "demo.md").exists())
 check("list_skills shows it", "demo: Demo" in g.list_skills())
 check("read_skill works", "x" in g.read_skill("demo"))
 
+# memory: remember and recall (#27)
+check("remember is in GENERIC_TOOLS", g.remember in g.GENERIC_TOOLS)
+check("recall is in GENERIC_TOOLS", g.recall in g.GENERIC_TOOLS)
+check("recall on empty memory reports no memories", g.recall() == "No memories saved yet.")
+check("remember rejects empty fact", "ERROR" in g.remember(""))
+
+# remember asks for approval and handles decline
+answer["value"] = False
+declined_res = g.remember("User prefers dark mode")
+check("remember declined returns DECLINED", declined_res == g.DECLINED and asked())
+check("declined fact not written to file", not g.MEMORY.exists() or "dark mode" not in g.MEMORY.read_text())
+
+# remember approved writes fact
+answer["value"] = True
+approved_res = g.remember("User prefers dark mode")
+check("remember approved returns SUCCESS", approved_res.startswith("SUCCESS") and asked())
+check("fact written to memory.md", g.MEMORY.exists() and "User prefers dark mode" in g.MEMORY.read_text())
+
+# remember appends subsequent facts
+g.remember("Backup drive is /Volumes/Backup")
+asked()
+mem_content = g.MEMORY.read_text()
+check("remember appends subsequent facts", "dark mode" in mem_content and "/Volumes/Backup" in mem_content)
+
+# remember redacts credentials
+g.remember("My API key is sk-1234567890abcdef12345678")
+asked()
+redacted_mem = g.MEMORY.read_text()
+check("remember redacts credentials", "sk-1234567890abcdef12345678" not in redacted_mem and "[REDACTED" in redacted_mem)
+
+# recall queries
+all_facts = g.recall()
+check("recall empty query returns all facts", "dark mode" in all_facts and "/Volumes/Backup" in all_facts)
+single_hit = g.recall("dark mode")
+check("recall single keyword returns matching line", "dark mode" in single_hit and "/Volumes/Backup" not in single_hit)
+multi_hit = g.recall("backup drive")
+check("recall multi-word query finds match", "/Volumes/Backup" in multi_hit)
+no_hit = g.recall("nonexistent topic")
+check("recall no match explains clearly", "No memories matching 'nonexistent topic'." in no_hit)
+check("recall does not ask for confirmation", not asked())
+
+# memory is NOT inlined into prompt (prompt overhead is 0)
+check("memory is not inlined into prompt", "dark mode" not in g.build_instructions())
+
+# token budget check: tool schemas for remember and recall under 160 tokens
+rem_schema_len = len(json.dumps({
+    "name": g.remember.name, "description": g.remember.description,
+    "parameters": {"properties": {k: v["description"] for k, v in g.remember.inputs.items()}}
+}))
+rec_schema_len = len(json.dumps({
+    "name": g.recall.name, "description": g.recall.description,
+    "parameters": {"properties": {k: v["description"] for k, v in g.recall.inputs.items()}}
+}))
+check("remember and recall schema fits token budget (< 160 tokens)", (rem_schema_len + rec_schema_len) < 640)
+
+# logging of remember and recall
+mem_log_file = tmp / "mem-log.jsonl"
+saved_log_file = g._log_file
+g._log_file = mem_log_file
+g.remember("Favorite language is Python")
+asked()
+g.recall("Python")
+g.recall("Ruby")
+mem_logs = [json.loads(line) for line in mem_log_file.read_text().splitlines()]
+g._log_file = saved_log_file
+
+check("remember calls are logged", any(l["kind"] == "remember" and "Python" in l["fact"] for l in mem_logs))
+check("recall calls are logged with query and hits", any(l["kind"] == "recall" and l["query"] == "Python" and l["hits"] > 0 for l in mem_logs))
+check("recall zero-hits logged", any(l["kind"] == "recall" and l["query"] == "Ruby" and l["hits"] == 0 for l in mem_logs))
+
 # ask_user redacts a pasted credential before it reaches the model or the log (#32)
 check("a GitHub token in an answer is redacted",
       g.redact_pasted_secrets("ghp_0000000000000000000000000000000000") == "[REDACTED: looks like a credential]")
@@ -198,6 +270,10 @@ import web  # noqa: E402
 saved_feed_log, web.g._log_file = web.g._log_file, (tmp / "openapi-search-log.jsonl")
 line = web.feed()[0]
 check("web.py's feed shows the spec, keyword and result", "spec2.json" in line and "queue" in line and "1 hits" in line)
+web.g._log_file = mem_log_file
+feed_lines = web.feed()
+check("web.py feed shows remember fact", any("remember" in fl and "Python" in fl for fl in feed_lines))
+check("web.py feed shows recall query and hits", any("recall" in fl and "Python" in fl for fl in feed_lines))
 web.g._log_file = saved_feed_log
 
 # HTML responses are flagged, JSON is not
@@ -679,6 +755,8 @@ _l1.write_text("\n".join(json.dumps(e) for e in [
     {"t": "2026-10-25T08:00:05", "kind": "shell", "command": "mv a.txt a-2026.txt", "read_only": False, "exit": 0},
     {"t": "2026-10-25T08:00:06", "kind": "http", "method": "GET", "url": "http://x/y", "status": 200},
     {"t": "2026-10-25T08:00:07", "kind": "fetch_page", "url": "http://x/docs", "query": "auth", "result": "2 hits"},
+    {"t": "2026-10-25T08:00:08", "kind": "remember", "fact": "User prefers dark mode"},
+    {"t": "2026-10-25T08:00:09", "kind": "recall", "query": "dark mode", "result": "1 hits"},
     {"t": "2026-10-25T08:00:10", "kind": "final", "answer": "Renamed a.txt.", "actions": ["shell exit 0: mv a.txt a-2026.txt"]},
 ]))
 _l2 = _findings_dir / "20261025-079000-no-final.jsonl"
@@ -688,6 +766,8 @@ check("export_findings renders the prompt and model", "rename the reports" in re
 check("export_findings renders a shell action", "`$ mv a.txt a-2026.txt`" in report)
 check("export_findings renders an http action", "`GET http://x/y` -> 200" in report)
 check("export_findings renders a fetch_page action", "`fetch_page` http://x/docs auth -> 2 hits" in report)
+check("export_findings renders a remember action", "`remember` User prefers dark mode" in report)
+check("export_findings renders a recall action", "`recall` dark mode -> 1 hits" in report)
 check("export_findings renders the final answer and duration", "Renamed a.txt." in report and "10s" in report)
 check("a run with no final answer is marked unfinished", "did not finish" in ef.render(_l2))
 _l3 = _findings_dir / "20261025-078000-no-start.jsonl"
