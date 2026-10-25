@@ -136,6 +136,8 @@ def feed() -> list[str]:
             lines.append(f"{t} asked: {first} -> {'yes' if e.get('approved') else 'no'}")
         elif kind == "ask":
             lines.append(f"{t} question: {e.get('question')}")
+        elif kind == "openapi_search":
+            lines.append(f"{t} openapi_search {e.get('spec_url')} {e.get('keyword') or '(no keyword)'} -> {e.get('result')}")
         elif kind in ("start", "final"):
             lines.append(f"{t} {kind}")
     return lines

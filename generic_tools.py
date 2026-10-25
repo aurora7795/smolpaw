@@ -340,6 +340,7 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
             r = requests.get(spec_url, timeout=30)
             _SPECS[spec_url] = r.json()
         except (requests.RequestException, ValueError) as exc:
+            _log("openapi_search", spec_url=spec_url, keyword=keyword, result=f"error: not a spec ({type(exc).__name__})")
             return (
                 f"ERROR: {spec_url} is not an OpenAPI spec ({type(exc).__name__}). "
                 "Do not guess spec URLs. Call the API itself with http_request instead."
@@ -347,6 +348,7 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
     spec = _SPECS[spec_url]
     if not isinstance(spec, dict) or "paths" not in spec:
         _SPECS.pop(spec_url, None)
+        _log("openapi_search", spec_url=spec_url, keyword=keyword, result="error: no 'paths' key")
         return (
             f"ERROR: {spec_url} returns JSON but it is not an OpenAPI spec (it has no 'paths'). "
             "That JSON is probably the API's own data or index: read it with http_request instead."
@@ -354,6 +356,7 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
     paths = spec["paths"]
     if not keyword:
         tags = sorted({t for ops in paths.values() for op in ops.values() if isinstance(op, dict) for t in op.get("tags", [])})
+        _log("openapi_search", spec_url=spec_url, keyword=keyword, result=f"{len(paths)} endpoints, no keyword")
         return f"{len(paths)} endpoints. Tags: {', '.join(tags)}"
     kw = keyword.lower()
     hits = []
@@ -364,6 +367,7 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
             text = " ".join([path, op.get("summary", ""), " ".join(op.get("tags", []))]).lower()
             if kw in text:
                 hits.append(f"{method.upper()} {path}  {op.get('summary', '')}".rstrip())
+    _log("openapi_search", spec_url=spec_url, keyword=keyword, result=f"{len(hits)} hits")
     return "\n".join(hits[:20]) + (f"\n... {len(hits) - 20} more" if len(hits) > 20 else "") or "No matching endpoints."
 
 
