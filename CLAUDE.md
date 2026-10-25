@@ -50,6 +50,7 @@ Build, run and workflow rules for this repository. Several rules are adapted fro
 
 * When code changes behaviour, update the docs in the same change: [README.md](README.md) for usage, flags, tools and safety rules; [RESULTS.md](RESULTS.md) for any new measurement; [PLAN.md](PLAN.md) for status and next steps.
 * No placeholders, dummy text or TODOs in docs. Describe what actually exists. Report numbers as measured, including small sample sizes and caveats, and correct earlier figures if they were wrong.
+* A measurement in RESULTS.md is not finished until its script and fixture are committed to the repo (ideally `tests/eval.py` or a sibling using its conventions and JSON log shape). It needs a pass/fail check against real output (the file written, the API actually called), not just the model's final spoken answer, and it must run against an isolated workspace/notes, never the real `workspace/` or `notes.md`. A result nobody else can rerun from the repo doesn't go in RESULTS.md, however plausible the numbers look.
 
 ## 6. Project-specific rules
 
