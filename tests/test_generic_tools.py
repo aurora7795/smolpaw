@@ -117,6 +117,26 @@ check("openapi_search explains non-spec JSON", "not an OpenAPI spec" in msg and 
 g.requests.get = lambda *a, **k: _Resp()
 check("openapi_search no match", g.openapi_search("http://x/spec.json", "zzz") == "No matching endpoints.")
 
+# openapi_search calls are logged, like http_request and run_shell (#30)
+_SPECS_SAVED = dict(g._SPECS)
+g._SPECS.clear()
+saved_log_file = g._log_file
+g._log_file = tmp / "openapi-search-log.jsonl"
+g.requests.get = lambda *a, **k: _Resp()
+g.openapi_search("http://x/spec2.json", "queue")
+g.openapi_search("http://x/spec2.json", "zzz")
+entries = [g.json.loads(line) for line in g._log_file.read_text().splitlines()]
+check("openapi_search calls are logged", [e["kind"] for e in entries] == ["openapi_search", "openapi_search"])
+check("logged entry has the keyword and a hit count", entries[0]["keyword"] == "queue" and entries[0]["result"] == "1 hits")
+check("a no-match call is logged too", entries[1]["keyword"] == "zzz" and entries[1]["result"] == "0 hits")
+g._log_file = saved_log_file
+g._SPECS.clear(); g._SPECS.update(_SPECS_SAVED)
+import web  # noqa: E402
+saved_feed_log, web.g._log_file = web.g._log_file, (tmp / "openapi-search-log.jsonl")
+line = web.feed()[0]
+check("web.py's feed shows the spec, keyword and result", "spec2.json" in line and "queue" in line and "1 hits" in line)
+web.g._log_file = saved_feed_log
+
 # HTML responses are flagged, JSON is not
 class _Http:
     def __init__(self, text, ctype, status=200):

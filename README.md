@@ -95,7 +95,7 @@ python3 agent.py --model google/gemma-4-e4b
 
 Type a request and press Enter; `quit` or Ctrl-C exits. After each answer the harness prints `[Harness says]`: what was actually changed or declined, so you do not have to trust the model's summary. If the agent hits the step cap, the harness says so and shows the last tool result. It also stops early, the same way, if the model makes the same tool call with the same arguments three times running and each attempt fails (an `ERROR:`/`DECLINED:` result, an HTTP 4xx/5xx response, or a parsing error) — no point letting it keep retrying something that is not going to start working.
 
-Every run is logged to `logs/` (gitignored, keys redacted).
+Every run is logged to `logs/` (gitignored, keys redacted), including each `openapi_search` call (spec URL, keyword, hit count), so a model's "I couldn't find it" can be checked against what it actually searched for.
 
 ### Using Ollama
 
