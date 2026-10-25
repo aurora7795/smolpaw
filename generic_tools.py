@@ -21,7 +21,7 @@ import warnings
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import requests
 from smolagents import tool
@@ -417,6 +417,35 @@ def _verify_write(method: str, url: str, data, r: requests.Response) -> str:
     return ""
 
 
+_REQUIRED_QUERY_PARAMS = {"term", "query", "q"}
+
+_ACTION_PATH_KEYWORDS = {
+    "action", "actions",
+    "cancel",
+    "command", "commands",
+    "execute",
+    "refresh",
+    "reload",
+    "rescan",
+    "reset",
+    "restart",
+    "run",
+    "scan",
+    "start",
+    "stop",
+    "sync",
+    "trigger", "triggers",
+    "webhook", "webhooks",
+}
+
+
+def _is_action_endpoint(url: str) -> bool:
+    """Return True if the URL path suggests an action/trigger endpoint that may take no body."""
+    path = urlparse(url).path.lower()
+    segments = [s for s in path.split("/") if s]
+    return any(seg in _ACTION_PATH_KEYWORDS for seg in segments)
+
+
 @tool
 @_remember
 def http_request(method: str, url: str, body: str = "") -> str:
@@ -428,6 +457,17 @@ def http_request(method: str, url: str, body: str = "") -> str:
         body: Optional JSON text to send as the request body.
     """
     method = method.upper()
+    parsed = urlparse(url)
+    if parsed.query:
+        for key, val in parse_qsl(parsed.query, keep_blank_values=True):
+            if key.lower() in _REQUIRED_QUERY_PARAMS and not val.strip():
+                return _redact(f"ERROR: query parameter '{key}' is empty; please provide a value for '{key}'.")
+    if method in ("POST", "PUT", "PATCH") and (not body or not body.strip()):
+        if method != "POST" or not _is_action_endpoint(url):
+            return _redact(
+                f"ERROR: {method} {url} requires a request body. "
+                "Look up the endpoint's required body first (see the api-discovery skill and openapi_search)."
+            )
     try:
         data = json.loads(body) if body else None
     except ValueError:
