@@ -449,6 +449,98 @@ def http_request(method: str, url: str, body: str = "") -> str:
     return _clip(_redact(f"HTTP {r.status_code}\n{r.text}"))
 
 
+def _trim_to_query(text: str, query: str, max_chars: int = 2500) -> tuple[str, int]:
+    """Trim page text to excerpts matching query, with surrounding line context. Returns (result_text, hit_count)."""
+    query = query.strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return "(empty page)", 0
+    title = lines[0] if lines[0].startswith("Title: ") else ""
+
+    if not query:
+        content = "\n".join(lines)
+        if len(content) > max_chars:
+            content = content[:max_chars] + f"\n... [trimmed to {max_chars} chars]"
+        return content, 0
+
+    q_lower = query.lower()
+    q_words = [w for w in re.findall(r"\w+", q_lower) if len(w) > 1]
+
+    def line_matches(l: str) -> bool:
+        low = l.lower()
+        if q_lower in low:
+            return True
+        if len(q_words) > 1 and all(w in low for w in q_words):
+            return True
+        return False
+
+    matching_indices = [i for i, line in enumerate(lines) if line_matches(line)]
+    if not matching_indices and len(q_words) > 1:
+        matching_indices = [i for i, line in enumerate(lines) if any(w in line.lower() for w in q_words)]
+
+    if not matching_indices:
+        snippet = "\n".join(lines[:6])
+        msg = f"No content matching {query!r} found on page ({len(text)} chars)."
+        if title:
+            msg += f" {title}."
+        msg += f"\nTop of page content:\n{snippet}"
+        return msg, 0
+
+    included_indices = set()
+    for idx in matching_indices:
+        for offset in range(-1, 2):
+            target = idx + offset
+            if 0 <= target < len(lines):
+                included_indices.add(target)
+    if title:
+        included_indices.add(0)
+
+    sorted_indices = sorted(included_indices)
+    blocks = []
+    current_block = [sorted_indices[0]]
+    for idx in sorted_indices[1:]:
+        if idx == current_block[-1] + 1:
+            current_block.append(idx)
+        else:
+            blocks.append(current_block)
+            current_block = [idx]
+    blocks.append(current_block)
+
+    formatted_blocks = ["\n".join(lines[i] for i in b) for b in blocks]
+    result = "\n\n...\n\n".join(formatted_blocks)
+    if len(result) > max_chars:
+        result = result[:max_chars] + f"\n... [trimmed to {max_chars} chars]"
+    return result, len(matching_indices)
+
+
+@tool
+@_remember
+def fetch_page(url: str, query: str = "") -> str:
+    """Fetch a web page and return the text matching a query, so large pages do not flood memory. Use this instead of reading an entire page when looking for specific information.
+
+    Args:
+        url: Web page URL (http:// or https://).
+        query: Words or phrase to search for on the page. If omitted, returns the page title and top text.
+    """
+    if not url.startswith(("http://", "https://")):
+        return "ERROR: URL must start with http:// or https://"
+    try:
+        headers = {"User-Agent": USER_AGENT, **_auth_headers(url)}
+        r = requests.get(url, headers=headers, timeout=30)
+    except requests.RequestException as exc:
+        _log("fetch_page", url=url, query=query, status="error", hits=0, result=f"error ({type(exc).__name__})")
+        return _clip(_redact(f"ERROR: {exc}"))
+    if not r.ok:
+        _log("fetch_page", url=url, query=query, status=r.status_code, hits=0, result=f"HTTP {r.status_code}")
+        return _clip(_redact(f"HTTP {r.status_code}\n{r.text[:500]}"))
+
+    text = html_to_text(r.text) if _looks_like_html(r) else r.text
+    result, hits = _trim_to_query(text, query)
+    _log("fetch_page", url=url, query=query, status=r.status_code, hits=hits,
+         result=f"{hits} hits" if query.strip() else f"{len(result)} chars")
+    return _clip(_redact(result))
+
+
 _SPECS: dict[str, dict] = {}
 
 
@@ -604,7 +696,7 @@ def write_skill(name: str, text: str) -> str:
 
 
 GENERIC_TOOLS = [
-    run_shell, http_request, openapi_search, read_file, write_file, ask_user,
+    run_shell, http_request, fetch_page, openapi_search, read_file, write_file, ask_user,
     list_skills, read_skill, write_skill,
 ]
 

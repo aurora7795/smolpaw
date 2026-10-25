@@ -34,6 +34,8 @@ def _line(e: dict) -> str:
         return f"- {t} question: {e.get('question')}  \n  answer: {e.get('answer')}"
     if kind == "openapi_search":
         return f"- {t} `openapi_search` {e.get('spec_url')} {e.get('keyword') or '(no keyword)'} -> {e.get('result')}"
+    if kind == "fetch_page":
+        return f"- {t} `fetch_page` {e.get('url')} {e.get('query') or '(no query)'} -> {e.get('result')}"
     return None
 
 

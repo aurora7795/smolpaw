@@ -100,7 +100,7 @@ Type a request and press Enter; `quit` or Ctrl-C exits. After each answer the ha
 
 `[Harness says]` also checks a write's own result, not just its status code: after a POST, PUT, PATCH or DELETE that returns 2xx, a follow-up GET (free, no approval needed) checks what actually happened — a POST is confirmed against its `Location` header or an `id` in the response; a PUT/PATCH's submitted fields are compared against what a GET now returns; a DELETE is confirmed gone (expecting 404). A mismatch or a resource that is still there after a delete is flagged with a loud `WARNING`, not quietly reported as a plain success. This never reaches the model, so it has no prompt cost — it is purely for the human reading the report.
 
-Every run is logged to `logs/` (gitignored, keys redacted), including each `openapi_search` call (spec URL, keyword, hit count), so a model's "I couldn't find it" can be checked against what it actually searched for.
+Every run is logged to `logs/` (gitignored, keys redacted), including each `openapi_search` and `fetch_page` call (url, query/keyword, hit count), so a model's "I couldn't find it" can be checked against what it actually searched for.
 
 ### Using Ollama
 
@@ -153,7 +153,7 @@ The model is told never to ask for a password, token or API key directly — a s
 
 ## Tools
 
-`run_shell`, `http_request`, `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`. `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
+`run_shell`, `http_request`, `fetch_page` (fetch a web page and return text trimmed to match a query), `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`. `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. `fetch_page` trims large web pages to excerpts matching a query with surrounding context, so long pages do not flood memory. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
 
 ## Tests
 
