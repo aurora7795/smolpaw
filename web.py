@@ -17,6 +17,7 @@ import secrets
 import threading
 import time
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 import generic_tools as g
 from agent import BACKENDS, MAX_STEPS, build_agent, load_env, run_request
+from smolagents.models import ChatMessage, MessageRole
 
 PORT = 8770
 MAX_BODY = 64_000
@@ -88,47 +90,114 @@ class Approvals:
         g.ASK = self.ask
 
 
+def summarize_run(prompt: str, answer: str, call_model: Callable[[str], str]) -> str | None:
+    """Ask the loaded model for a one-sentence summary (<= 100 chars) of a run."""
+    try:
+        p = (prompt or "")[:1500]
+        a = (answer or "")[:1500]
+        query = (
+            "Write a one-sentence summary of at most 100 characters for this run.\n\n"
+            f"Prompt: {p}\n\n"
+            f"Final answer: {a}"
+        )
+        reply = call_model(query)
+        if not reply or not isinstance(reply, str):
+            return None
+        reply = reply.strip()
+        if not reply:
+            return None
+        first_line = reply.splitlines()[0].strip()
+        if not first_line:
+            return None
+        redacted = g.redact_pasted_secrets(g._redact(first_line)).strip()
+        if not redacted:
+            return None
+        return redacted[:100]
+    except Exception:
+        return None
+
+
 class Session:
     """Runs one agent request at a time in a background thread."""
 
     def __init__(self, agent, model: str, approvals: Approvals, backend: str = "lmstudio",
-                 max_steps: int = MAX_STEPS):
+                 max_steps: int = MAX_STEPS, run_summaries: bool | None = None,
+                 call_model: Callable[[str], str] | None = None):
         self.agent, self.model, self.approvals = agent, model, approvals
         self.backend, self.max_steps = backend, max_steps
+        if run_summaries is None:
+            run_summaries = os.environ.get("SMOLPAW_RUN_SUMMARIES", "").lower() in ("1", "true", "yes")
+        self.run_summaries = run_summaries
+        self.call_model = call_model
         self._lock = threading.Lock()
         self.status, self.prompt, self.answer, self.outcome, self.error = "idle", "", "", "", ""
         self.started_at = 0.0
+        self._run_id = 0
 
     def start(self, prompt: str) -> bool:
         with self._lock:
             if self.status == "running":
                 return False
+            self._run_id += 1
+            run_id = self._run_id
             self.status, self.prompt, self.answer, self.outcome, self.error = "running", prompt, "", "", ""
             self.started_at = time.time()
-        threading.Thread(target=self._run, args=(prompt,), daemon=True).start()
+        threading.Thread(target=self._run, args=(prompt, run_id), daemon=True).start()
         return True
 
-    def _run(self, prompt: str) -> None:
+    def _default_call_model(self, text: str) -> str:
+        msg = self.agent.model([ChatMessage(role=MessageRole.USER, content=text)])
+        return getattr(msg, "content", "") or ""
+
+    def _summarize(self, run_id: int, prompt: str, answer: str, log_file: Path) -> None:
+        with self._lock:
+            if self._run_id != run_id or self.status == "running":
+                return
+        caller = self.call_model or self._default_call_model
+        summary = summarize_run(prompt, answer, caller)
+        with self._lock:
+            if self._run_id != run_id or self.status == "running":
+                return
+        if summary:
+            try:
+                sidecar = log_file.with_name(f"{log_file.stem}.summary.txt")
+                sidecar.write_text(summary)
+            except OSError:
+                pass
+
+    def _run(self, prompt: str, run_id: int) -> None:
         try:
             self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt)
         except Exception as exc:  # noqa: BLE001 - shown on the page, as the CLI prints it
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
-            self.status = "idle"
+            log_file = g._log_file
+            answer = self.answer
+            has_error = bool(self.error)
+            with self._lock:
+                self.status = "idle"
+            if self.run_summaries and log_file and answer and not has_error:
+                threading.Thread(target=self._summarize, args=(run_id, prompt, answer, log_file), daemon=True).start()
 
     def stop(self) -> None:
+        with self._lock:
+            self._run_id += 1
         self.agent.interrupt()
         self.approvals.cancel()
 
-    def configure(self, backend: str, model: str, max_steps: int, timeout: float) -> bool:
-        """Switch backend, model, step limit and prompt timeout between requests; refused while one runs."""
+    def configure(self, backend: str, model: str, max_steps: int, timeout: float,
+                  run_summaries: bool | None = None) -> bool:
+        """Switch backend, model, step limit, prompt timeout and run summaries between requests; refused while one runs."""
         with self._lock:
             if self.status == "running":
                 return False
+            self._run_id += 1
             if (backend, model, max_steps) != (self.backend, self.model, self.max_steps):
                 self.agent = build_agent(model, "tool", max_steps, "generic", backend)
                 self.backend, self.model, self.max_steps = backend, model, max_steps
             self.approvals.timeout = timeout
+            if run_summaries is not None:
+                self.run_summaries = run_summaries
             return True
 
 
@@ -281,7 +350,18 @@ def _list_runs() -> list[dict]:
         summary = _run_summary(f)
         if summary is None:
             continue
-        runs.append({"id": f.name, "summary": summary, "title": _run_title(f)})
+        title = ""
+        sidecar = f.with_name(f"{f.stem}.summary.txt")
+        if sidecar.exists():
+            try:
+                txt = g.redact_pasted_secrets(g._redact(sidecar.read_text().strip()))[:100]
+                if txt:
+                    title = txt
+            except OSError:
+                pass
+        if not title:
+            title = _run_title(f)
+        runs.append({"id": f.name, "summary": summary, "title": title})
         if len(runs) >= 20:
             break
     return runs
@@ -349,7 +429,8 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, {
                     **info, "can_run": s is not None,
                     **({"backends": sorted(BACKENDS), "backend": s.backend, "model": s.model,
-                        "max_steps": s.max_steps, "timeout": approvals.timeout} if s else {}),
+                        "max_steps": s.max_steps, "timeout": approvals.timeout,
+                        "run_summaries": s.run_summaries} if s else {}),
                     "status": s.status if s else info.get("status", "running"),
                     "started_at": s.started_at if s and s.status == "running" else None,
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
@@ -406,12 +487,14 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
             if path == "/api/settings" and session:
                 backend, model = body.get("backend"), body.get("model")
                 steps, timeout = body.get("max_steps"), body.get("timeout")
+                summaries = body.get("run_summaries", session.run_summaries)
                 if (backend not in BACKENDS or not isinstance(model, str) or not model.strip()
                         or len(model) > 200 or isinstance(steps, bool) or not isinstance(steps, int)
                         or not 1 <= steps <= 50 or isinstance(timeout, bool)
-                        or not isinstance(timeout, (int, float)) or not 0 <= timeout <= 3600):
+                        or not isinstance(timeout, (int, float)) or not 0 <= timeout <= 3600
+                        or not isinstance(summaries, bool)):
                     return self._send(400, {"error": "invalid settings"})
-                ok = session.configure(backend, model.strip(), steps, float(timeout))
+                ok = session.configure(backend, model.strip(), steps, float(timeout), summaries)
                 return self._send(200 if ok else 409, {"ok": ok})
             if path == "/api/stop" and session:
                 session.stop()
@@ -503,8 +586,9 @@ summary:focus { outline:none; }
 .filesec h3 { font-size:12px; font-weight:600; color:var(--muted); margin:8px 0 2px; }
 .runitem { padding:6px 8px; border-radius:6px; cursor:pointer; font-size:12px; font-family:ui-monospace, Menlo, monospace; color:var(--muted); margin-bottom:4px; }
 .runitem:hover { background:var(--bg); color:var(--ink); }
-select, input { width:100%; font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line);
+select, input:not([type="checkbox"]) { width:100%; font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line);
                 background:var(--bg); color:var(--ink); }
+input[type="checkbox"] { width:auto; cursor:pointer; }
 [hidden] { display:none !important; }
 .nav { display:none; }
 aside { padding:16px 16px 0; }
@@ -552,6 +636,7 @@ main { display:flex; flex-direction:column; }
     <h3>Model</h3><input id="smodel" list="smodels" autocomplete="off"><datalist id="smodels"></datalist>
     <h3>Step limit</h3><input id="ssteps" type="number" min="1" max="50">
     <h3>Prompt timeout (seconds, 0 waits forever)</h3><input id="stimeout" type="number" min="0" max="3600">
+    <h3>Run summaries</h3><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input id="ssummaries" type="checkbox"> Model-written one-sentence summaries for recent runs</label>
     <div class="row"><button id="sapply">Apply</button></div>
     <div class="meta" id="smsg"></div>
   </div></details>
@@ -653,6 +738,7 @@ function fillSettings(s) {
   }
   sel.value = s.backend; $("smodel").value = s.model;
   $("ssteps").value = s.max_steps; $("stimeout").value = s.timeout;
+  $("ssummaries").checked = !!s.run_summaries;
 }
 $("sbackend").onchange = () => { $("smodel").value = ""; loadModels(); };
 $("setcard").ontoggle = () => { if ($("setcard").open) loadModels(); };
@@ -660,7 +746,8 @@ $("sapply").onclick = async () => {
   const r = await fetch("/api/settings", {method: "POST", cache: "no-store",
     headers: {"X-Token": token, "Content-Type": "application/json"},
     body: JSON.stringify({backend: $("sbackend").value, model: $("smodel").value,
-      max_steps: parseInt($("ssteps").value, 10), timeout: Number($("stimeout").value)})});
+      max_steps: parseInt($("ssteps").value, 10), timeout: Number($("stimeout").value),
+      run_summaries: $("ssummaries").checked})});
   $("smsg").textContent = r.ok ? "Applied." : r.status === 409 ? "A request is running; try again when it finishes." : "Invalid settings.";
   refresh();
 };
