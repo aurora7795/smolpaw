@@ -6,7 +6,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 
 - A lean harness with generic tools works with small local models, but only some of them. Gemma 4 E4B and Qwen 3.5 9B can follow a skill and discover an unseen API. Bonsai 8B (ternary) cannot do discovery. Nanbeige 3B produced garbage under LM Studio.
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
-- OpenClaw's prompt is roughly 8x larger than SmolPaw's (about 24K tokens against about 3K on the first call). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against 5s to 13s for 3K, which is the efficiency gap this project is aiming at.
+- OpenClaw's prompt is still about 5.5 to 5.9 times larger than SmolPaw's (about 24K tokens against 4.1K to 4.4K on the first call, measured 2026-10-26; it was about 3K in early builds, before more tools were added). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against roughly 7s to 20s for SmolPaw's current prompt, which is the efficiency gap this project is aiming at.
 - Discovery held up on harder variants of the invented API: 17 of 18 runs passed (hint, detail, paged).
 - Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time. A recheck with the actual error text shows the remaining rare errors are a different, generic issue (the model skipping a tool call, not copying history) (#14).
 - On Ollama the default MLX builds beat the GGUF ones on speed (Gemma reads prompts about twice as fast) with the same pass rates (#16). With native history at 32K, the earlier Ollama weakness on Tidepool `detail` is gone: 11 of 12 on each runtime (#15).
@@ -256,7 +256,7 @@ Time to read a prompt of random words (one output token requested), 32K context,
 | 11K | 54.2s (211 tok/s) | 18.8s (596 tok/s) |
 | 23K | 114s (201 tok/s) | 41s (548 tok/s) |
 
-Reading OpenClaw's roughly 24K-token prompt would take about 2 minutes per call on Qwen and about 45 seconds on Gemma, and its task needed 3 model turns, so roughly 6 minutes and 2 minutes of prefill alone without caching. SmolPaw's roughly 3K-token first call costs about 13s and 5s. Caveat: the test used unique prompts, so no cache could help; a stable prefix is much cheaper (next section). Memory use was not measured.
+Reading OpenClaw's roughly 24K-token prompt would take about 2 minutes per call on Qwen and about 45 seconds on Gemma, and its task needed 3 model turns, so roughly 6 minutes and 2 minutes of prefill alone without caching. SmolPaw's first call at the time (roughly 3K tokens) cost about 13s and 5s; the current one is larger, see "First-call prompt size" below. Caveat: the test used unique prompts, so no cache could help; a stable prefix is much cheaper (next section). Memory use was not measured.
 
 The table above is LM Studio. A two-size check of Qwen on Ollama (`qwen3.5:9b`, MLX `nvfp4`, 32K context, one run each) gave 8.9s at 1,911 tokens (215 tok/s) and 27.4s at 5,810 tokens (212 tok/s), close to LM Studio's 228 and 225 tok/s for the same prompts. Gemma and the larger sizes were not run on Ollama.
 
@@ -325,7 +325,7 @@ Same Radarr queue question through `openclaw agent --json`, fresh session, read-
 | Work | 3 model turns, 4 `exec` calls (2 failed before it got there) |
 | Cost | about $0.0013 (prompt caching made the large prompt cheap) |
 
-For comparison, SmolPaw's first call is about 2.9K tokens. A local model would also have to read an OpenClaw-sized prompt on every call; that prefill time has not been measured. I did not see which commands the `exec` calls ran (the audit log is metadata-only).
+For comparison, SmolPaw's first call was about 2.9K tokens at the time (4.1K to 4.4K now, see "First-call prompt size"). A local model would also have to read an OpenClaw-sized prompt on every call; that prefill time has not been measured. I did not see which commands the `exec` calls ran (the audit log is metadata-only).
 
 ## Models
 
@@ -403,3 +403,18 @@ Caveats: 3 trials per cell; one task on one invented API; the baseline comes fro
 A thinking model spent thousands of hidden tokens on a one-line summary, and the next request waited behind it for the whole time (Qwen 22s to 178s). Sending `reasoning_effort: "none"` and `max_tokens: 80` fixed that: the summary takes about a second. The "on" runs after the fix are slower on average, but they also took more steps (Qwen 6.0 against 5.0, Gemma 4.0 against 3.3); per step the two conditions are close (Qwen 5.5s against 5.2s, Gemma 5.3s against 4.9s), and individual runs ranged from 3 to 8 steps, so the difference is within run-to-run noise at 3 trials. All 12 task runs passed, and every summary was a correct one-line statement of the answer.
 
 Caveats: 3 trials per cell; the summary's quality was only read by eye on one simple task (the task answers were all "Kestrel, 340"), not scored; the call was timed against Ollama only. `reasoning_effort` is retried without if a server rejects it, which was not tried against LM Studio, where a thinking model could still be slow.
+
+## First-call prompt size (`tests/first_call_tokens.py`, 2026-10-26)
+
+The tokens of the first model call for the request "hello", counted by Ollama (`usage.prompt_tokens`, `max_tokens=1`) on the exact messages and tool list the agent would send: smolagents' system prompt, SmolPaw's guidance, the one committed skill (`api-discovery.md`), an empty `notes.md`, and 14 tools plus smolagents' `final_answer`. Ollama, 32768 context, 3 runs per figure, identical every time. The script builds the agent in an isolated notes/skills setup, so your own notes, memory and skills do not change the figure; a real `notes.md` adds its own length.
+
+| Model | Whole first call | Instructions alone (no tools) | Tool schemas (difference) | Whole call without `web_search` | `web_search` cost in the prompt |
+|---|---|---|---|---|---|
+| Qwen 3.5 9B | 4,407 | 2,677 | 1,730 | 4,242 | 165 |
+| Gemma 4 E4B | 4,085 | 2,737 | 1,348 | 3,931 | 154 |
+
+- The earlier figure of 2.2K to 2.9K is from before `fetch_page`, `remember`, `recall`, `list_dir` and `web_search` were added; it was not recorded with a script, so how much of the growth each tool caused is not known from it. Today the instructions alone are about 2.7K and the tool schemas add 1.3K to 1.7K.
+- A tool costs about 1.7 times its raw schema count once it is inside the chat template: `web_search`'s schema alone was 91 and 92 tokens (above), but removing it from the prompt saves 165 and 154. Estimates of a future tool's cost from its raw schema should be scaled up by about that much.
+- This confirms the +165 and +154 first-call figures an outside report gave for `web_search` (checked here, not taken on trust).
+- Other tools' individual in-prompt costs were not measured, only the whole and the `web_search` difference. Reading time at this size is worked out from the speeds in the prefill table above (about 20s on Qwen, about 7s on Gemma, cold), not timed. OpenClaw's 24K figure comes from one run on a different tokenizer, so the ratio is approximate.
+
