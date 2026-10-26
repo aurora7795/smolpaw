@@ -1676,6 +1676,13 @@ check("settings rebuild the agent between requests",
 kept = set_sess.agent
 http.post(f"{set_base}/api/settings", json={**good, "timeout": 5}, headers=hdr, timeout=5)
 check("a timeout-only change keeps the agent", set_sess.agent is kept and set_appr.timeout == 5)
+http.post(f"{set_base}/api/settings", json={**good, "timeout": 5, "run_summaries": True}, headers=hdr, timeout=5)
+check("settings toggle enables run_summaries", set_sess.run_summaries is True)
+http.post(f"{set_base}/api/settings", json={**good, "timeout": 5, "run_summaries": False}, headers=hdr, timeout=5)
+check("settings toggle disables run_summaries", set_sess.run_summaries is False)
+r_bad = http.post(f"{set_base}/api/settings", json={**good, "timeout": 5, "run_summaries": "invalid"}, headers=hdr, timeout=5)
+check("settings refuse invalid run_summaries type", r_bad.status_code == 400)
+check("web page contains run summaries toggle", 'id="ssummaries"' in http.get(f"{set_base}/?t={token}", timeout=5).text)
 check("models endpoint refuses an unknown backend",
       http.get(f"{set_base}/api/models?backend=x", headers=hdr, timeout=5).status_code == 404)
 saved_list_models = web.list_models
@@ -1688,6 +1695,163 @@ web.BACKENDS["ollama"]["url"] = "http://127.0.0.1:1/v1"
 check("an unreachable model server gives an empty list", web.list_models("ollama") == [])
 web.BACKENDS["ollama"]["url"] = saved_url
 set_srv.shutdown()
+
+# model-written one-sentence summaries for recent runs (#47)
+# 1. first line only, clipped to 100 characters
+stub_multiline = lambda text: "First line of summary.\nSecond line should be ignored.\nThird line."
+check("first line only, clipped to 100 characters",
+      web.summarize_run("prompt", "answer", stub_multiline) == "First line of summary.")
+
+stub_long = lambda text: "x" * 150
+check("summary reply is clipped to 100 characters",
+      web.summarize_run("prompt", "answer", stub_long) == "x" * 100)
+
+rec_query = []
+def stub_rec(t):
+    rec_query.append(t)
+    return "ok"
+web.summarize_run("P" * 2000, "A" * 2000, stub_rec)
+check("prompt and answer passed to model are clipped to 1500 characters",
+      len(rec_query) == 1 and "P" * 1500 in rec_query[0] and "P" * 1501 not in rec_query[0]
+      and "A" * 1500 in rec_query[0] and "A" * 1501 not in rec_query[0])
+
+# 2. a secret (a registered key or a ghp_-shaped token) in the reply is redacted
+saved_notes = g.NOTES
+test_sec_notes = tmp / "notes_for_summary_secret.md"
+test_sec_notes.write_text("- svc: http://example.com | key_env=TEST_SUMM_SECRET\n")
+os.environ["TEST_SUMM_SECRET"] = "registered-secret-abc12345"
+g.NOTES = test_sec_notes
+
+stub_secrets = lambda text: "Got registered-secret-abc12345 and ghp_0123456789abcdef0123456789 from api."
+sec_res = web.summarize_run("prompt", "answer", stub_secrets)
+check("a secret (a registered key or a ghp_-shaped token) in the reply is redacted",
+      sec_res is not None
+      and "registered-secret-abc12345" not in sec_res
+      and "ghp_0123456789abcdef0123456789" not in sec_res
+      and "[REDACTED]" in sec_res
+      and "[REDACTED: looks like a credential]" in sec_res)
+
+del os.environ["TEST_SUMM_SECRET"]
+g.NOTES = saved_notes
+
+# 3. a raising, empty or whitespace stub gives None and no sidecar
+def stub_raising(text):
+    raise RuntimeError("Model service down")
+
+check("a raising, empty or whitespace stub gives None and no sidecar",
+      web.summarize_run("prompt", "answer", stub_raising) is None
+      and web.summarize_run("prompt", "answer", lambda t: "") is None
+      and web.summarize_run("prompt", "answer", lambda t: "   \n\t  \n  ") is None)
+
+summary_logs_dir = tmp / "summary_logs"
+summary_logs_dir.mkdir(exist_ok=True)
+saved_log_dir = g.LOG_DIR
+g.LOG_DIR = summary_logs_dir
+
+dummy_agent = type("DummyAgent", (), {
+    "interrupt": lambda self: None,
+    "run": lambda self, prompt: "dummy answer",
+    "monitor": type("M", (), {"get_total_token_counts": lambda self: None})(),
+    "memory": type("Mem", (), {"steps": []})(),
+    "stall_reason": None,
+})()
+dummy_appr = web.Approvals(timeout=0)
+
+log_fail = summary_logs_dir / "20261026-100000-fail.jsonl"
+log_fail.write_text(json.dumps({"t": "2026-10-26T10:00:00", "kind": "start", "model": "m", "prompt": "test fail"}) + "\n")
+sidecar_fail = log_fail.with_name(f"{log_fail.stem}.summary.txt")
+
+sess_raising = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5, run_summaries=True,
+                           call_model=stub_raising)
+sess_raising._summarize(1, "test fail", "dummy answer", log_fail)
+check("raising stub writes no sidecar", not sidecar_fail.exists())
+
+sess_empty = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5, run_summaries=True,
+                         call_model=lambda t: "")
+sess_empty._summarize(1, "test empty", "dummy answer", log_fail)
+check("empty stub writes no sidecar", not sidecar_fail.exists())
+
+sess_ws = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5, run_summaries=True,
+                      call_model=lambda t: "   \n\t  ")
+sess_ws._summarize(1, "test ws", "dummy answer", log_fail)
+check("whitespace stub writes no sidecar", not sidecar_fail.exists())
+
+# 4. _list_runs() shows the sidecar text as title when present and the prompt-derived title when absent, including an old log with no sidecar
+f_old = summary_logs_dir / "20261026-090000-old.jsonl"
+f_old.write_text("\n".join([
+    json.dumps({"t": "2026-10-26T09:00:00", "kind": "start", "model": "m", "prompt": "Old task prompt. More details."}),
+    json.dumps({"t": "2026-10-26T09:00:05", "kind": "final", "answer": "old answer"}),
+]) + "\n")
+
+f_with_sidecar = summary_logs_dir / "20261026-093000-sidecar.jsonl"
+f_with_sidecar.write_text("\n".join([
+    json.dumps({"t": "2026-10-26T09:30:00", "kind": "start", "model": "m", "prompt": "Prompt for run with sidecar."}),
+    json.dumps({"t": "2026-10-26T09:30:05", "kind": "final", "answer": "sidecar answer"}),
+]) + "\n")
+sidecar_file = f_with_sidecar.with_name(f"{f_with_sidecar.stem}.summary.txt")
+sidecar_file.write_text("Model-written summary for run with sidecar")
+
+runs_by_id = {r["id"]: r for r in web._list_runs()}
+check("_list_runs() shows the sidecar text as title when present and the prompt-derived title when absent, including an old log with no sidecar",
+      runs_by_id[f_with_sidecar.name]["title"] == "Model-written summary for run with sidecar"
+      and runs_by_id[f_old.name]["title"] == "Old task prompt.")
+
+# 5. no sidecar is written when the setting is off
+sess_off = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5, run_summaries=False,
+                       call_model=lambda t: "Summary should not be written")
+sess_off._run("Task with summaries off", 1)
+log_file_off = g._log_file
+sidecar_off = log_file_off.with_name(f"{log_file_off.stem}.summary.txt") if log_file_off else None
+check("no sidecar is written when the setting is off",
+      sidecar_off is not None and not sidecar_off.exists())
+
+# 6. a run started while a summary is in flight does not get the older run’s summary (stub blocking on an event)
+block_event = threading.Event()
+model_called = threading.Event()
+
+def blocking_call_model(prompt_text):
+    model_called.set()
+    block_event.wait(5)
+    return "Older run summary"
+
+sess_inflight = web.Session(dummy_agent, "m1", dummy_appr, "lmstudio", 5, run_summaries=True,
+                            call_model=blocking_call_model)
+
+# Start run 1 (creates log 1)
+sess_inflight.start("Run 1 prompt")
+model_called.wait(3)
+
+run1_log = g._log_file
+# Run 1 summary is currently in flight. Start run 2 while summary is in flight!
+sess_inflight.model = "m2"
+sess_inflight.call_model = lambda t: "Run 2 summary"
+sess_inflight.start("Run 2 prompt")
+
+# Unblock run 1's call_model
+block_event.set()
+
+# Wait for run 2 to finish
+time.sleep(0.5)
+run2_log = g._log_file
+
+runs_by_id = {r["id"]: r for r in web._list_runs()}
+run1_sidecar = run1_log.with_name(f"{run1_log.stem}.summary.txt") if run1_log else None
+run2_sidecar = run2_log.with_name(f"{run2_log.stem}.summary.txt") if run2_log else None
+
+check("a run started while a summary is in flight does not get the older run’s summary",
+      runs_by_id.get(run2_log.name, {}).get("title") != "Older run summary"
+      and (run2_sidecar is not None and run2_sidecar.exists() and run2_sidecar.read_text().strip() == "Run 2 summary")
+      and (run1_sidecar is not None and not run1_sidecar.exists()))
+
+# env var default SMOLPAW_RUN_SUMMARIES=1
+os.environ["SMOLPAW_RUN_SUMMARIES"] = "1"
+sess_env_on = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5)
+check("SMOLPAW_RUN_SUMMARIES=1 enables summaries by default", sess_env_on.run_summaries is True)
+os.environ.pop("SMOLPAW_RUN_SUMMARIES", None)
+sess_env_off = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5)
+check("summaries are off by default when SMOLPAW_RUN_SUMMARIES is unset", sess_env_off.run_summaries is False)
+
+g.LOG_DIR = saved_log_dir
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
