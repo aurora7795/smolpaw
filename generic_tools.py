@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -263,6 +264,11 @@ def _run_shell_string(command: str) -> subprocess.CompletedProcess:
     if WINDOWS:
         return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
                               cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+    # pipefail so a failing first stage of a pipe is not hidden by the last stage's exit 0 (#49)
+    bash = shutil.which("bash")
+    if bash:
+        return subprocess.run([bash, "-c", "set -o pipefail; " + command], cwd=WORKSPACE,
+                              capture_output=True, text=True, timeout=60)
     return subprocess.run(command, shell=True, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
 
 
