@@ -80,6 +80,7 @@ check("cat .env asks (not free)", g.run_shell("cat .env") == g.DECLINED and aske
 answer["value"] = True
 check("approved write command runs", "exit code 0" in g.run_shell("echo hi > b.txt") and asked())
 check("approved write took effect", (g.WORKSPACE / "b.txt").read_text() == "hi\n")
+check("approved pipe reports a failing first stage (#49)", "exit code 0" not in g.run_shell("ls no_such_dir | wc -l"))
 answer["value"] = False
 
 # Windows support (#33): both paths route through PowerShell there, not a bare exec / cmd.exe
