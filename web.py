@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 import generic_tools as g
 from agent import BACKENDS, MAX_STEPS, build_agent, load_env, run_request
+from scheduler import Scheduler
 from smolagents.models import ChatMessage, MessageRole
 
 PORT = 8770
@@ -186,6 +187,8 @@ class Session:
         self._run_id = 0
         self.thread: str | None = None  # id of the current chat; follow-ups share it
         self.history: list[tuple[str, str]] = []  # finished turns before the current prompt/answer
+        self._scheduled_chat = False  # the current thread belongs to a scheduled run; interactive runs must not join it
+        self.needs_approval: dict | None = None  # {schedule_id, prompt, actions} of the latest scheduled run with declined actions
 
     def new_thread(self) -> bool:
         """Begin an empty chat; refused while a request runs."""
@@ -197,10 +200,16 @@ class Session:
             self.prompt = self.answer = self.outcome = self.error = ""
             return True
 
-    def start(self, prompt: str, thread: str | None = None) -> bool:
+    def start(self, prompt: str, thread: str | None = None, schedule: str | None = None) -> bool:
+        """Begin a run; False if one is already running. `schedule` (a schedule id) makes it an unattended,
+        read-only run in its own thread."""
         with self._lock:
             if self.status == "running":
                 return False
+            if schedule or self._scheduled_chat:  # a scheduled run never joins a chat, nor does a chat join it
+                self.thread, self.history = None, []
+                self.prompt = self.answer = self.outcome = self.error = ""
+                self._scheduled_chat = bool(schedule)
             if thread and thread != self.thread:  # continue a chat picked from Recents
                 self.thread, self.history = thread, _thread_turns(thread)
                 self.prompt = self.answer = self.outcome = self.error = ""
@@ -213,7 +222,7 @@ class Session:
             run_id = self._run_id
             self.status, self.prompt, self.answer, self.outcome, self.error = "running", prompt, "", "", ""
             self.started_at = time.time()
-        threading.Thread(target=self._run, args=(prompt, run_id, context, self.thread), daemon=True).start()
+        threading.Thread(target=self._run, args=(prompt, run_id, context, self.thread, schedule), daemon=True).start()
         return True
 
     def _default_call_model(self, text: str) -> str:
@@ -235,16 +244,31 @@ class Session:
             except OSError:
                 pass
 
-    def _run(self, prompt: str, run_id: int, context: str = "", thread: str | None = None) -> None:
+    def _run(self, prompt: str, run_id: int, context: str = "", thread: str | None = None,
+             schedule: str | None = None) -> None:
+        deferred: list[str] = []
+        saved_hooks = g.CONFIRM, g.ASK
+        if schedule:  # nobody is there to answer: decline through the normal path and remember what was refused
+            def confirm_later(desc: str) -> bool:
+                deferred.append(g._redact(desc))
+                return False
+            g.CONFIRM, g.ASK = confirm_later, lambda question: NO_ANSWER
         try:
-            self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context)
+            self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context,
+                                                    schedule)
         except Exception as exc:  # noqa: BLE001 - shown on the page, as the CLI prints it
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
+            if schedule:
+                g.CONFIRM, g.ASK = saved_hooks
             log_file = g._log_file
+            if deferred and log_file:
+                g._log("deferred", actions=deferred)
             answer = self.answer
             has_error = bool(self.error)
             with self._lock:
+                if deferred and self._run_id == run_id:  # not for a stopped run
+                    self.needs_approval = {"schedule_id": schedule, "prompt": prompt, "actions": deferred}
                 self.status = "idle"
             if self.run_summaries and log_file and answer and not has_error:
                 threading.Thread(target=self._summarize, args=(run_id, prompt, answer, log_file), daemon=True).start()
@@ -653,6 +677,7 @@ def main() -> None:
                       args.backend, max_steps)
     server = serve(args.host, args.port, token, approvals, session,
                    {"mode": "agent", "backend": args.backend, "model": model})
+    Scheduler(session, approvals).start()
     print(f"SmolPaw web [{args.backend}: {model}] at {url(args.host, args.port, token)}  (Ctrl-C to stop)")
     try:
         threading.Event().wait()

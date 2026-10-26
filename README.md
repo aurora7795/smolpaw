@@ -162,6 +162,7 @@ The Recent runs list can optionally show a model-written one-sentence summary (a
 | Web search (`web_search`) | Runs freely (read-only). Search queries leave your machine (to DuckDuckGo, or to your SearXNG instance) and need no approval, so the model could put text from your files into a query; set `SMOLPAW_SEARCH_PROVIDER=none` if that matters to you. Search results are untrusted web text and may contain prompt injections or instructions aimed at the model; the confirmation layer protects against acting on them. |
 | An `ask_user` answer that looks like a credential (a GitHub/AWS/OpenAI/Slack token, a JWT, or any other long opaque token) | Redacted before it reaches the model, the log, or anything the model repeats back. |
 | Declined action | The model is told and may try another way. |
+| Scheduled runs | Read-only: every action that would ask is declined, see [Scheduled runs](#scheduled-runs). |
 
 An approved shell command runs with your user's permissions, so read the prompt, in the terminal or on the web page. See [PLAN.md](PLAN.md) for the reasoning.
 
@@ -213,6 +214,17 @@ minute   hour   day-of-month   month   day-of-week
 - **Names**: Case-insensitive 3-letter month names (`jan` through `dec`) and weekday names (`sun` through `sat`).
 - **Standard Vixie-cron day rule**: If both `day-of-month` and `day-of-week` are restricted (neither is `*`), a time matches when **either** field matches. If only one is restricted, only that one applies.
 
+### Scheduled runs
+
+`web.py` starts a scheduler thread ([scheduler.py](scheduler.py)) that checks `schedules.json` every 30 seconds. There is no way to add schedules from the UI or API yet, so for now they are added from Python with `schedules.add(prompt, cron)`.
+
+- It starts at most one due schedule per check, the one with the oldest `next_run`, and only when no run is in progress and no prompt is waiting for an answer. It never interrupts a chat; a schedule that cannot start yet simply stays due.
+- A schedule that was missed (the computer was asleep, or the server was stopped) runs once when it is next possible, not once per missed slot. Its next run is computed from the time it started, even if the run fails.
+- A scheduled run is an ordinary run (same model, step limit, log file and run summary) in its own thread, so it does not join a chat. Its log's `start` entry carries `schedule: <id>`.
+- A damaged `schedules.json` does not stop the thread; it prints the error once and keeps checking. Schedule prompts are never printed to the console.
+
+**Read-only policy.** Nobody is at the keyboard for a scheduled run, so every action that would ask `[y/N]` is declined at once and `ask_user` gets the "no answer" reply. The model sees the usual `DECLINED` result and the run's final `[Harness says]` lines list what was declined. Actions that run freely in a chat (read-only shell, GET requests, reads inside `workspace/` and `skills/`) work the same. The declined actions are written to the log as a `deferred` entry and kept in memory as `Session.needs_approval` (schedule id, prompt, actions). Approving them and re-running is not built yet. Interactive runs are unchanged.
+
 ## Tests
 
 ```bash
@@ -248,6 +260,7 @@ agent.py              CLI and agent wiring
 web.py                Web harness: run the agent and answer its prompts from a browser
 generic_tools.py      Tools, confirmation layer, secrets, logging, prompt building
 schedules.py          Schedule store and cron parser
+scheduler.py          Thread that runs due schedules in read-only mode
 radarr_tools.py       Hand-written single-service tools (baseline for comparisons)
 skills/               Skills the agent follows or writes (api-discovery.md is hand-written)
 notes.example.md      Template for notes.md (gitignored)

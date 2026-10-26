@@ -162,13 +162,14 @@ def _log(kind: str, **fields) -> None:
             f.write(_redact(json.dumps(entry, default=str)) + "\n")
 
 
-def start_log(model: str, prompt: str, thread: str | None = None) -> Path:
+def start_log(model: str, prompt: str, thread: str | None = None, schedule: str | None = None) -> Path:
     global _log_file, SHOWN_OUTPUT
     SHOWN_OUTPUT = None
     reset_search_count()
     LOG_DIR.mkdir(exist_ok=True)
     _log_file = LOG_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{model.replace('/', '_')}.jsonl"
-    _log("start", model=model, prompt=prompt, **({"thread": thread} if thread else {}))
+    _log("start", model=model, prompt=prompt, **({"thread": thread} if thread else {}),
+         **({"schedule": schedule} if schedule else {}))
     return _log_file
 
 
