@@ -200,45 +200,23 @@ def _load_deferred_approvals() -> list[dict]:
             continue
 
         scanned_runs += 1
-
         schedule = start.get("schedule")
-        if not schedule:
-            if scanned_runs >= 50:
-                break
-            continue
-
-        if schedule in seen_schedules:
-            if scanned_runs >= 50:
-                break
-            continue
-        seen_schedules.add(schedule)
-
-        handled_sidecar = f.with_name(f"{f.stem}.handled.txt")
-        if handled_sidecar.exists():
-            if scanned_runs >= 50:
-                break
-            continue
-
-        deferred = next((e for e in entries if isinstance(e, dict) and e.get("kind") == "deferred"), None)
-        if not deferred:
-            if scanned_runs >= 50:
-                break
-            continue
-
-        actions = deferred.get("actions")
-        if not actions or not isinstance(actions, list):
-            if scanned_runs >= 50:
-                break
-            continue
-        run_t = str(start.get("t") or deferred.get("t") or "")
-        candidates.append({
-            "id": f.stem,
-            "schedule_id": str(schedule),
-            "prompt": g._redact(str(start.get("prompt", ""))),
-            "actions": [g._redact(str(a)) for a in actions],
-            "t": run_t,
-        })
-
+        if schedule and schedule not in seen_schedules:
+            deferred = next((e for e in entries if isinstance(e, dict) and e.get("kind") == "deferred"), None)
+            actions = deferred.get("actions") if deferred else None
+            handled = f.with_name(f"{f.stem}.handled.txt").exists()
+            # Only a deferring or dismissed run supersedes older runs of its schedule, as in a live
+            # session; a clean or stopped run leaves an older pending deferral alone.
+            if handled or (actions and isinstance(actions, list)):
+                seen_schedules.add(schedule)
+            if not handled and actions and isinstance(actions, list):
+                candidates.append({
+                    "id": f.stem,
+                    "schedule_id": str(schedule),
+                    "prompt": g._redact(str(start.get("prompt", ""))),
+                    "actions": [g._redact(str(a)) for a in actions],
+                    "t": str(start.get("t") or deferred.get("t") or ""),
+                })
         if scanned_runs >= 50:
             break
 

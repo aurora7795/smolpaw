@@ -513,6 +513,27 @@ try:
           and "[REDACTED]" in sess_sec.needs_approval[0]["actions"][0])
     g._secrets = lambda: []
 
+    # 10. Only a deferring or dismissed newer run supersedes an older deferral, as in a live session
+    sup_dir = tmp / "sup_logs"
+    sup_dir.mkdir()
+    g.LOG_DIR = sup_dir
+
+    def sup_log(stem: str, schedule: str, *later: dict) -> None:
+        start = {"t": "2026-10-26T09:00:00", "kind": "start", "schedule": schedule, "prompt": "p"}
+        (sup_dir / f"{stem}.jsonl").write_text("\n".join(json.dumps(e) for e in (start, *later)) + "\n")
+
+    sup_log("20261026-090000-m", "s_a", {"kind": "deferred", "actions": ["write a"]})
+    sup_log("20261026-100000-m", "s_a", {"kind": "final", "answer": "nothing to do"})
+    sup_log("20261026-110000-m", "s_a")  # a stopped run: start entry only
+    check("a newer clean or stopped run does not hide an older deferral after a restart",
+          [e["id"] for e in make()[0].needs_approval] == ["20261026-090000-m"])
+    sup_log("20261026-120000-m", "s_a", {"kind": "deferred", "actions": ["write b"]})
+    check("a newer deferring run supersedes the older one after a restart",
+          [e["id"] for e in make()[0].needs_approval] == ["20261026-120000-m"])
+    (sup_dir / "20261026-120000-m.handled.txt").write_text("handled\n")
+    check("a dismissed newer run still hides the older deferral after a restart",
+          make()[0].needs_approval == [])
+
 finally:
     g.LOG_DIR = saved_log_dir
     g._secrets = lambda: []
