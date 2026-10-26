@@ -1962,5 +1962,28 @@ g.LOG_DIR = saved_ld_t
 
 g.LOG_DIR = saved_log_dir
 
+# interactive runs keep today's confirmation behaviour (the scheduled read-only mode must not leak into them, #52)
+_ia_prompts: list[str] = []
+_ia_answer = {"v": True}
+_ia_saved = g.CONFIRM, g.ASK
+g.CONFIRM = lambda d: (_ia_prompts.append(d), _ia_answer["v"])[1]
+g.ASK = lambda q: "typed answer"
+_ia_sess = web.Session(_ThreadAgent(), "m", web.Approvals(), "lmstudio", 5, run_summaries=False)
+saved_ld_ia = g.LOG_DIR
+g.LOG_DIR = tmp / "interactive-logs"
+_ia_sess.start("plain interactive run")
+_wait_idle(_ia_sess)
+check("an interactive run leaves the confirm and ask hooks alone", g.CONFIRM is not _ia_saved[0] and g.ASK("q") == "typed answer")
+_ia_prompts.clear()
+check("an interactive write still asks and goes ahead when approved",
+      "wrote" in g.write_file("ia.txt", "x").lower() and len(_ia_prompts) == 1 and (g.WORKSPACE / "ia.txt").exists())
+_ia_answer["v"] = False
+check("an interactive write still comes back DECLINED when refused",
+      g.write_file("ia2.txt", "x") == g.DECLINED and not (g.WORKSPACE / "ia2.txt").exists())
+_start = json.loads(g._log_file.read_text().splitlines()[0]) if g._log_file and g._log_file.exists() else {}
+check("an interactive run's start log entry has no schedule field", _start.get("kind") == "start" and "schedule" not in _start)
+g.LOG_DIR = saved_ld_ia
+g.CONFIRM, g.ASK = _ia_saved
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

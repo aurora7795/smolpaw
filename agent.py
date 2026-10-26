@@ -187,16 +187,16 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
 
 
 def run_request(agent, model: str, toolset: str, user_input: str, thread: str | None = None,
-                context: str = "") -> tuple[str, str]:
+                context: str = "", schedule: str | None = None) -> tuple[str, str]:
     """Run one request; return the answer and the harness's own account of what changed.
 
-    `context` (earlier turns of the same chat) is shown to the model but not logged; `thread` tags the log.
+    `context` (earlier turns of the same chat) is shown to the model but not logged; `thread` and `schedule` tag the log.
     """
     radarr_tools.LAST_ACTION = ""
     generic_tools.ACTIONS.clear()
     generic_tools.LAST_RESULT = ""
     if toolset == "generic":
-        print(f"[log] {generic_tools.start_log(model, user_input, thread)}")
+        print(f"[log] {generic_tools.start_log(model, user_input, thread, schedule)}")
     agent.stall_reason = None
     try:
         response = agent.run(context + user_input)

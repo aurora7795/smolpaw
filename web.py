@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 import generic_tools as g
 from agent import BACKENDS, MAX_STEPS, build_agent, load_env, run_request
+from scheduler import Scheduler
 from smolagents.models import ChatMessage, MessageRole
 
 PORT = 8770
@@ -168,6 +169,61 @@ def _thread_turns(thread: str) -> list[tuple[str, str]]:
     return turns
 
 
+def _load_deferred_approvals() -> list[dict]:
+    """Deferred actions from past scheduled runs in g.LOG_DIR, oldest first, one per schedule.
+
+    Scans newest files first and stops after 50 runs. Runs marked handled (via a .handled.txt
+    sidecar) or missing a start/deferred entry are skipped.
+    """
+    if not g.LOG_DIR.exists() or not g.LOG_DIR.is_dir():
+        return []
+    try:
+        files = sorted(g.LOG_DIR.glob("*.jsonl"), key=lambda f: f.name, reverse=True)
+    except OSError:
+        return []
+
+    candidates: list[dict] = []
+    seen_schedules: set[str] = set()
+    scanned_runs = 0
+
+    for f in files:
+        if not f.is_file():
+            continue
+        try:
+            entries = [json.loads(raw) for raw in f.read_text().splitlines() if raw.strip()]
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not entries:
+            continue
+        start = entries[0] if isinstance(entries[0], dict) and entries[0].get("kind") == "start" else None
+        if not start:
+            continue
+
+        scanned_runs += 1
+        schedule = start.get("schedule")
+        if schedule and schedule not in seen_schedules:
+            deferred = next((e for e in entries if isinstance(e, dict) and e.get("kind") == "deferred"), None)
+            actions = deferred.get("actions") if deferred else None
+            handled = f.with_name(f"{f.stem}.handled.txt").exists()
+            # Only a deferring or dismissed run supersedes older runs of its schedule, as in a live
+            # session; a clean or stopped run leaves an older pending deferral alone.
+            if handled or (actions and isinstance(actions, list)):
+                seen_schedules.add(schedule)
+            if not handled and actions and isinstance(actions, list):
+                candidates.append({
+                    "id": f.stem,
+                    "schedule_id": str(schedule),
+                    "prompt": g._redact(str(start.get("prompt", ""))),
+                    "actions": [g._redact(str(a)) for a in actions],
+                    "t": str(start.get("t") or deferred.get("t") or ""),
+                })
+        if scanned_runs >= 50:
+            break
+
+    candidates.reverse()
+    return candidates
+
+
 class Session:
     """Runs one agent request at a time in a background thread."""
 
@@ -186,6 +242,8 @@ class Session:
         self._run_id = 0
         self.thread: str | None = None  # id of the current chat; follow-ups share it
         self.history: list[tuple[str, str]] = []  # finished turns before the current prompt/answer
+        self._scheduled_chat = False  # the current thread belongs to a scheduled run; interactive runs must not join it
+        self.needs_approval: list[dict] = _load_deferred_approvals()
 
     def new_thread(self) -> bool:
         """Begin an empty chat; refused while a request runs."""
@@ -197,10 +255,16 @@ class Session:
             self.prompt = self.answer = self.outcome = self.error = ""
             return True
 
-    def start(self, prompt: str, thread: str | None = None) -> bool:
+    def start(self, prompt: str, thread: str | None = None, schedule: str | None = None) -> bool:
+        """Begin a run; False if one is already running. `schedule` (a schedule id) makes it an unattended,
+        read-only run in its own thread."""
         with self._lock:
             if self.status == "running":
                 return False
+            if schedule or self._scheduled_chat:  # a scheduled run never joins a chat, nor does a chat join it
+                self.thread, self.history = None, []
+                self.prompt = self.answer = self.outcome = self.error = ""
+                self._scheduled_chat = bool(schedule)
             if thread and thread != self.thread:  # continue a chat picked from Recents
                 self.thread, self.history = thread, _thread_turns(thread)
                 self.prompt = self.answer = self.outcome = self.error = ""
@@ -213,7 +277,7 @@ class Session:
             run_id = self._run_id
             self.status, self.prompt, self.answer, self.outcome, self.error = "running", prompt, "", "", ""
             self.started_at = time.time()
-        threading.Thread(target=self._run, args=(prompt, run_id, context, self.thread), daemon=True).start()
+        threading.Thread(target=self._run, args=(prompt, run_id, context, self.thread, schedule), daemon=True).start()
         return True
 
     def _default_call_model(self, text: str) -> str:
@@ -235,19 +299,62 @@ class Session:
             except OSError:
                 pass
 
-    def _run(self, prompt: str, run_id: int, context: str = "", thread: str | None = None) -> None:
+    def _run(self, prompt: str, run_id: int, context: str = "", thread: str | None = None,
+             schedule: str | None = None) -> None:
+        deferred: list[str] = []
+        saved_hooks = g.CONFIRM, g.ASK
+        if schedule:  # nobody is there to answer: decline through the normal path and remember what was refused
+            def confirm_later(desc: str) -> bool:
+                deferred.append(g._redact(desc))
+                return False
+            g.CONFIRM, g.ASK = confirm_later, lambda question: NO_ANSWER
         try:
-            self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context)
+            self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context,
+                                                    schedule)
         except Exception as exc:  # noqa: BLE001 - shown on the page, as the CLI prints it
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
+            if schedule:
+                g.CONFIRM, g.ASK = saved_hooks
             log_file = g._log_file
             answer = self.answer
             has_error = bool(self.error)
             with self._lock:
+                if deferred and self._run_id == run_id:  # not for a stopped run
+                    if log_file:
+                        g._log("deferred", actions=deferred)
+                    run_t = ""
+                    if log_file:
+                        start_entry = _log_start(log_file)
+                        run_t = str(start_entry.get("t") or "")
+                    if not run_t:
+                        run_t = datetime.now().isoformat(timespec="seconds")
+                    self.needs_approval = [e for e in self.needs_approval if e.get("schedule_id") != schedule]
+                    self.needs_approval.append({
+                        "id": log_file.stem if log_file else str(run_id),
+                        "schedule_id": str(schedule),
+                        "prompt": g._redact(prompt),
+                        "actions": list(deferred),
+                        "t": run_t,
+                    })
                 self.status = "idle"
             if self.run_summaries and log_file and answer and not has_error:
                 threading.Thread(target=self._summarize, args=(run_id, prompt, answer, log_file), daemon=True).start()
+
+    def dismiss_approval(self, id: str) -> bool:
+        """Remove a deferred approval entry and persist dismissal as a <stem>.handled.txt sidecar."""
+        with self._lock:
+            entry = next((e for e in self.needs_approval if e.get("id") == id), None)
+            if not entry:
+                return False
+            self.needs_approval = [e for e in self.needs_approval if e.get("id") != id]
+            try:
+                g.LOG_DIR.mkdir(exist_ok=True)
+                sidecar = g.LOG_DIR / f"{id}.handled.txt"
+                sidecar.write_text("handled\n")
+            except OSError:
+                pass
+            return True
 
     def stop(self) -> None:
         with self._lock:
@@ -653,6 +760,7 @@ def main() -> None:
                       args.backend, max_steps)
     server = serve(args.host, args.port, token, approvals, session,
                    {"mode": "agent", "backend": args.backend, "model": model})
+    Scheduler(session, approvals).start()
     print(f"SmolPaw web [{args.backend}: {model}] at {url(args.host, args.port, token)}  (Ctrl-C to stop)")
     try:
         threading.Event().wait()
