@@ -151,6 +151,7 @@ Tracked as GitHub issues:
 19. Done: Web search ([#24](https://github.com/aurora7795/smolpaw/issues/24)): a pluggable `web_search` tool, on by default with the `ddgs` package so users get search with no setup (it scrapes DuckDuckGo and may be patchy), SearXNG as an alternative, 3 searches per request cap. Schema measured at 91/92 tokens (Qwen/Gemma, `tests/tool_schema_tokens.py`). Revisit the default-on choice once its cost and reliability are measured: [#44](https://github.com/aurora7795/smolpaw/issues/44).
 
 20. A `list_dir` tool returning exact names, sizes and a count: [#46](https://github.com/aurora7795/smolpaw/issues/46). Found in an exploratory run: asked what is in a folder of about 55 entries, Qwen 3.5 9B ran one `ls -la` but its answer missed five entries, got some sizes wrong and over-counted subfolder items by two (it read the link-count column). Not built; measure the schema cost first.
+21. Recent runs show the first sentence of the prompt as a title (done); a model-written one-sentence summary per run is next: [#47](https://github.com/aurora7795/smolpaw/issues/47).
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
