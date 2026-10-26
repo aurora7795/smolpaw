@@ -138,7 +138,7 @@ class Session:
         self.agent, self.model, self.approvals = agent, model, approvals
         self.backend, self.max_steps = backend, max_steps
         if run_summaries is None:
-            run_summaries = os.environ.get("SMOLPAW_RUN_SUMMARIES", "").lower() in ("1", "true", "yes")
+            run_summaries = os.environ.get("SMOLPAW_RUN_SUMMARIES", "1").lower() not in ("0", "false", "no", "off")
         self.run_summaries = run_summaries
         self.call_model = call_model
         self._lock = threading.Lock()

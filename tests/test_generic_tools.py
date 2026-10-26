@@ -1858,13 +1858,17 @@ check("a run started while a summary is in flight does not get the older run’s
       and (run2_sidecar is not None and run2_sidecar.exists() and run2_sidecar.read_text().strip() == "Run 2 summary")
       and (run1_sidecar is not None and not run1_sidecar.exists()))
 
-# env var default SMOLPAW_RUN_SUMMARIES=1
+# env var default SMOLPAW_RUN_SUMMARIES
 os.environ["SMOLPAW_RUN_SUMMARIES"] = "1"
 sess_env_on = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5)
 check("SMOLPAW_RUN_SUMMARIES=1 enables summaries by default", sess_env_on.run_summaries is True)
 os.environ.pop("SMOLPAW_RUN_SUMMARIES", None)
 sess_env_off = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5)
-check("summaries are off by default when SMOLPAW_RUN_SUMMARIES is unset", sess_env_off.run_summaries is False)
+check("summaries are on by default when SMOLPAW_RUN_SUMMARIES is unset", sess_env_off.run_summaries is True)
+os.environ["SMOLPAW_RUN_SUMMARIES"] = "0"
+sess_env_zero = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5)
+check("SMOLPAW_RUN_SUMMARIES=0 turns summaries off", sess_env_zero.run_summaries is False)
+os.environ.pop("SMOLPAW_RUN_SUMMARIES", None)
 
 g.LOG_DIR = saved_log_dir
 
