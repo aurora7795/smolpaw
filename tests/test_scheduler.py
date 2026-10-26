@@ -222,9 +222,9 @@ check("an auto-allowed read still runs in a scheduled run", "hello" in agent.too
 check("ask_user returns NO_ANSWER instead of blocking", agent.tool_results["ask"] == web.NO_ANSWER)
 check("the interactive prompt hook was not used", interactive_prompts == [])
 check("the deferred list is kept for the UI",
-      sess.needs_approval is not None and sess.needs_approval["schedule_id"] == s3["id"]
-      and sess.needs_approval["prompt"] == "write something" and len(sess.needs_approval["actions"]) == 1
-      and "new.txt" in sess.needs_approval["actions"][0])
+      bool(sess.needs_approval) and sess.needs_approval[0]["schedule_id"] == s3["id"]
+      and sess.needs_approval[0]["prompt"] == "write something" and len(sess.needs_approval[0]["actions"]) == 1
+      and "new.txt" in sess.needs_approval[0]["actions"][0])
 log = entries(g._log_file)
 check("the log has a deferred entry", [e for e in log if e["kind"] == "deferred"]
       and "new.txt" in log[-1]["actions"][0])
@@ -243,7 +243,7 @@ schedules.add("leak?", "*/5 * * * *", now=T0)
 Scheduler(sess, approvals, clock=lambda: T0 + timedelta(minutes=5)).tick()
 wait_idle(sess)
 check("secrets in the deferred list are redacted",
-      sess.needs_approval is not None and secret not in json.dumps(sess.needs_approval["actions"])
+      bool(sess.needs_approval) and secret not in json.dumps(sess.needs_approval[0]["actions"])
       and secret not in g._log_file.read_text())
 
 # an interactive run afterwards still prompts, with its own hooks
@@ -309,10 +309,14 @@ sess.stop()
 release.set()
 wait_idle(sess)
 check("hooks are restored after Stop", g.CONFIRM is interactive_confirm and g.ASK is interactive_ask)
-check("a stopped run leaves no needs_approval half-filled", sess.needs_approval is None
-      or sess.needs_approval["prompt"] != "will be stopped")
+check("a stopped run leaves no needs_approval half-filled",
+      not any(e.get("prompt") == "will be stopped" for e in sess.needs_approval))
 check("the stopped run's declined write is still in its log",
       any(e["kind"] == "confirm" and not e["approved"] for e in entries(g._log_file)))
+check("a stopped run does not write a deferred entry to the log",
+      not any(e["kind"] == "deferred" for e in entries(g._log_file)))
+check("a stopped run is not rebuilt after a restart",
+      not any(e.get("prompt") == "will be stopped" for e in web.Session(agent, "m", approvals, run_summaries=False).needs_approval))
 
 # --- the thread -------------------------------------------------------------------------------
 
@@ -356,6 +360,162 @@ wait_idle(sess)
 start = entries(g._log_file)[0]
 check("the schedule field appears in a scheduled run's start entry",
       start["kind"] == "start" and start["schedule"] == s5["id"] and "thread" in start)
+
+# --- deferred approvals (#55) -----------------------------------------------------------------
+
+deferred_tmp = tmp / "deferred_logs"
+deferred_tmp.mkdir()
+saved_log_dir = g.LOG_DIR
+g.LOG_DIR = deferred_tmp
+
+try:
+    reset_schedules()
+    sess, approvals, agent = make()
+    agent.script = writes_and_reads
+
+    # 1. The same schedule deferring twice: one entry, the newer one
+    s_a = schedules.add("task a first", "*/5 * * * *", now=T0)
+    next_model(sess)
+    Scheduler(sess, approvals, clock=lambda: T0 + timedelta(minutes=5)).tick()
+    wait_idle(sess)
+    first_id = sess.needs_approval[0]["id"]
+
+    # Same schedule s_a runs again at T0 + 10 with updated prompt and defers again
+    scheds = schedules.load()
+    scheds[0]["prompt"] = "task a second"
+    schedules._atomic_save(scheds)
+    next_model(sess)
+    Scheduler(sess, approvals, clock=lambda: T0 + timedelta(minutes=10)).tick()
+    wait_idle(sess)
+    second_id = sess.needs_approval[0]["id"]
+
+    check("the same schedule deferring twice: one entry, the newer one",
+          len(sess.needs_approval) == 1
+          and sess.needs_approval[0]["schedule_id"] == s_a["id"]
+          and sess.needs_approval[0]["prompt"] == "task a second"
+          and sess.needs_approval[0]["id"] == second_id
+          and second_id != first_id)
+
+    # 2. Two different schedules that both defer: two entries, oldest first
+    s_b = schedules.add("task b", "*/5 * * * *", now=T0 + timedelta(minutes=10))
+    next_model(sess)
+    schedules.set_enabled(s_a["id"], False)
+    Scheduler(sess, approvals, clock=lambda: T0 + timedelta(minutes=15)).tick()
+    wait_idle(sess)
+    schedules.set_enabled(s_a["id"], True)
+
+    check("two different schedules that both defer: two entries, oldest first",
+          len(sess.needs_approval) == 2
+          and sess.needs_approval[0]["schedule_id"] == s_a["id"]
+          and sess.needs_approval[1]["schedule_id"] == s_b["id"]
+          and sess.needs_approval[0]["prompt"] == "task a second"
+          and sess.needs_approval[1]["prompt"] == "task b"
+          and "new.txt" in sess.needs_approval[0]["actions"][0]
+          and "new.txt" in sess.needs_approval[1]["actions"][0])
+
+    # 3. A run with no declined actions adds nothing and leaves other entries alone
+    s_c = schedules.add("read-only task", "0 13 * * *", now=T0)
+    agent.script = lambda a: g.read_file("a.txt")
+    next_model(sess)
+    schedules.set_enabled(s_a["id"], False)
+    schedules.set_enabled(s_b["id"], False)
+    Scheduler(sess, approvals, clock=lambda: datetime(2026, 10, 26, 13, 0)).tick()
+    wait_idle(sess)
+    schedules.set_enabled(s_a["id"], True)
+    schedules.set_enabled(s_b["id"], True)
+
+    check("a run with no declined actions adds nothing and leaves other entries alone",
+          len(sess.needs_approval) == 2
+          and [e["schedule_id"] for e in sess.needs_approval] == [s_a["id"], s_b["id"]])
+
+    # 4. An interactive run never adds an entry
+    agent.script = lambda a: "chat reply"
+    next_model(sess)
+    sess.start("interactive question")
+    wait_idle(sess)
+
+    check("an interactive run never adds an entry",
+          len(sess.needs_approval) == 2
+          and [e["schedule_id"] for e in sess.needs_approval] == [s_a["id"], s_b["id"]])
+
+    # 5. Restart: a new Session over the same LOG_DIR has the same entries
+    sess_restart, _, _ = make()
+    check("restart: a new Session over the same LOG_DIR has the same entries",
+          len(sess_restart.needs_approval) == len(sess.needs_approval)
+          and [e["id"] for e in sess_restart.needs_approval] == [e["id"] for e in sess.needs_approval]
+          and [e["schedule_id"] for e in sess_restart.needs_approval] == [e["schedule_id"] for e in sess.needs_approval]
+          and [e["prompt"] for e in sess_restart.needs_approval] == [e["prompt"] for e in sess.needs_approval]
+          and [e["actions"] for e in sess_restart.needs_approval] == [e["actions"] for e in sess.needs_approval]
+          and [e["t"] for e in sess_restart.needs_approval] == [e["t"] for e in sess.needs_approval])
+
+    # 6. dismiss_approval removes entry, returns False for unknown id, survives restart
+    check("dismiss_approval returns False for an unknown id", sess.dismiss_approval("nonexistent-id") is False)
+
+    to_dismiss = sess.needs_approval[0]
+    dismiss_id = to_dismiss["id"]
+    remaining_id = sess.needs_approval[1]["id"]
+    dismiss_ok = sess.dismiss_approval(dismiss_id)
+    sidecar_path = g.LOG_DIR / f"{dismiss_id}.handled.txt"
+    check("dismiss_approval removes the entry",
+          dismiss_ok is True
+          and len(sess.needs_approval) == 1
+          and sess.needs_approval[0]["id"] == remaining_id
+          and sidecar_path.exists())
+
+    sess_restart_after_dismiss, _, _ = make()
+    check("the dismissal survives a restart",
+          len(sess_restart_after_dismiss.needs_approval) == 1
+          and sess_restart_after_dismiss.needs_approval[0]["id"] == remaining_id)
+
+    # 7. A malformed or truncated log file, and a log without a start entry, are skipped without error
+    (g.LOG_DIR / "99999999-000001-corrupt.jsonl").write_text("{broken json\n")
+    (g.LOG_DIR / "99999999-000002-truncated.jsonl").write_text('{"t": "2026-10-26T12:00:00", "kind": "start"')
+    (g.LOG_DIR / "99999999-000003-nostart.jsonl").write_text(
+        json.dumps({"t": "2026-10-26T12:00:00", "kind": "deferred", "actions": ["do bad"]}) + "\n"
+    )
+    sess_bad_files, _, _ = make()
+    check("a malformed or truncated log file, and a log without a start entry, are skipped without error",
+          not any(bad in e["id"] for bad in ("corrupt", "truncated", "nostart")
+                  for e in sess_bad_files.needs_approval))
+
+    # 8. The 50-run cap on rebuild
+    cap_dir = tmp / "cap_logs"
+    cap_dir.mkdir()
+    g.LOG_DIR = cap_dir
+    for i in range(55):
+        fname = f"20261026-{100000 + i:06d}-m.jsonl"
+        t_iso = f"2026-10-26T10:{i // 60:02d}:{i % 60:02d}"
+        (cap_dir / fname).write_text(
+            json.dumps({"t": t_iso, "kind": "start", "schedule": f"sched_{i}", "prompt": f"prompt_{i}"}) + "\n"
+            + json.dumps({"t": t_iso, "kind": "deferred", "actions": [f"action_{i}"]}) + "\n"
+        )
+    sess_cap, _, _ = make()
+    check("the 50-run cap on rebuild",
+          len(sess_cap.needs_approval) == 50
+          and sess_cap.needs_approval[0]["schedule_id"] == "sched_5"
+          and sess_cap.needs_approval[-1]["schedule_id"] == "sched_54")
+
+    # 9. Secrets in loaded actions are redacted
+    sec_dir = tmp / "sec_logs"
+    sec_dir.mkdir()
+    g.LOG_DIR = sec_dir
+    secret_token = "sk-loaded-secret-key-12345"
+    (sec_dir / "20261026-120000-m.jsonl").write_text(
+        json.dumps({"t": "2026-10-26T12:00:00", "kind": "start", "schedule": "s_sec", "prompt": f"leak {secret_token}"}) + "\n"
+        + json.dumps({"t": "2026-10-26T12:00:01", "kind": "deferred", "actions": [f"write {secret_token}"]}) + "\n"
+    )
+    g._secrets = lambda: [secret_token]
+    sess_sec, _, _ = make()
+    check("secrets in loaded actions are redacted",
+          len(sess_sec.needs_approval) == 1
+          and secret_token not in json.dumps(sess_sec.needs_approval)
+          and "[REDACTED]" in sess_sec.needs_approval[0]["prompt"]
+          and "[REDACTED]" in sess_sec.needs_approval[0]["actions"][0])
+    g._secrets = lambda: []
+
+finally:
+    g.LOG_DIR = saved_log_dir
+    g._secrets = lambda: []
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

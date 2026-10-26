@@ -169,6 +169,83 @@ def _thread_turns(thread: str) -> list[tuple[str, str]]:
     return turns
 
 
+def _load_deferred_approvals() -> list[dict]:
+    """Deferred actions from past scheduled runs in g.LOG_DIR, oldest first, one per schedule.
+
+    Scans newest files first and stops after 50 runs. Runs marked handled (via a .handled.txt
+    sidecar) or missing a start/deferred entry are skipped.
+    """
+    if not g.LOG_DIR.exists() or not g.LOG_DIR.is_dir():
+        return []
+    try:
+        files = sorted(g.LOG_DIR.glob("*.jsonl"), key=lambda f: f.name, reverse=True)
+    except OSError:
+        return []
+
+    candidates: list[dict] = []
+    seen_schedules: set[str] = set()
+    scanned_runs = 0
+
+    for f in files:
+        if not f.is_file():
+            continue
+        try:
+            entries = [json.loads(raw) for raw in f.read_text().splitlines() if raw.strip()]
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not entries:
+            continue
+        start = entries[0] if isinstance(entries[0], dict) and entries[0].get("kind") == "start" else None
+        if not start:
+            continue
+
+        scanned_runs += 1
+
+        schedule = start.get("schedule")
+        if not schedule:
+            if scanned_runs >= 50:
+                break
+            continue
+
+        if schedule in seen_schedules:
+            if scanned_runs >= 50:
+                break
+            continue
+        seen_schedules.add(schedule)
+
+        handled_sidecar = f.with_name(f"{f.stem}.handled.txt")
+        if handled_sidecar.exists():
+            if scanned_runs >= 50:
+                break
+            continue
+
+        deferred = next((e for e in entries if isinstance(e, dict) and e.get("kind") == "deferred"), None)
+        if not deferred:
+            if scanned_runs >= 50:
+                break
+            continue
+
+        actions = deferred.get("actions")
+        if not actions or not isinstance(actions, list):
+            if scanned_runs >= 50:
+                break
+            continue
+        run_t = str(start.get("t") or deferred.get("t") or "")
+        candidates.append({
+            "id": f.stem,
+            "schedule_id": str(schedule),
+            "prompt": g._redact(str(start.get("prompt", ""))),
+            "actions": [g._redact(str(a)) for a in actions],
+            "t": run_t,
+        })
+
+        if scanned_runs >= 50:
+            break
+
+    candidates.reverse()
+    return candidates
+
+
 class Session:
     """Runs one agent request at a time in a background thread."""
 
@@ -188,7 +265,7 @@ class Session:
         self.thread: str | None = None  # id of the current chat; follow-ups share it
         self.history: list[tuple[str, str]] = []  # finished turns before the current prompt/answer
         self._scheduled_chat = False  # the current thread belongs to a scheduled run; interactive runs must not join it
-        self.needs_approval: dict | None = None  # {schedule_id, prompt, actions} of the latest scheduled run with declined actions
+        self.needs_approval: list[dict] = _load_deferred_approvals()
 
     def new_thread(self) -> bool:
         """Begin an empty chat; refused while a request runs."""
@@ -262,16 +339,44 @@ class Session:
             if schedule:
                 g.CONFIRM, g.ASK = saved_hooks
             log_file = g._log_file
-            if deferred and log_file:
-                g._log("deferred", actions=deferred)
             answer = self.answer
             has_error = bool(self.error)
             with self._lock:
                 if deferred and self._run_id == run_id:  # not for a stopped run
-                    self.needs_approval = {"schedule_id": schedule, "prompt": prompt, "actions": deferred}
+                    if log_file:
+                        g._log("deferred", actions=deferred)
+                    run_t = ""
+                    if log_file:
+                        start_entry = _log_start(log_file)
+                        run_t = str(start_entry.get("t") or "")
+                    if not run_t:
+                        run_t = datetime.now().isoformat(timespec="seconds")
+                    self.needs_approval = [e for e in self.needs_approval if e.get("schedule_id") != schedule]
+                    self.needs_approval.append({
+                        "id": log_file.stem if log_file else str(run_id),
+                        "schedule_id": str(schedule),
+                        "prompt": g._redact(prompt),
+                        "actions": list(deferred),
+                        "t": run_t,
+                    })
                 self.status = "idle"
             if self.run_summaries and log_file and answer and not has_error:
                 threading.Thread(target=self._summarize, args=(run_id, prompt, answer, log_file), daemon=True).start()
+
+    def dismiss_approval(self, id: str) -> bool:
+        """Remove a deferred approval entry and persist dismissal as a <stem>.handled.txt sidecar."""
+        with self._lock:
+            entry = next((e for e in self.needs_approval if e.get("id") == id), None)
+            if not entry:
+                return False
+            self.needs_approval = [e for e in self.needs_approval if e.get("id") != id]
+            try:
+                g.LOG_DIR.mkdir(exist_ok=True)
+                sidecar = g.LOG_DIR / f"{id}.handled.txt"
+                sidecar.write_text("handled\n")
+            except OSError:
+                pass
+            return True
 
     def stop(self) -> None:
         with self._lock:
