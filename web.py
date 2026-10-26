@@ -694,6 +694,11 @@ $("no").onclick = () => answer(false);
 $("send").onclick = () => { answer($("reply").value); $("reply").value = ""; };
 $("run").onclick = async () => { const p = $("prompt").value.trim(); if (p) { await api("/api/run", {prompt: p}); refresh(); } };
 $("stop").onclick = () => api("/api/stop", {});
+// Enter sends, Shift+Enter adds a newline; click() keeps the buttons' disabled state in charge
+for (const [box, btn] of [["prompt", "run"], ["reply", "send"]])
+  $(box).addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $(btn).click(); }
+  });
 $("copy").onclick = async () => {
   const text = $("answer").textContent;
   const flash = msg => { $("copy").textContent = msg; setTimeout(() => { $("copy").textContent = "Copy"; }, 1500); };

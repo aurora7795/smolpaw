@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- `web.py`: pressing Enter in the request box or the `ask_user` answer box now sends it (Shift+Enter adds a newline), same as clicking Run or Send answer.
 - The web page shows the output of the run's latest shell command or `list_dir` call in an Output card under the answer, so a listing is readable even when the model's answer does not repeat it.
 - `tests/summary_cost.py` (#47) measures the cost of run summaries: seconds and tokens per summary, and the next request's wall time and steps with and without a summary in flight. Results in RESULTS.md.
 - Model-written one-sentence summaries for Recent runs (#47): optional way for the loaded model to write a one-sentence summary of a finished run (at most 100 characters), stored in a sidecar `<log stem>.summary.txt` in `logs/` and shown in place of the prompt title, falling back to the title when absent. On by default; switch off with the Settings toggle or `SMOLPAW_RUN_SUMMARIES=0`. Generated lazily in a background thread after the answer is shown without blocking requests; skipped or cancelled if a new run starts while a summary is in flight. Redacted with `_redact` and `redact_pasted_secrets`. It adds one short extra model call per run (thinking off, output capped at 80 tokens; measured at about a second, see RESULTS.md). 19 new tests.
