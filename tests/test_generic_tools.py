@@ -1373,6 +1373,20 @@ check("/api/run_feed returns formatted lines",
 check("/api/run_feed returns 404 for unknown id",
       http.get(f"{base}/api/run_feed?id=unknown.jsonl", headers=hdr, timeout=5).status_code == 404)
 
+# /api/run_detail: what a past run asked and answered, for the sidebar chat view
+detail = http.get(f"{base}/api/run_detail?id={f_finished.name}", headers=hdr, timeout=5).json()
+check("/api/run_detail returns prompt, answer, outcome and feed for a finished run",
+      detail["prompt"] == "do something" and detail["answer"] == "done" and detail["finished"]
+      and detail["outcome"].startswith("[Harness says]") and any("$ ls" in fl for fl in detail["feed"]))
+detail_u = http.get(f"{base}/api/run_detail?id={f_unfinished.name}", headers=hdr, timeout=5).json()
+check("/api/run_detail marks an unfinished run and gives no answer",
+      detail_u["prompt"] == "unfinished task" and not detail_u["finished"] and detail_u["answer"] == "")
+check("/api/run_detail returns 404 for unknown id and for traversal",
+      http.get(f"{base}/api/run_detail?id=unknown.jsonl", headers=hdr, timeout=5).status_code == 404
+      and http.get(f"{base}/api/run_detail?id=../x", headers=hdr, timeout=5).status_code == 404)
+check("/api/run_detail refuses a missing token with 403",
+      http.get(f"{base}/api/run_detail?id={f_finished.name}", timeout=5).status_code == 403)
+
 # 3. Path traversal attempts return 404
 check("/api/run_feed returns 404 for ?id=../x",
       http.get(f"{base}/api/run_feed?id=../x", headers=hdr, timeout=5).status_code == 404)
@@ -1411,7 +1425,7 @@ check("secret in log file comes back masked in run_feed",
 del os.environ["MY_RUN_SECRET"]
 g.NOTES = saved_notes
 
-# 6. Current run summary in /api/state and web page contains recentcard
+# 6. Current run summary in /api/state and web page has the Recents list
 saved_curr_log = g._log_file
 g._log_file = f_finished
 state_with_summary = http.get(f"{base}/api/state", headers=hdr, timeout=5).json()
@@ -1427,9 +1441,10 @@ check("page returns to the live feed when the run changes and reloads the list o
       "s.run_id !== lastRunId) selectedRunId = null" in _page and "key !== runsKey" in _page
       and _page.count("loadRuns();") == 1)  # only the gated call, not an unconditional one per refresh
 
-check("web page contains recentcard and runslist",
-      'id="recentcard"' in http.get(f"{base}/?t={token}", timeout=5).text
-      and 'id="runslist"' in http.get(f"{base}/?t={token}", timeout=5).text)
+_page = http.get(f"{base}/?t={token}", timeout=5).text
+check("web page has the Recents list and New chat button in the left panel",
+      '<div class="recents">' in _page and 'id="runslist"' in _page and 'id="newchat"' in _page
+      and 'id="recentcard"' not in _page)
 
 g.LOG_DIR = saved_log_dir
 

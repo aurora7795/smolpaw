@@ -125,7 +125,7 @@ Ollama cuts prompts that exceed the loaded context with no error to the client (
 
 ### Web harness: answer prompts from your phone
 
-`web.py` runs the same agent and puts every `[y/N]` prompt and `ask_user` question on a web page, so you can approve or decline from another device (for example over Tailscale) while a task runs. Enter in the request or answer box sends it (Shift+Enter for a newline). Typing requests also happens on the page, not the terminal — for a terminal session that can *also* be answered from a browser (not just run from one), use `agent.py --web` instead (see [Run](#run)).
+`web.py` runs the same agent and puts every `[y/N]` prompt and `ask_user` question on a web page, so you can approve or decline from another device (for example over Tailscale) while a task runs. Enter in the request or answer box sends it (Shift+Enter for a newline). Past runs are listed under Recents in the left panel; click one to read its request, answer and activity, and use New chat to go back to the live view. Typing requests also happens on the page, not the terminal — for a terminal session that can *also* be answered from a browser (not just run from one), use `agent.py --web` instead (see [Run](#run)).
 
 ```bash
 .venv/bin/python web.py --backend ollama --host 0.0.0.0
