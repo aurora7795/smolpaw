@@ -828,6 +828,51 @@ def read_file(path: str) -> str:
     return _clip(_redact(content))
 
 
+def _size(n: int) -> str:
+    for unit in ("B", "KB", "MB"):
+        if n < 1024:
+            return f"{n} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+LIST_DIR_MAX = 200
+
+
+@tool
+@_remember
+def list_dir(path: str = ".") -> str:
+    """List a folder: exact names, sizes and entry count. Folders in workspace/ and skills/ are listed immediately; other paths ask the user first. Paths are relative to workspace/.
+
+    Args:
+        path: Folder path, e.g. "." or "../skills".
+    """
+    p = _resolve(path)
+    if ".ssh" in p.parts:
+        _log("list_dir", path=path, result="blocked (secrets folder)")
+        return "BLOCKED: this folder holds secrets and cannot be listed."
+    if not _in_scope(path) and not _approved(f"List folder outside workspace/:\n  {p}"):
+        _log("list_dir", path=path, result="declined")
+        return DECLINED
+    try:
+        entries = sorted(p.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        lines = []
+        for e in entries[:LIST_DIR_MAX]:
+            if e.is_dir():
+                lines.append(f"{e.name}/  folder, {sum(1 for _ in e.iterdir())} items")
+            else:
+                lines.append(f"{e.name}  {_size(e.stat().st_size)}")
+    except OSError as exc:
+        _log("list_dir", path=path, result=f"error ({type(exc).__name__})")
+        return f"ERROR: {exc}"
+    folders = sum(e.is_dir() for e in entries)
+    head = f"{p}: {len(entries)} entries ({folders} folders, {len(entries) - folders} files)"
+    if len(entries) > LIST_DIR_MAX:
+        head += f"; showing the first {LIST_DIR_MAX}"
+    _log("list_dir", path=path, entries=len(entries), result="ok")
+    return _clip(_redact("\n".join([head, *lines])))
+
+
 @tool
 def write_file(path: str, text: str) -> str:
     """Write a text file, replacing any existing one. Always asks the user first. Paths are relative to workspace/.
@@ -1040,7 +1085,7 @@ def _configure_search_provider(provider: str | None = None) -> str:
 
 
 GENERIC_TOOLS = [
-    run_shell, http_request, fetch_page, openapi_search, read_file, write_file, ask_user,
+    run_shell, http_request, fetch_page, openapi_search, read_file, list_dir, write_file, ask_user,
     list_skills, read_skill, write_skill, remember, recall,
 ]
 def apply_search_provider() -> str:

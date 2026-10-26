@@ -136,6 +136,33 @@ answer["value"] = True
 check("write approved", g.write_file("c.txt", "x").startswith("SUCCESS") and asked())
 check("outside-scope read asks", "hello" not in g.read_file("../../outside") and asked())
 
+# list_dir
+(g.WORKSPACE / "ld").mkdir()
+(g.WORKSPACE / "ld" / "sub").mkdir()
+(g.WORKSPACE / "ld" / "sub" / "x").write_text("1")
+(g.WORKSPACE / "ld" / "sub" / "y").write_text("2")
+(g.WORKSPACE / "ld" / "big.bin").write_bytes(b"0" * 2048)
+(g.WORKSPACE / "ld" / "b.txt").write_text("12345")
+listing = g.list_dir("ld")
+check("list_dir gives an exact count line", ": 3 entries (1 folders, 2 files)" in listing.splitlines()[0])
+check("list_dir counts a subfolder's items exactly", "sub/  folder, 2 items" in listing)
+check("list_dir shows sizes", "b.txt  5 B" in listing and "big.bin  2.0 KB" in listing)
+check("list_dir lists folders first", listing.splitlines()[1].startswith("sub/"))
+check("list_dir in workspace is free", not asked())
+check("list_dir blocks .ssh without asking", g.list_dir(".ssh").startswith("BLOCKED") and not asked())
+answer["value"] = False
+check("outside-scope list_dir asks and can be declined", g.list_dir("../..") == g.DECLINED and asked())
+answer["value"] = True
+check("list_dir of a missing folder is a clean ERROR", g.list_dir("nope").startswith("ERROR"))
+(g.WORKSPACE / "many").mkdir()
+for i in range(g.LIST_DIR_MAX + 5):
+    (g.WORKSPACE / "many" / f"f{i:03}").write_text("")
+many = g.list_dir("many")
+check("list_dir caps long listings but keeps the true count",
+      f": {g.LIST_DIR_MAX + 5} entries" in many.splitlines()[0] and len(many.splitlines()) == g.LIST_DIR_MAX + 1)
+check("list_dir is in the generic toolset", g.list_dir in g.GENERIC_TOOLS)
+prompts.clear()
+
 # skills
 answer["value"] = False
 check("skill write declined", g.write_skill("demo", "# Demo\nx") == g.DECLINED and asked())
