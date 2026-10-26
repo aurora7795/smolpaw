@@ -763,6 +763,16 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
 <main><div id="content">
+<div id="thread" data-views="chat">
+  <div id="history"></div>
+  <div class="bubble" id="userbubble" hidden><pre id="pastprompt"></pre></div>
+  <div class="reply" id="result" hidden><pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre>
+    <button class="copybtn" id="copy">Copy</button></div>
+  <details class="card" id="outcard" hidden open><summary id="outlabel">Output</summary><pre id="outtext"></pre></details>
+  <details class="card feed" id="feedcard"><summary>Activity</summary>
+    <div class="cardhead"><div class="meta" id="actsummary" style="margin:0"></div><button class="copybtn" id="livebtn" hidden>Current run</button></div>
+    <pre id="feed">(nothing yet)</pre></details>
+</div>
 <details class="card" id="setcard" data-views="settings" hidden><summary>Settings</summary>
   <div class="filesec">
     <h3>Backend</h3><select id="sbackend"></select>
@@ -782,16 +792,7 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <h2 style="margin-top:12px">Memory (memory.md)</h2>
     <pre id="fmemory">(empty)</pre>
   </div></details>
-<div id="thread" data-views="chat">
-  <div id="history"></div>
-  <div class="bubble" id="userbubble" hidden><pre id="pastprompt"></pre></div>
-  <div class="reply" id="result" hidden><pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre>
-    <button class="copybtn" id="copy">Copy</button></div>
-  <details class="card" id="outcard" hidden open><summary id="outlabel">Output</summary><pre id="outtext"></pre></details>
-  <details class="card feed" id="feedcard"><summary>Activity</summary>
-    <div class="cardhead"><div class="meta" id="actsummary" style="margin:0"></div><button class="copybtn" id="livebtn" hidden>Current run</button></div>
-    <pre id="feed">(nothing yet)</pre></details>
-</div></div>
+</div>
 <div id="dock">
 <div class="card pending" id="pending" data-views="chat files settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
   <div class="row" id="yesno"><button class="yes" id="yes">Yes</button><button class="no" id="no">No</button></div>
@@ -1023,7 +1024,7 @@ async function refresh() {
   if (key !== runsKey) { runsKey = key; loadRuns(); }
 }
 const wide = window.matchMedia("(min-width:900px)");
-function openPanels() { if (wide.matches) { $("setcard").open = true; $("filescard").open = true; } }
+function openPanels() { $("setcard").open = wide.matches; $("filescard").open = wide.matches; }
 function setView(v) {
   document.body.dataset.view = v;
   for (const b of document.querySelectorAll(".nav")) b.classList.toggle("on", b.dataset.view === v);
