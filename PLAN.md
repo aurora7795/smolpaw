@@ -70,6 +70,22 @@ Not planned: persona files and full browser automation (all prompt cost, little 
   6. Update README, CHANGELOG and RESULTS (done).
 - Only one model fits on 16GB: unload LM Studio before loading a model in Ollama, and the reverse.
 
+### Scheduler and daemon (planned, [#20](https://github.com/aurora7795/smolpaw/issues/20))
+Heartbeats and scheduled runs need something always running; today `web.py` and `agent.py` each own the agent and stop when closed. Decision (2026-10-26): turn `web.py` into the daemon that owns the agent, the scheduler, the approvals and the run logs, and make the CLI a thin client of its token-protected HTTP API. No separate service or message queue (against the efficiency goal). Zero prompt cost: the schedule lives outside the model's context.
+
+| Piece | Plan |
+|---|---|
+| Schedule store | `schedules.json` (gitignored): id, prompt, standard 5-field cron expression, `enabled`, `last_run`, `next_run`. A small own parser (no new dependency) with unit tests. |
+| Scheduler thread | Wakes every 30s, enqueues due jobs, starts one only when `Session` is idle; never interrupts an interactive run (the agent state in `generic_tools` is module-global, so runs cannot overlap). Missed slots after sleep or restart fire once, not once per slot. |
+| Unattended policy | A scheduled run uses a read-only approvals mode: `confirm()` returns False at once and records the action as deferred; `ask()` returns the existing `NO_ANSWER`. The model sees `DECLINED` through the normal path. A run with deferred writes shows as "needs approval"; approving re-runs the prompt with the user present (no replay of a half-finished tool call). This touches the confirmation flow, so it needs the owner's explicit OK and tests before merge. |
+| Model not loaded | The daemon loads the configured model through `lms` or `ollama` when a job fires and none is loaded. It never unloads another model or restarts an app without asking (ask-first list in CLAUDE.md); if loading fails or something else occupies memory, the run is logged as skipped and retried at the next slot. |
+| Logs | Ordinary run logs with `schedule: <id>` in the start entry; Recents tags them. `export_findings.py` needs no change. |
+| API and UI | `GET/POST /api/schedules` plus run-now and delete, same token; a Schedules section on the Settings page. |
+| CLI client | `agent.py --connect URL` talks to the daemon, so a scheduled run that needs approval shows up in whichever client is open. |
+| launchd | A LaunchAgent plist example and a README section (`KeepAlive`, `--host 0.0.0.0` for Tailscale, a fixed `SMOLPAW_WEB_TOKEN`). |
+
+Order: schedule store and parser, then scheduler thread with the read-only mode (with tests), then API and Settings UI, then model loading, then the CLI client, then launchd. Check the first-call prompt is unchanged with `tests/eval.py` at the end.
+
 ## Work items
 
 1. **Generic tools** (done): `http_request`, `run_shell`, file tools, `ask_user`, with the confirmation layer and secret injection.
@@ -102,7 +118,7 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 ## Out of scope for this tranche
 
 - Deleting data, editing Radarr's database, torrent swap/recovery, direct-source fallbacks (all in OpenClaw's skill; risky or rare).
-- Multi-agent setups, a UI, scheduling.
+- Multi-agent setups. (A web UI exists; scheduling is now planned, see "Scheduler and daemon".)
 - Porting OpenClaw's full `radarr-grab-and-verify` flow (release selection, Transmission checks). Revisit once the generic path works; it is a good later rung.
 
 ## Decisions (settled 2026-10-24)
@@ -155,6 +171,7 @@ Tracked as GitHub issues:
 22. Exploratory run, "how many files in my downloads folder": the shell answer counted entries (folders included) as files, and `exit 0` hid a failed first stage of a pipe: [#49](https://github.com/aurora7795/smolpaw/issues/49). The `pipefail` half is done. `list_dir` already returns the file/folder split, so the counting half is a tool-choice problem (the model ran shell instead); measure with a fixture before adding to the prompt.
 23. Web UI layout like the Claude app: Recents in the left panel, click a run to read it (done). Found along the way: the test suite writes its logs into the real `logs/` folder: [#50](https://github.com/aurora7795/smolpaw/issues/50).
 24. Exploratory run, "what is the time in Madrid right now": web search and page fetches could not give a live time (29s, about 18.7K tokens, no answer) while `TZ=Europe/Madrid date` would have; `date` also asks `[y/N]`: [#51](https://github.com/aurora7795/smolpaw/issues/51).
+25. Scheduler and daemon, planned in full above ("Scheduler and daemon"): [#20](https://github.com/aurora7795/smolpaw/issues/20). Scope settled 2026-10-26: cron syntax, read-only scheduled runs with re-run-to-approve, model loading by the daemon, CLI client and launchd in the first slice.
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
