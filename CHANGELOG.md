@@ -5,7 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
-- Cron parser and schedule store (`schedules.py`, #20): pure-Python 5-field cron expression parser (`minute hour day-of-month month day-of-week`) supporting steps, ranges, comma-separated lists, month and weekday names, strictly-after run calculations (`next_run`), and standard Vixie-cron day matching (DOM or DOW when both restricted). Atomic thread-safe schedule persistence in `schedules.json` (`load`, `add`, `remove`, `set_enabled`, `due`, `mark_ran`) ensuring missed slots fire once after sleep or restart and corrupt files raise without modification. 98 new tests.
+- Cron parser and schedule store (`schedules.py`, #20): pure-Python 5-field cron expression parser (`minute hour day-of-month month day-of-week`) supporting steps, ranges, comma-separated lists, month and weekday names, strictly-after run calculations (`next_run`), and standard Vixie-cron day matching (DOM or DOW when both restricted). Atomic thread-safe schedule persistence in `schedules.json` (`load`, `add`, `remove`, `set_enabled`, `due`, `mark_ran`) ensuring missed slots fire once after sleep or restart and corrupt files raise without modification. Tests in `tests/test_schedules.py`.
 
 ### Fixed
 - `web.py`: the conversation (including Activity) no longer shows on the Settings page on a wide screen.

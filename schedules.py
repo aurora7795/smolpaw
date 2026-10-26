@@ -42,10 +42,9 @@ def _parse_field_val(
         # If 'sun' is at the end of a range (e.g. fri-sun), treat as 7 so start <= end.
         val = 7 if (is_range_end and token_lower == "sun") else WEEKDAY_NAMES[token_lower]
     else:
-        try:
-            val = int(token)
-        except ValueError:
+        if not (token.isascii() and token.isdigit()):  # int() would also accept "1_0", "+5", " 5"
             raise ValueError(f"Invalid {field_name}: invalid value {token!r}")
+        val = int(token)
     if val < min_val or val > max_val:
         raise ValueError(f"Invalid {field_name}: value {val} out of range ({min_val}-{max_val})")
     return val
@@ -57,7 +56,7 @@ def _parse_field(
     """Parse a single cron field, returning (matched_values, is_unrestricted_star)."""
     if not expr:
         raise ValueError(f"Invalid {field_name}: empty field")
-    is_star = (expr == "*")
+    is_star = expr.startswith("*")  # Vixie: a leading * (also "*/n") selects the AND day rule
     items = expr.split(",")
     values: set[int] = set()
     for item in items:
@@ -68,7 +67,7 @@ def _parse_field(
             if len(parts) != 2:
                 raise ValueError(f"Invalid {field_name}: bad step syntax {item!r}")
             base, step_str = parts
-            if not step_str.isdigit() or int(step_str) <= 0:
+            if not (step_str.isascii() and step_str.isdigit()) or int(step_str) <= 0:
                 raise ValueError(f"Invalid {field_name}: step must be a positive integer, got {step_str!r}")
             step = int(step_str)
             if base == "*":
@@ -132,22 +131,18 @@ def next_run(expr: str, after: datetime) -> datetime:
     """Return the first matching minute strictly after after (seconds zeroed)."""
     minutes, hours, doms, months, dows, dom_restricted, dow_restricted = parse_cron(expr)
 
-    # DST: All times are naive local wall-clock datetimes. On spring-forward, skipped
-    # minutes fire as soon as the clock reaches/exceeds them; on fall-back, mark_ran
-    # advances next_run past the current day so the repeated hour fires only once.
+    # DST: times are naive wall-clock values. Spring-forward: a skipped minute fires as soon as the
+    # clock passes it. Fall-back: next_run is computed from "now", so the repeated hour never fires
+    # twice, but a job due within it may wait until the clock reaches its next slot again.
     cur = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
     max_year = cur.year + 5
 
     def day_matches(y: int, m: int, d: int) -> bool:
-        if not dom_restricted and not dow_restricted:
-            return True
         # In Python, Monday is 0 and Sunday is 6; map to cron (0=Sunday, 1=Monday, ..., 6=Saturday).
         cron_dow = (datetime(y, m, d).weekday() + 1) % 7
-        if dom_restricted and not dow_restricted:
-            return d in doms
-        if not dom_restricted and dow_restricted:
-            return cron_dow in dows
-        return (d in doms) or (cron_dow in dows)
+        if dom_restricted and dow_restricted:
+            return d in doms or cron_dow in dows
+        return d in doms and cron_dow in dows  # a field starting with * matches every value unless stepped
 
     while cur.year <= max_year:
         if cur.month not in months:

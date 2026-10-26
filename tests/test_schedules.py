@@ -478,6 +478,15 @@ check(
     len([f for f in tmp.iterdir() if f.name.startswith("tmp")]) == 0,
 )
 
+# Review fixes: strict numbers, and a leading * selects the AND day rule
+check("underscore in a field value is rejected", raises_and_names("0 0 1_0 * *", "day-of-month"))
+check("plus sign in a field value is rejected", raises_and_names("+5 * * * *", "minute"))
+check("surrounding-style junk in a step is rejected", raises_and_names("*/1_0 * * * *", "minute"))
+check("*/2 day-of-month with a weekday needs both (AND rule)",
+      schedules.next_run("0 0 */2 * 1", datetime(2027, 1, 1)) == datetime(2027, 1, 11))
+check("a plain number day-of-month with a weekday still uses OR",
+      schedules.next_run("0 0 5 * 1", datetime(2027, 1, 1)) == datetime(2027, 1, 4))
+
 # Clean up
 if concurrent_tmp.exists():
     concurrent_tmp.unlink()
