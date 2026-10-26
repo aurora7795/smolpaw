@@ -1309,6 +1309,19 @@ check("runs list is newest first",
       runs[0]["id"] == "20261025-110000-model_b.jsonl" and runs[1]["id"] == "20261025-100000-model_a.jsonl")
 check("unfinished run summary has model, 'unfinished', and tool count",
       "model_b" in runs[0]["summary"] and "unfinished" in runs[0]["summary"] and "1 tool call" in runs[0]["summary"])
+check("run titles come from the prompt's first sentence",
+      runs[1]["title"] == "do something" and runs[0]["title"] == "unfinished task")
+_long = fake_log_dir / "20261025-130000-long.jsonl"
+_long.write_text(json.dumps({"t": "2026-10-25T13:00:00", "kind": "start", "model": "m",
+                             "prompt": "Check the queue.  Then " + "x" * 200}) + "\n")
+_long2 = fake_log_dir / "20261025-140000-long2.jsonl"
+_long2.write_text(json.dumps({"t": "2026-10-25T14:00:00", "kind": "start", "model": "m",
+                              "prompt": "w" * 200}) + "\n")
+_titles = {r["id"]: r["title"] for r in web._list_runs()}
+check("title stops at the first sentence", _titles[_long.name] == "Check the queue.")
+check("long title is clipped to 80 characters with an ellipsis",
+      len(_titles[_long2.name]) == 80 and _titles[_long2.name].endswith("\u2026"))
+_long.unlink(); _long2.unlink()
 check("finished run summary has model, elapsed seconds, and tool count",
       "model_a" in runs[1]["summary"] and "12s" in runs[1]["summary"] and "2 tool calls" in runs[1]["summary"]
       and "12,345 in / 678 out tokens" in runs[1]["summary"] and "tokens" not in runs[0]["summary"])

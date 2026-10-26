@@ -12,6 +12,7 @@ import hmac
 import itertools
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -243,6 +244,26 @@ def _run_summary(path: Path | None) -> str | None:
     return g._redact(f"{start_t} · {model} · {dur} · {tool_str}{tokens}")
 
 
+def _run_title(path: Path) -> str:
+    """First sentence of the run's prompt, clipped to 80 characters, or '' if unavailable."""
+    try:
+        with path.open() as fh:
+            for raw in fh:
+                try:
+                    e = json.loads(raw)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if e.get("kind") != "start":
+                    continue
+                text = " ".join(str(e.get("prompt", "")).split())
+                text = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+                text = g._redact(text)
+                return text if len(text) <= 80 else text[:79].rstrip() + "\u2026"
+    except OSError:
+        pass
+    return ""
+
+
 def _list_runs() -> list[dict]:
     """List recent runs from g.LOG_DIR, newest first, capped at 20."""
     if not g.LOG_DIR.exists() or not g.LOG_DIR.is_dir():
@@ -258,7 +279,7 @@ def _list_runs() -> list[dict]:
         summary = _run_summary(f)
         if summary is None:
             continue
-        runs.append({"id": f.name, "summary": summary})
+        runs.append({"id": f.name, "summary": summary, "title": _run_title(f)})
         if len(runs) >= 20:
             break
     return runs
@@ -472,6 +493,8 @@ button:disabled { opacity:.45; }
 .copybtn { font:12px inherit; font-weight:600; padding:4px 10px; border-radius:6px; border:1px solid var(--line);
            background:transparent; color:var(--muted); }
 .feed pre { font-size:12px; color:var(--muted); }
+.runtitle { font-weight:600; }
+.runmeta { color:var(--muted); font-size:12px; }
 summary { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; cursor:pointer; }
 summary:focus { outline:none; }
 .filesec { margin-top:12px; }
@@ -655,7 +678,16 @@ async function loadRuns() {
     for (const r of runs) {
       const row = document.createElement("div");
       row.className = "runitem";
-      row.textContent = r.summary;
+      if (r.title) {
+        const t = document.createElement("div");
+        t.className = "runtitle";
+        t.textContent = r.title;
+        row.appendChild(t);
+      }
+      const m = document.createElement("div");
+      m.className = "runmeta";
+      m.textContent = r.summary;
+      row.appendChild(m);
       row.onclick = async () => {
         selectedRunId = r.id;
         try {

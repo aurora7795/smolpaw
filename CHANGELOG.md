@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added
+- Recent runs now show a title above each run's summary line: the first sentence of the run's prompt, secret-redacted and clipped to 80 characters. It is a cheap stand-in for a real summary; model-written summaries are tracked in #47. 3 new tests.
+
 ### Security
 - `ask_user` answers are now checked for a pasted credential (GitHub/AWS/OpenAI/Slack token shapes, JWTs, a conservative generic long-opaque-token catch-all) and redacted before reaching the model's context, the run log, or anything it echoes back. Found from a real session: a model asked a user directly for a GitHub token (against an instruction already telling it not to), the user pasted a real one, and it went completely unredacted into the log and the model's final answer. `_redact()` only ever covered pre-registered secrets from `notes.md`/`.env`; this is the backstop for anything pasted ad hoc. `GUIDANCE` now also says plainly never to ask for a credential, even if offered — the redaction is the real fix, the instruction alone had already failed once. 6 new tests. Closes #32.
 
