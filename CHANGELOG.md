@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+- `web.py`: on a narrow window the Files and Settings panels no longer sit open above the conversation. They now come after it and collapse when the window is narrow.
+
 ### Added
 - `web.py`: chats. Follow-up messages now continue the same chat instead of starting from nothing: the last three turns (answers clipped to 600 characters) are put before the new message for the model, and the run log keeps only your own message plus a `thread` id. Recents lists one entry per chat (with a message count); clicking one shows the whole chat and sending from it continues that chat, and New chat starts an empty one. Runs from before this change, and from the terminal agent, stay single-message entries. Adds a few hundred tokens to follow-ups only; first messages are unchanged. 8 new tests.
 
