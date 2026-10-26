@@ -144,6 +144,13 @@ check("outside-scope read asks", "hello" not in g.read_file("../../outside") and
 (g.WORKSPACE / "ld" / "big.bin").write_bytes(b"0" * 2048)
 (g.WORKSPACE / "ld" / "b.txt").write_text("12345")
 listing = g.list_dir("ld")
+check("list_dir result is kept for the page", g.SHOWN_OUTPUT == ("list_dir ld", listing))
+g.run_shell("ls ld")
+check("shell result is kept for the page, labelled with the command",
+      g.SHOWN_OUTPUT is not None and g.SHOWN_OUTPUT[0] == "$ ls ld" and "big.bin" in g.SHOWN_OUTPUT[1])
+g.start_log("m", "p")
+check("starting a run clears the shown output", g.SHOWN_OUTPUT is None)
+g.run_shell("ls ld")
 check("list_dir gives an exact count line", ": 3 entries (1 folders, 2 files)" in listing.splitlines()[0])
 check("list_dir counts a subfolder's items exactly", "sub/  folder, 2 items" in listing)
 check("list_dir shows sizes", "b.txt  5 B" in listing and "big.bin  2.0 KB" in listing)
@@ -1217,7 +1224,10 @@ g.NOTES.write_text("- svc: http://example.com | key_env=SMOLPAW_TEST_WEB_KEY | h
 os.environ["SMOLPAW_TEST_WEB_KEY"] = "s3cret-value-for-test"
 job = run_in_thread(appr.confirm, "POST with key s3cret-value-for-test?")
 p = wait_pending(appr)
+g._show("$ echo s3cret-value-for-test", "listing")
 state = http.get(f"{base}/api/state", headers=hdr, timeout=5).json()
+check("api/state carries the shown tool output, label redacted",
+      (state.get("tool_output") or {}).get("label") == "$ echo [REDACTED]" and state["tool_output"]["text"] == "listing")
 check("keys are redacted on the web page",
       "s3cret-value-for-test" not in json.dumps(state) and "[REDACTED]" in p["text"])
 appr.cancel()

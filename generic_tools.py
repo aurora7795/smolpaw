@@ -148,6 +148,12 @@ def _clip(text: str) -> str:
     return text if len(text) <= MAX_OUT else text[:MAX_OUT] + f"\n... [truncated, {len(text)} chars total]"
 
 
+def _show(label: str, text: str) -> None:
+    """Remember a result the user should be able to read, since the agent may not repeat it in its answer."""
+    global SHOWN_OUTPUT
+    SHOWN_OUTPUT = (_redact(label), text)
+
+
 def _log(kind: str, **fields) -> None:
     if _log_file:
         entry = {"t": datetime.now().isoformat(timespec="seconds"), "kind": kind, **fields}
@@ -156,7 +162,8 @@ def _log(kind: str, **fields) -> None:
 
 
 def start_log(model: str, prompt: str) -> Path:
-    global _log_file
+    global _log_file, SHOWN_OUTPUT
+    SHOWN_OUTPUT = None
     reset_search_count()
     LOG_DIR.mkdir(exist_ok=True)
     _log_file = LOG_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{model.replace('/', '_')}.jsonl"
@@ -170,6 +177,7 @@ def log_final(answer: object, input_tokens: int | None = None, output_tokens: in
     _log("final", answer=str(answer), actions=list(ACTIONS), **extra)
 
 
+SHOWN_OUTPUT: tuple[str, str] | None = None  # (label, text) of the latest shell or list_dir result, for the web page
 LAST_RESULT = ""  # most recent tool output, shown by the harness if the agent hits the step cap
 
 
@@ -289,7 +297,9 @@ def run_shell(command: str) -> str:
         ACTIONS.append(f"shell exit {r.returncode}: {command}")
     out = f"exit code {r.returncode}\n{r.stdout}{('[stderr] ' + r.stderr) if r.stderr else ''}"
     _log("shell", command=command, read_only=bool(argv), exit=r.returncode, output=out[:LOG_OUT])
-    return _clip(_redact(out))
+    result = _clip(_redact(out))
+    _show(f"$ {command}", result)
+    return result
 
 
 # --- http -------------------------------------------------------------------------
@@ -870,7 +880,9 @@ def list_dir(path: str = ".") -> str:
     if len(entries) > LIST_DIR_MAX:
         head += f"; showing the first {LIST_DIR_MAX}"
     _log("list_dir", path=path, entries=len(entries), result="ok")
-    return _clip(_redact("\n".join([head, *lines])))
+    result = _clip(_redact("\n".join([head, *lines])))
+    _show(f"list_dir {path}", result)
+    return result
 
 
 @tool
