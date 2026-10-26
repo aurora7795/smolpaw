@@ -1801,6 +1801,16 @@ leaky = {r["id"]: r for r in web._list_runs()}[f_with_sidecar.name]["title"]
 check("_list_runs() redacts and clips a sidecar on read", "ghp_0123" not in leaky and len(leaky) <= 100)
 sidecar_file.write_text("Model-written summary for run with sidecar")
 
+seen_kwargs = []
+def stub_model(messages, **kw):
+    seen_kwargs.append(kw)
+    if "reasoning_effort" in kw:
+        raise RuntimeError("unknown parameter")
+    return type("Msg", (), {"content": "ok"})()
+check("summary call turns thinking off and caps output, retrying without the reasoning setting if rejected",
+      web.call_summary_model(stub_model, "x") == "ok"
+      and seen_kwargs == [{"reasoning_effort": "none", "max_tokens": 80}, {"max_tokens": 80}])
+
 # 5. no sidecar is written when the setting is off
 sess_off = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5, run_summaries=False,
                        call_model=lambda t: "Summary should not be written")

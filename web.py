@@ -117,6 +117,18 @@ def summarize_run(prompt: str, answer: str, call_model: Callable[[str], str]) ->
         return None
 
 
+def call_summary_model(model, text: str) -> str:
+    """One short reply from the loaded model with thinking off and output capped (a thinking model otherwise
+    spends minutes on a one-line summary and blocks the next request, see RESULTS.md); retries without the
+    reasoning setting if the server rejects it."""
+    messages = [ChatMessage(role=MessageRole.USER, content=text)]
+    try:
+        msg = model(messages, reasoning_effort="none", max_tokens=80)
+    except Exception:  # noqa: BLE001 - a server that does not know reasoning_effort
+        msg = model(messages, max_tokens=80)
+    return getattr(msg, "content", "") or ""
+
+
 class Session:
     """Runs one agent request at a time in a background thread."""
 
@@ -146,8 +158,7 @@ class Session:
         return True
 
     def _default_call_model(self, text: str) -> str:
-        msg = self.agent.model([ChatMessage(role=MessageRole.USER, content=text)])
-        return getattr(msg, "content", "") or ""
+        return call_summary_model(self.agent.model, text)
 
     def _summarize(self, run_id: int, prompt: str, answer: str, log_file: Path) -> None:
         with self._lock:
