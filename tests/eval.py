@@ -47,6 +47,23 @@ TIDEPOOL_PROMPT = ("Using the Tidepool service at {url}, which vessel has the bi
                    "capacity, and what is that capacity?")
 
 
+LISTING_PROMPT = "What files and folders are in the folder downloads/? Give the exact total count and the name of every folder."
+LISTING_FOLDERS = ["apps", "docs", "fonts", "photos"]
+
+
+def make_listing_fixture(workspace: Path) -> list[str]:
+    """Create downloads/ with 55 entries (4 folders, 51 files) and return regexes the answer must match (#46)."""
+    d = workspace / "downloads"
+    d.mkdir(parents=True)
+    for i, name in enumerate(LISTING_FOLDERS):
+        (d / name).mkdir()
+        for j in range(i + 1):
+            (d / name / f"item{j}.txt").write_text("x")
+    for i in range(51):
+        (d / f"file{i:02}.{('pdf', 'png', 'zip')[i % 3]}").write_bytes(b"0" * (i * 100 + 10))
+    return [r"\b55\b", *LISTING_FOLDERS]
+
+
 def lms(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([str(LMS), *args], capture_output=True, text=True)
 
@@ -183,6 +200,10 @@ def main() -> None:
                     help="do not unload/load models; use what is loaded")
     ap.add_argument("--notes-file", help="notes to use instead of the real notes.md")
     ap.add_argument("--tidepool", metavar="VARIANT", help="serve the fake Tidepool API (easy|hint|detail|paged)")
+    ap.add_argument("--listing", action="store_true",
+                    help="folder-listing task on a generated 55-entry downloads/ in an isolated workspace (#46)")
+    ap.add_argument("--without-tool", action="append", default=[],
+                    help="drop a generic tool by name for this run, to compare (for example list_dir)")
     ap.add_argument("--label", default="")
     ap.add_argument("--confirm", choices=["no", "web"], default="no",
                     help="no = answer every prompt no; web = answer prompts in the browser (web.py)")
@@ -210,8 +231,16 @@ def main() -> None:
         (tmp / "notes.md").write_text(Path(args.notes_file).read_text())
     else:
         (tmp / "notes.md").write_text("# notes\n")
+    if args.listing:
+        g.WORKSPACE = tmp / "workspace"
+        expects = expects or make_listing_fixture(g.WORKSPACE)
+        prompt = prompt or LISTING_PROMPT
+        if not args.tidepool and not args.notes_file:
+            (tmp / "notes.md").write_text("# notes\n")
+    for name in args.without_tool:
+        g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
     if not prompt:
-        ap.error("--prompt is required unless --tidepool is used")
+        ap.error("--prompt is required unless --tidepool or --listing is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
     web_server, web_info = None, {}
@@ -231,7 +260,7 @@ def main() -> None:
     try:
         if not args.no_load:
             ctx = ensure_model(args.model, args.ctx, args.backend)
-        label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "custom")
+        label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
         for i in range(1, args.n + 1):

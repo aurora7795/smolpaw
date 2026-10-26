@@ -358,3 +358,14 @@ The same write-up said Ollama chose a 32K context from available memory on this 
 | Gemma 4 E4B | 92 |
 
 This is the schema alone. The whole first-call prompt with `web_search` enabled was not re-measured, and no task using search was run, so reliability of the default `ddgs` backend is unmeasured ([#44](https://github.com/aurora7795/smolpaw/issues/44)). A live `ddgs` 9.16.1 search returned results, and its exception classes match those `generic_tools.py` imports.
+
+## `list_dir` tool (#46)
+
+Task: "What files and folders are in the folder downloads/? Give the exact total count and the name of every folder." The fixture (`tests/eval.py --listing`) is a generated `downloads/` with 55 entries (4 folders, 51 files) in an isolated temp workspace. A run passes if the final answer contains `55` and all four folder names; it does not check the file names. Ollama, 3 runs per cell, Ollama's server context was 32768 (not the 16384 the eval expects).
+
+| Model | With `list_dir` | Without (`--without-tool list_dir`, shell `ls`) |
+|---|---|---|
+| Qwen 3.5 9B | 3/3, mean 23s, 2.7 steps, 13.0K input tokens | 2/3, mean 58s, 4.0 steps, 21.6K input tokens |
+| Gemma 4 E4B | 3/3, mean 10s, 2.3 steps, 10.5K input tokens | 2/3, mean 34s, 3.3 steps, 14.4K input tokens |
+
+Without the tool, the failures were a miscount (Qwen: "50 files + 4 folders = 54") and a run that ended by saying the listing was "in the previous response" (Gemma). With the tool, every run called `list_dir` once and copied the harness's count. Samples are small (3 per cell) and the check covers the count and folder names only, not sizes, which the original exploratory failure also got wrong. Schema cost (`tests/tool_schema_tokens.py`, one run each): Qwen 3.5 9B 108 tokens, Gemma 4 E4B 110.
