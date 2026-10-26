@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+- `web.py`: chat layout like other chat clients. The request box is pinned to the bottom of the page and clears when sent, the request shows as a bubble above the answer, Activity is a collapsible section under the answer instead of a right-hand column, and approval prompts appear just above the request box. The request box stays available while reading a past run; sending starts a new live run.
+
 ### Added
 - `web.py`: pressing Enter in the request box or the `ask_user` answer box now sends it (Shift+Enter adds a newline), same as clicking Run or Send answer.
 - The web page shows the output of the run's latest shell command or `list_dir` call in an Output card under the answer, so a listing is readable even when the model's answer does not repeat it.
