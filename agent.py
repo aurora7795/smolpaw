@@ -186,16 +186,20 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
                instructions=RADARR_INSTRUCTIONS, step_callbacks=[check_stall], **kwargs)
 
 
-def run_request(agent, model: str, toolset: str, user_input: str) -> tuple[str, str]:
-    """Run one request; return the answer and the harness's own account of what changed."""
+def run_request(agent, model: str, toolset: str, user_input: str, thread: str | None = None,
+                context: str = "") -> tuple[str, str]:
+    """Run one request; return the answer and the harness's own account of what changed.
+
+    `context` (earlier turns of the same chat) is shown to the model but not logged; `thread` tags the log.
+    """
     radarr_tools.LAST_ACTION = ""
     generic_tools.ACTIONS.clear()
     generic_tools.LAST_RESULT = ""
     if toolset == "generic":
-        print(f"[log] {generic_tools.start_log(model, user_input)}")
+        print(f"[log] {generic_tools.start_log(model, user_input, thread)}")
     agent.stall_reason = None
     try:
-        response = agent.run(user_input)
+        response = agent.run(context + user_input)
     except AgentError:
         if not agent.stall_reason:
             raise  # a genuine interrupt (the web harness's Stop button), not a stall
