@@ -1796,6 +1796,11 @@ check("_list_runs() shows the sidecar text as title when present and the prompt-
       runs_by_id[f_with_sidecar.name]["title"] == "Model-written summary for run with sidecar"
       and runs_by_id[f_old.name]["title"] == "Old task prompt.")
 
+f_with_sidecar.with_name(f"{f_with_sidecar.stem}.summary.txt").write_text("Leaked ghp_0123456789abcdef0123456789 " + "y" * 200)
+leaky = {r["id"]: r for r in web._list_runs()}[f_with_sidecar.name]["title"]
+check("_list_runs() redacts and clips a sidecar on read", "ghp_0123" not in leaky and len(leaky) <= 100)
+sidecar_file.write_text("Model-written summary for run with sidecar")
+
 # 5. no sidecar is written when the setting is off
 sess_off = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5, run_summaries=False,
                        call_model=lambda t: "Summary should not be written")

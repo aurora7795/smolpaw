@@ -354,7 +354,7 @@ def _list_runs() -> list[dict]:
         sidecar = f.with_name(f"{f.stem}.summary.txt")
         if sidecar.exists():
             try:
-                txt = sidecar.read_text().strip()
+                txt = g.redact_pasted_secrets(g._redact(sidecar.read_text().strip()))[:100]
                 if txt:
                     title = txt
             except OSError:
