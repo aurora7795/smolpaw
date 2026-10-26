@@ -1896,6 +1896,69 @@ sess_env_zero = web.Session(dummy_agent, "m", dummy_appr, "lmstudio", 5)
 check("SMOLPAW_RUN_SUMMARIES=0 turns summaries off", sess_env_zero.run_summaries is False)
 os.environ.pop("SMOLPAW_RUN_SUMMARIES", None)
 
+
+# ---- chat threads: follow-ups share a thread, carry context, and group in Recents ----
+import agent as _agent_mod  # noqa: E402
+
+thread_dir = tmp / "thread-logs"
+saved_ld_t, g.LOG_DIR = g.LOG_DIR, thread_dir
+seen_inputs: list[str] = []
+
+
+class _ThreadAgent:
+    def __init__(self):
+        self.stall_reason = None
+        self.memory = type("M", (), {"steps": []})()
+        self.monitor = type("Mon", (), {"get_total_token_counts": lambda self: type("T", (), {"input_tokens": 1, "output_tokens": 1})()})()
+
+    def run(self, text):
+        seen_inputs.append(text)
+        return f"answer {len(seen_inputs)}"
+
+
+def _wait_idle(sess):
+    for _ in range(100):
+        if sess.status == "idle":
+            return
+        time.sleep(0.05)
+
+
+tsess = web.Session(_ThreadAgent(), "m", web.Approvals(), "lmstudio", 5, run_summaries=False)
+tsess.start("first question")
+_wait_idle(tsess)
+time.sleep(1.1)  # log files are named to the second
+tsess.start("and a follow up")
+_wait_idle(tsess)
+check("first message carries no earlier-chat context", seen_inputs[0] == "first question")
+check("a follow-up carries the earlier turn as context",
+      "User: first question" in seen_inputs[1] and "You: answer 1" in seen_inputs[1]
+      and seen_inputs[1].endswith("New message from the user: and a follow up"))
+check("the session keeps earlier turns for the page", tsess.history == [("first question", "answer 1")])
+chats = web._list_runs()
+check("follow-ups group into one Recents entry", len(chats) == 1 and chats[0]["turns"] == 2 and len(chats[0]["ids"]) == 2)
+check("the log keeps the user's own message, not the context",
+      web._run_detail(thread_dir / chats[0]["ids"][1])["prompt"] == "and a follow up")
+check("a chat's title comes from its first message", chats[0]["title"] == "first question")
+check("a chat is rebuilt from its logs", web._thread_turns(chats[0]["thread"]) ==
+      [("first question", "answer 1"), ("and a follow up", "answer 2")])
+
+time.sleep(1.1)
+check("new_thread clears the chat", tsess.new_thread() and tsess.history == [] and tsess.thread is None)
+tsess.start("unrelated")
+_wait_idle(tsess)
+check("a new chat starts without context", seen_inputs[2] == "unrelated" and len(web._list_runs()) == 2)
+
+time.sleep(1.1)
+tsess.start("back to the first one", chats[0]["thread"])
+_wait_idle(tsess)
+check("continuing a chat from Recents restores its context",
+      "User: first question" in seen_inputs[3] and "User: and a follow up" in seen_inputs[3]
+      and "unrelated" not in seen_inputs[3] and len(web._list_runs()) == 2)
+check("build_context keeps only the last turns and clips long answers",
+      "turn0" not in web.build_context([(f"turn{i}", "x" * 2000) for i in range(5)])
+      and "x" * 700 not in web.build_context([("q", "x" * 2000)]))
+g.LOG_DIR = saved_ld_t
+
 g.LOG_DIR = saved_log_dir
 
 print(f"\n{check.failed} failed")

@@ -129,6 +129,45 @@ def call_summary_model(model, text: str) -> str:
     return getattr(msg, "content", "") or ""
 
 
+CONTEXT_TURNS = 3
+CONTEXT_ANSWER_CHARS = 600
+
+
+def build_context(history: list[tuple[str, str]]) -> str:
+    """The last few turns of a chat as plain text to put before a follow-up; '' for a first message."""
+    if not history:
+        return ""
+    lines = ["Earlier in this chat (for context only):"]
+    for prompt, answer in history[-CONTEXT_TURNS:]:
+        lines.append(f"User: {prompt}")
+        lines.append(f"You: {answer if len(answer) <= CONTEXT_ANSWER_CHARS else answer[:CONTEXT_ANSWER_CHARS] + '...'}")
+    return "\n".join(lines) + "\n\nNew message from the user: "
+
+
+def _log_start(path: Path) -> dict:
+    """The first (start) entry of a run log, or {}."""
+    try:
+        with path.open() as fh:
+            e = json.loads(fh.readline())
+        return e if isinstance(e, dict) and e.get("kind") == "start" else {}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+
+
+def _thread_turns(thread: str) -> list[tuple[str, str]]:
+    """Finished (prompt, answer) turns of a chat, oldest first, from the run logs."""
+    turns = []
+    if not g.LOG_DIR.is_dir():
+        return turns
+    for f in sorted(g.LOG_DIR.glob("*.jsonl"), key=lambda f: f.name):
+        if _log_start(f).get("thread") != thread:
+            continue
+        d = _run_detail(f)
+        if d and d["finished"] and d["answer"]:
+            turns.append((d["prompt"], d["answer"]))
+    return turns
+
+
 class Session:
     """Runs one agent request at a time in a background thread."""
 
@@ -145,16 +184,36 @@ class Session:
         self.status, self.prompt, self.answer, self.outcome, self.error = "idle", "", "", "", ""
         self.started_at = 0.0
         self._run_id = 0
+        self.thread: str | None = None  # id of the current chat; follow-ups share it
+        self.history: list[tuple[str, str]] = []  # finished turns before the current prompt/answer
 
-    def start(self, prompt: str) -> bool:
+    def new_thread(self) -> bool:
+        """Begin an empty chat; refused while a request runs."""
         with self._lock:
             if self.status == "running":
                 return False
             self._run_id += 1
+            self.thread, self.history = None, []
+            self.prompt = self.answer = self.outcome = self.error = ""
+            return True
+
+    def start(self, prompt: str, thread: str | None = None) -> bool:
+        with self._lock:
+            if self.status == "running":
+                return False
+            if thread and thread != self.thread:  # continue a chat picked from Recents
+                self.thread, self.history = thread, _thread_turns(thread)
+                self.prompt = self.answer = self.outcome = self.error = ""
+            elif self.prompt and self.answer and not self.error:
+                self.history.append((self.prompt, self.answer))
+            if not self.thread:
+                self.thread = f"{datetime.now():%Y%m%d-%H%M%S-%f}"
+            context = build_context(self.history)
+            self._run_id += 1
             run_id = self._run_id
             self.status, self.prompt, self.answer, self.outcome, self.error = "running", prompt, "", "", ""
             self.started_at = time.time()
-        threading.Thread(target=self._run, args=(prompt, run_id), daemon=True).start()
+        threading.Thread(target=self._run, args=(prompt, run_id, context, self.thread), daemon=True).start()
         return True
 
     def _default_call_model(self, text: str) -> str:
@@ -176,9 +235,9 @@ class Session:
             except OSError:
                 pass
 
-    def _run(self, prompt: str, run_id: int) -> None:
+    def _run(self, prompt: str, run_id: int, context: str = "", thread: str | None = None) -> None:
         try:
-            self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt)
+            self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context)
         except Exception as exc:  # noqa: BLE001 - shown on the page, as the CLI prints it
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
@@ -346,33 +405,48 @@ def _run_title(path: Path) -> str:
     return ""
 
 
+def _run_title_for(f: Path) -> str:
+    """A run's title: its model-written summary if there is one, else the first sentence of its prompt."""
+    sidecar = f.with_name(f"{f.stem}.summary.txt")
+    if sidecar.exists():
+        try:
+            txt = g.redact_pasted_secrets(g._redact(sidecar.read_text().strip()))[:100]
+            if txt:
+                return txt
+        except OSError:
+            pass
+    return _run_title(f)
+
+
 def _list_runs() -> list[dict]:
-    """List recent runs from g.LOG_DIR, newest first, capped at 20."""
+    """Recent chats from g.LOG_DIR, newest first, capped at 20. Runs sharing a thread id form one chat.
+
+    Each entry: id (the chat's first run log), ids (all its run logs, oldest first), thread (or ''),
+    title (from the first run), summary (of the latest run) and turns.
+    """
     if not g.LOG_DIR.exists() or not g.LOG_DIR.is_dir():
         return []
     try:
         files = sorted(g.LOG_DIR.glob("*.jsonl"), key=lambda f: f.name, reverse=True)
     except OSError:
         return []
-    runs = []
+    groups: dict[str, list[Path]] = {}  # newest-first order of first appearance
     for f in files:
         if not f.is_file():
             continue
-        summary = _run_summary(f)
+        start = _log_start(f)
+        if not start:
+            continue
+        groups.setdefault(str(start.get("thread") or f.name), []).append(f)
+    runs = []
+    for key, members in groups.items():
+        latest, first = members[0], members[-1]
+        summary = _run_summary(latest)
         if summary is None:
             continue
-        title = ""
-        sidecar = f.with_name(f"{f.stem}.summary.txt")
-        if sidecar.exists():
-            try:
-                txt = g.redact_pasted_secrets(g._redact(sidecar.read_text().strip()))[:100]
-                if txt:
-                    title = txt
-            except OSError:
-                pass
-        if not title:
-            title = _run_title(f)
-        runs.append({"id": f.name, "summary": summary, "title": title})
+        threaded = key != first.name
+        runs.append({"id": first.name, "ids": [m.name for m in reversed(members)], "thread": key if threaded else "",
+                     "summary": summary, "title": _run_title_for(first), "turns": len(members)})
         if len(runs) >= 20:
             break
     return runs
@@ -462,6 +536,8 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                     "status": s.status if s else info.get("status", "running"),
                     "started_at": s.started_at if s and s.status == "running" else None,
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
+                    "thread": s.thread if s else None,
+                    "turns": [{"prompt": g._redact(p), "answer": g._redact(a)} for p, a in s.history] if s else [],
                     "outcome": s.outcome if s else "", "error": s.error if s else "",
                     "pending": approvals.pending, "feed": feed(),
                     "tool_output": ({"label": g.SHOWN_OUTPUT[0], "text": g.SHOWN_OUTPUT[1]} if g.SHOWN_OUTPUT else None),
@@ -514,7 +590,13 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 prompt = str(body.get("prompt", "")).strip()
                 if not prompt or len(prompt) > MAX_PROMPT:
                     return self._send(400, {"error": "empty or too long"})
-                ok = session.start(prompt)
+                thread = body.get("thread")
+                if thread is not None and not (isinstance(thread, str) and re.fullmatch(r"[\w.-]{1,64}", thread)):
+                    return self._send(400, {"error": "bad thread"})
+                ok = session.start(prompt, thread)
+                return self._send(200 if ok else 409, {"ok": ok})
+            if path == "/api/new_thread" and session:
+                ok = session.new_thread()
                 return self._send(200 if ok else 409, {"ok": ok})
             if path == "/api/settings" and session:
                 backend, model = body.get("backend"), body.get("model")
@@ -629,7 +711,9 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 #content { flex:1; padding-top:16px; }
 #dock { position:sticky; bottom:0; background:var(--bg); padding:8px 0 16px; }
 #dock .card { margin-bottom:10px; }
-#thread { display:flex; flex-direction:column; gap:14px; padding-bottom:14px; }
+#thread, #history { display:flex; flex-direction:column; gap:14px; }
+#thread { padding-bottom:14px; }
+#history:empty { display:none; }
 .bubble { align-self:flex-end; max-width:85%; background:var(--card); border:1px solid var(--line);
           border-radius:18px 18px 4px 18px; padding:10px 14px; }
 .bubble pre, .reply pre { font:inherit; }
@@ -666,6 +750,7 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   body[data-view=chat] [data-views~=chat], body[data-view=files] [data-views~=files],
   body[data-view=settings] [data-views~=settings] { display:block; }
   body[data-view=chat] #thread { display:flex; }
+  body[data-view=chat] #history:empty { display:none; }
   body[data-view=files] #dock, body[data-view=settings] #dock { background:transparent; }
   #setcard > summary, #filescard > summary { display:none; }
   .feed pre { font-size:13px; }
@@ -698,10 +783,10 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <pre id="fmemory">(empty)</pre>
   </div></details>
 <div id="thread" data-views="chat">
+  <div id="history"></div>
   <div class="bubble" id="userbubble" hidden><pre id="pastprompt"></pre></div>
   <div class="reply" id="result" hidden><pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre>
     <button class="copybtn" id="copy">Copy</button></div>
-  <div class="reply" id="pastcard" hidden><pre id="pastanswer"></pre><pre id="pastoutcome" style="margin-top:10px"></pre></div>
   <details class="card" id="outcard" hidden open><summary id="outlabel">Output</summary><pre id="outtext"></pre></details>
   <details class="card feed" id="feedcard"><summary>Activity</summary>
     <div class="cardhead"><div class="meta" id="actsummary" style="margin:0"></div><button class="copybtn" id="livebtn" hidden>Current run</button></div>
@@ -742,9 +827,10 @@ $("prompt").addEventListener("input", fitPrompt);
 $("run").onclick = async () => {
   const p = $("prompt").value.trim();
   if (!p) return;
-  const r = await api("/api/run", {prompt: p});
+  const r = await api("/api/run", selectedThread ? {prompt: p, thread: selectedThread} : {prompt: p});
   if (!r || !r.ok) { refresh(); return; }
-  $("prompt").value = ""; fitPrompt(); selectedRunId = null; $("livebtn").hidden = true; renderRuns(); refresh();
+  $("prompt").value = ""; fitPrompt(); selectedRunId = null; selectedThread = ""; historyKey = null;
+  $("livebtn").hidden = true; renderRuns(); refresh();
 };
 $("stop").onclick = () => api("/api/stop", {});
 // Enter sends, Shift+Enter adds a newline; click() keeps the buttons' disabled state in charge
@@ -823,7 +909,7 @@ $("sapply").onclick = async () => {
   refresh();
 };
 $("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
-let lastSig = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
+let lastSig = null, selectedThread = "", historyKey = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
 function renderRuns() {
   const container = $("runslist");
   while (container.firstChild) container.removeChild(container.firstChild);
@@ -844,6 +930,7 @@ function renderRuns() {
     const m = document.createElement("div");
     m.className = "runmeta";
     m.textContent = r.summary.split(" · ")[0].replace("T", " ").slice(0, 16);
+    if (r.turns > 1) m.textContent += " · " + r.turns + " messages";
     row.appendChild(m);
     row.onclick = () => selectRun(r);
     container.appendChild(row);
@@ -852,30 +939,43 @@ function renderRuns() {
 async function loadRuns() {
   try { runsData = (await api("/api/runs")) || []; renderRuns(); } catch (e) {}
 }
+function renderHistory(turns) {
+  const box = $("history");
+  while (box.firstChild) box.removeChild(box.firstChild);
+  for (const t of turns) {
+    const b = document.createElement("div"); b.className = "bubble";
+    const bp = document.createElement("pre"); bp.textContent = t.prompt; b.appendChild(bp);
+    const a = document.createElement("div"); a.className = "reply";
+    const ap = document.createElement("pre"); ap.textContent = t.answer; a.appendChild(ap);
+    if (t.outcome) { const op = document.createElement("pre"); op.style.marginTop = "10px"; op.textContent = t.outcome; a.appendChild(op); }
+    box.appendChild(b); box.appendChild(a);
+  }
+}
 async function selectRun(r) {
-  selectedRunId = r.id;
+  selectedRunId = r.id; selectedThread = r.thread || "";
   setView("chat");
   renderRuns();
   try {
-    const d = await api("/api/run_detail?id=" + encodeURIComponent(r.id));
+    const ds = await Promise.all((r.ids || [r.id]).map(id => api("/api/run_detail?id=" + encodeURIComponent(id))));
     if (selectedRunId !== r.id) return;
-    $("pastprompt").textContent = d.prompt || "";
-    $("userbubble").hidden = !d.prompt;
-    $("pastanswer").textContent = d.finished ? d.answer : "(this run did not finish)";
-    $("pastoutcome").textContent = d.outcome || "";
-    $("feed").textContent = (d.feed || []).join("\\n") || "(empty run log)";
+    const ok = ds.filter(d => d && d.prompt !== undefined);
+    renderHistory(ok.map(d => ({prompt: d.prompt, answer: d.finished ? d.answer : "(this run did not finish)", outcome: d.outcome})));
+    historyKey = null;
+    const last = ok[ok.length - 1] || {};
+    $("feed").textContent = (last.feed || []).join("\\n") || "(empty run log)";
     $("actsummary").textContent = r.summary;
     $("livebtn").hidden = false;
     refresh();
+    window.scrollTo({top: document.body.scrollHeight});
   } catch (e) {}
 }
 function showLive() {
-  selectedRunId = null;
+  selectedRunId = null; selectedThread = ""; historyKey = null;
   $("livebtn").hidden = true;
   renderRuns();
   refresh();
 }
-$("newchat").onclick = () => { showLive(); setView("chat"); $("prompt").focus(); };
+$("newchat").onclick = async () => { await api("/api/new_thread", {}); showLive(); setView("chat"); $("prompt").focus(); };
 $("livebtn").onclick = showLive;
 async function refresh() {
   let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach SmolPaw"; return; }
@@ -890,7 +990,6 @@ async function refresh() {
   }
   if (!p) pendingId = null;
   const viewing = selectedRunId !== null;
-  $("pastcard").hidden = !viewing;
   $("runcard").hidden = !s.can_run;
   $("setcard").hidden = !s.can_run;
   if (s.can_run) fillSettings(s);
@@ -900,7 +999,11 @@ async function refresh() {
   if (s.status === "running") { startedAt = s.started_at ? s.started_at * 1000 : (startedAt || Date.now()); tick(); }
   else { startedAt = null; }
   const done = s.answer || s.error;
-  if (!viewing) { $("pastprompt").textContent = s.prompt || ""; $("userbubble").hidden = !s.prompt; }
+  if (!viewing) {
+    $("pastprompt").textContent = s.prompt || ""; $("userbubble").hidden = !s.prompt;
+    const hk = (s.thread || "") + "|" + (s.turns || []).length;
+    if (hk !== historyKey) { historyKey = hk; renderHistory(s.turns || []); }
+  } else { $("userbubble").hidden = true; }
   $("result").hidden = viewing || (!done && !s.prompt);
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
   $("outcome").textContent = s.outcome || "";
@@ -911,10 +1014,10 @@ async function refresh() {
   if (!selectedRunId) {
     $("livebtn").hidden = true;
     $("actsummary").textContent = s.summary || "";
-    $("feed").textContent = (s.feed || []).join("\\n") || "(nothing yet)";
+    $("feed").textContent = s.prompt ? ((s.feed || []).join("\\n") || "(nothing yet)") : "(nothing yet)";
   }
   if ($("filescard").open) loadFiles();
-  const sig = [s.run_id, s.answer, s.error, (s.feed || []).length, p && p.id].join("|");
+  const sig = [s.run_id, s.answer, s.error, (s.feed || []).length, (s.turns || []).length, p && p.id].join("|");
   if (!viewing && sig !== lastSig) { lastSig = sig; window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"}); }
   const key = [s.run_id, s.status, s.summary].join("|");
   if (key !== runsKey) { runsKey = key; loadRuns(); }
