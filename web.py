@@ -447,6 +447,7 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
                     "outcome": s.outcome if s else "", "error": s.error if s else "",
                     "pending": approvals.pending, "feed": feed(),
+                    "tool_output": ({"label": g.SHOWN_OUTPUT[0], "text": g.SHOWN_OUTPUT[1]} if g.SHOWN_OUTPUT else None),
                     "summary": curr_summary or "", "run_id": g._log_file.name if g._log_file else ""})
             if path == "/api/models":
                 backend = parse_qs(urlparse(self.path).query).get("backend", [""])[0]
@@ -653,6 +654,7 @@ main { display:flex; flex-direction:column; }
   </div></details>
 <div class="card" id="result" data-views="chat" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
   <pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
+<details class="card" id="outcard" data-views="chat" hidden open><summary id="outlabel">Output</summary><pre id="outtext"></pre></details>
 <details class="card" id="filescard" data-views="files"><summary>Files</summary>
   <div class="filesec">
     <h2>Notes (notes.md)</h2>
@@ -830,6 +832,8 @@ async function refresh() {
   $("result").hidden = !done && !s.prompt;
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
   $("outcome").textContent = s.outcome || "";
+  $("outcard").hidden = !(done && s.tool_output);
+  if (s.tool_output) { $("outlabel").textContent = "Output of " + s.tool_output.label; $("outtext").textContent = s.tool_output.text; }
   if (lastRunId !== null && s.run_id !== lastRunId) selectedRunId = null;
   lastRunId = s.run_id;
   if (!selectedRunId) {
