@@ -388,3 +388,18 @@ Against the no-skill baseline above, reuse took about a third fewer steps and to
 Not writing a skill unprompted is tracked in [#48](https://github.com/aurora7795/smolpaw/issues/48).
 
 Caveats: 3 trials per cell; one task on one invented API; the baseline comes from a different set of runs (the unasked condition), not interleaved; the discovery runs include the extra prompt sentence and the write step, so they are not a clean baseline; the reuse comparison starts from a skill the same model wrote moments earlier.
+
+## Cost of model-written run summaries (#47)
+
+`tests/summary_cost.py`: the easy Tidepool task in an isolated workspace, Ollama with a server context of 32768, 3 trials per model. Each trial runs the task once to warm up, then (a) a run straight after a finished run, "off"; (b) a run started while the previous answer's summary is being written on the same loaded model, "on". The summary uses `web.call_summary_model`, the same call the web page makes.
+
+| Model | Summary call | Next run, off | Next run, on |
+|---|---|---|---|
+| Qwen 3.5 9B, first version (default call) | 161s mean (103, 114, 267), 85 in / 4,558 out tokens | 22.5s, 4.0 steps | 178.0s, 3.3 steps |
+| Gemma 4 E4B, first version | 5.3s, 98 in / 358 out | 13.6s, 3.3 steps | 18.9s, 3.0 steps |
+| Qwen 3.5 9B, thinking off and 80 tokens max | 1.2s, 84 in / 20 out | 26.2s, 5.0 steps | 33.2s, 6.0 steps |
+| Gemma 4 E4B, thinking off and 80 tokens max | 0.4s, 93 in / 15 out | 16.3s, 3.3 steps | 21.1s, 4.0 steps |
+
+A thinking model spent thousands of hidden tokens on a one-line summary, and the next request waited behind it for the whole time (Qwen 22s to 178s). Sending `reasoning_effort: "none"` and `max_tokens: 80` fixed that: the summary takes about a second. The "on" runs after the fix are slower on average, but they also took more steps (Qwen 6.0 against 5.0, Gemma 4.0 against 3.3); per step the two conditions are close (Qwen 5.5s against 5.2s, Gemma 5.3s against 4.9s), and individual runs ranged from 3 to 8 steps, so the difference is within run-to-run noise at 3 trials. All 12 task runs passed, and every summary was a correct one-line statement of the answer.
+
+Caveats: 3 trials per cell; the summary's quality was only read by eye on one simple task (the task answers were all "Kestrel, 340"), not scored; the call was timed against Ollama only. `reasoning_effort` is retried without if a server rejects it, which was not tried against LM Studio, where a thinking model could still be slow.
