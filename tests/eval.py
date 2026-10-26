@@ -233,7 +233,8 @@ def main() -> None:
         (tmp / "notes.md").write_text("# notes\n")
     if args.listing:
         g.WORKSPACE = tmp / "workspace"
-        expects = expects or make_listing_fixture(g.WORKSPACE)
+        fixture_expects = make_listing_fixture(g.WORKSPACE)
+        expects = expects or fixture_expects
         prompt = prompt or LISTING_PROMPT
         if not args.tidepool and not args.notes_file:
             (tmp / "notes.md").write_text("# notes\n")
