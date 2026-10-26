@@ -10,6 +10,7 @@ Status: experimental. See [RESULTS.md](RESULTS.md) for what has been measured, [
 - The model gets a small set of general-purpose tools ([generic_tools.py](generic_tools.py)): shell, HTTP, web search, page fetching, files, skills, long-term memory and a way to ask you a question. It works out any service you list in `notes.md` from its API description, so nothing is built in for a particular service.
 - Every safety rule is enforced in Python, not in the prompt, so a model cannot talk its way past it.
 - `notes.md` lists the services the agent may use. Short skills in `skills/` are put straight into the prompt; longer ones are listed and read on demand.
+- `web.py` is a browser front end for the same agent: chat, approvals from a phone, settings and run history. It can also run saved prompts on a cron schedule, read-only (see [Scheduled runs](#scheduled-runs)).
 - The generic toolset is the product. A second, hand-written toolset for one service (`--tools radarr`, [radarr_tools.py](radarr_tools.py)) exists only as a baseline for measuring what the generic tools cost against purpose-built ones.
 
 ## How it compares with OpenClaw
@@ -47,7 +48,7 @@ We have not yet measured the prompt any of these harnesses actually sends, so th
 **What this does not show**
 
 - OpenClaw was **not** run on a local model, so "OpenClaw would not work here" is an estimate from prompt size and measured reading speed, not a test. The cloud run also benefited from provider-side prompt caching (about 60K cached tokens), and a local server that caches a stable prompt prefix cuts reading time a lot: measured on SmolPaw's own prompt in RESULTS.md (#29), a whole run took at least 2.4 times shorter than the time just to read its prompts cold on Qwen, on both LM Studio and Ollama.
-- OpenClaw does much more: chat channels, long-term memory, many ready-made skills, and recovery behaviour such as checking a download is really moving. SmolPaw has a shell, HTTP, web search, page fetching, files, notes, skills, long-term memory and a safety layer, nothing more.
+- OpenClaw does much more: chat channels, long-term memory, many ready-made skills, and recovery behaviour such as checking a download is really moving. SmolPaw has a shell, HTTP, web search, page fetching, files and folder listing, notes, skills, long-term memory, a web page and read-only scheduled runs, and a safety layer, nothing more.
 - SmolPaw's results are small samples (3 runs per cell) on a few read-only tasks. Real writes through the generic tools are not yet measured: the first supervised attempt (adding a film to a Radarr server) failed because the model guessed the film's id and the root folder instead of looking them up ([#1](https://github.com/aurora7795/smolpaw/issues/1)).
 - It also needs help a strong model would not: clear tool error messages, short skills placed in the prompt, and a warning when a server returns a web page instead of data. Some small models (Bonsai 8B, Nanbeige 3B) did not work at all.
 
@@ -229,9 +230,11 @@ minute   hour   day-of-month   month   day-of-week
 
 ```bash
 .venv/bin/python tests/test_generic_tools.py
+.venv/bin/python tests/test_schedules.py
+.venv/bin/python tests/test_scheduler.py
 ```
 
-Checks the confirmation layer, path scoping, secret handling and tool messages. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
+`test_generic_tools.py` checks the confirmation layer, path scoping, secret handling, tool messages and the web page's server. `test_schedules.py` covers the cron parser and schedule store, and `test_scheduler.py` the scheduler thread, read-only scheduled runs and deferred approvals. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
 
 ```bash
 .venv/bin/python tests/fake_api.py 8765 [easy|hint|detail|paged]
