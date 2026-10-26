@@ -196,6 +196,23 @@ SEARCH_PROVIDERS = {
 
 `web_search` handles all shared logic: capping to 5 results, formatting, secret redaction, clipping, per-request search limits, error reporting, and logging.
 
+## Schedules and cron syntax
+
+SmolPaw includes a pure-Python cron parser and schedule store ([schedules.py](schedules.py)) for running saved prompts without model or network overhead.
+
+Standard 5-field cron expressions are supported:
+
+```
+minute   hour   day-of-month   month   day-of-week
+(0-59)   (0-23)    (1-31)     (1-12)     (0-7)
+```
+
+- **Wildcard**: `*` matches every value in the field.
+- **Numbers and ranges**: `5`, `1-5`, with `a <= b`. Both `0` and `7` in `day-of-week` represent Sunday.
+- **Lists and steps**: `1,15,30`, `*/15`, and range steps like `1-5/2` or `9-17/2`.
+- **Names**: Case-insensitive 3-letter month names (`jan` through `dec`) and weekday names (`sun` through `sat`).
+- **Standard Vixie-cron day rule**: If both `day-of-month` and `day-of-week` are restricted (neither is `*`), a time matches when **either** field matches. If only one is restricted, only that one applies.
+
 ## Tests
 
 ```bash
@@ -230,6 +247,7 @@ Earlier tool calls and results are sent to the model as native `tool_calls` and 
 agent.py              CLI and agent wiring
 web.py                Web harness: run the agent and answer its prompts from a browser
 generic_tools.py      Tools, confirmation layer, secrets, logging, prompt building
+schedules.py          Schedule store and cron parser
 radarr_tools.py       Hand-written single-service tools (baseline for comparisons)
 skills/               Skills the agent follows or writes (api-discovery.md is hand-written)
 notes.example.md      Template for notes.md (gitignored)
