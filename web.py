@@ -624,8 +624,23 @@ input[type="checkbox"] { width:auto; cursor:pointer; }
 [hidden] { display:none !important; }
 .nav { display:none; }
 aside { padding:16px 16px 0; }
-main { display:flex; flex-direction:column; }
-#content, .col { display:contents; }
+main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; max-width:none; width:100%; }
+#content, #dock { width:100%; max-width:760px; margin:0 auto; }
+#content { flex:1; padding-top:16px; }
+#dock { position:sticky; bottom:0; background:var(--bg); padding:8px 0 16px; }
+#dock .card { margin-bottom:10px; }
+#thread { display:flex; flex-direction:column; gap:14px; padding-bottom:14px; }
+.bubble { align-self:flex-end; max-width:85%; background:var(--card); border:1px solid var(--line);
+          border-radius:18px 18px 4px 18px; padding:10px 14px; }
+.bubble pre, .reply pre { font:inherit; }
+.reply { padding:2px 4px; }
+.reply .copybtn { margin-top:8px; }
+#thread .card { margin-bottom:0; }
+.composer { background:var(--card); border:1px solid var(--line); border-radius:22px; padding:10px 12px; }
+.composer textarea { border:0; background:transparent; min-height:44px; max-height:200px; resize:none; padding:6px; outline:none; }
+.composer .row { margin-top:4px; align-items:center; justify-content:flex-end; }
+.composer .row .meta { margin:0 auto 0 6px; font-size:13px; }
+.composer button { flex:none; padding:8px 20px; border-radius:18px; }
 #newchat { margin:0 0 4px; flex:none; }
 .recents { margin-top:10px; }
 .recents h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px 8px; }
@@ -645,16 +660,14 @@ main { display:flex; flex-direction:column; }
          padding:10px 12px; border-radius:8px; flex:none; }
   .nav:hover { background:var(--bg); color:var(--ink); }
   .nav.on { background:var(--bg); color:var(--accent); }
-  main { display:block; max-width:none; width:100%; padding:24px 32px; }
-  #content { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:0 24px; align-items:start; }
-  .col { display:block; }
-  .side { position:sticky; top:24px; }
+  main { padding:0 32px; }
+  #content { padding-top:24px; }
   [data-views] { display:none; }
   body[data-view=chat] [data-views~=chat], body[data-view=files] [data-views~=files],
   body[data-view=settings] [data-views~=settings] { display:block; }
-  body[data-view=files] #content, body[data-view=settings] #content { grid-template-columns:minmax(0,760px); }
+  body[data-view=chat] #thread { display:flex; }
+  body[data-view=files] #dock, body[data-view=settings] #dock { background:transparent; }
   #setcard > summary, #filescard > summary { display:none; }
-  #prompt { min-height:120px; }
   .feed pre { font-size:13px; }
 }
 </style></head><body data-view="chat">
@@ -664,14 +677,7 @@ main { display:flex; flex-direction:column; }
   <button class="nav" data-view="files">Files</button><button class="nav" data-view="settings">Settings</button>
   <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
-<main><div id="content"><div class="col">
-<div class="card pending" id="pending" data-views="chat files settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
-  <div class="row" id="yesno"><button class="yes" id="yes">Yes</button><button class="no" id="no">No</button></div>
-  <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
-    <div class="row"><button id="send">Send answer</button></div></div></div>
-<div class="card" id="runcard" data-views="chat" hidden><h2>Request</h2><textarea id="prompt" placeholder="What should the agent do?"></textarea>
-  <div class="row"><button id="run">Run</button><button class="ghost" id="stop">Stop</button></div>
-  <div class="meta" id="working" hidden></div></div>
+<main><div id="content">
 <details class="card" id="setcard" data-views="settings" hidden><summary>Settings</summary>
   <div class="filesec">
     <h3>Backend</h3><select id="sbackend"></select>
@@ -682,11 +688,6 @@ main { display:flex; flex-direction:column; }
     <div class="row"><button id="sapply">Apply</button></div>
     <div class="meta" id="smsg"></div>
   </div></details>
-<div class="card" id="result" data-views="chat" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
-  <pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
-<div class="card" id="pastcard" data-views="chat" hidden><h2>Request</h2><pre id="pastprompt"></pre>
-  <h2 style="margin-top:12px">Answer</h2><pre id="pastanswer"></pre><pre id="pastoutcome" style="margin-top:10px"></pre></div>
-<details class="card" id="outcard" data-views="chat" hidden open><summary id="outlabel">Output</summary><pre id="outtext"></pre></details>
 <details class="card" id="filescard" data-views="files"><summary>Files</summary>
   <div class="filesec">
     <h2>Notes (notes.md)</h2>
@@ -696,11 +697,24 @@ main { display:flex; flex-direction:column; }
     <h2 style="margin-top:12px">Memory (memory.md)</h2>
     <pre id="fmemory">(empty)</pre>
   </div></details>
-</div><div class="col side">
-<div class="card feed" data-views="chat"><div class="cardhead"><h2>Activity</h2><button class="copybtn" id="livebtn" hidden>Current run</button></div>
-  <div class="meta" id="actsummary" style="margin-bottom:8px"></div>
-  <pre id="feed">(nothing yet)</pre></div>
-</div></div></div></main><script>
+<div id="thread" data-views="chat">
+  <div class="bubble" id="userbubble" hidden><pre id="pastprompt"></pre></div>
+  <div class="reply" id="result" hidden><pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre>
+    <button class="copybtn" id="copy">Copy</button></div>
+  <div class="reply" id="pastcard" hidden><pre id="pastanswer"></pre><pre id="pastoutcome" style="margin-top:10px"></pre></div>
+  <details class="card" id="outcard" hidden open><summary id="outlabel">Output</summary><pre id="outtext"></pre></details>
+  <details class="card feed" id="feedcard"><summary>Activity</summary>
+    <div class="cardhead"><div class="meta" id="actsummary" style="margin:0"></div><button class="copybtn" id="livebtn" hidden>Current run</button></div>
+    <pre id="feed">(nothing yet)</pre></details>
+</div></div>
+<div id="dock">
+<div class="card pending" id="pending" data-views="chat files settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
+  <div class="row" id="yesno"><button class="yes" id="yes">Yes</button><button class="no" id="no">No</button></div>
+  <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
+    <div class="row"><button id="send">Send answer</button></div></div></div>
+<div class="composer" id="runcard" data-views="chat" hidden><textarea id="prompt" rows="1" placeholder="What should the agent do?"></textarea>
+  <div class="row"><div class="meta" id="working" hidden></div><button class="ghost" id="stop">Stop</button><button id="run">Run</button></div></div>
+</div></main><script>
 const token = new URLSearchParams(location.search).get("t") || "";
 const $ = id => document.getElementById(id);
 let pendingId = null;
@@ -723,7 +737,15 @@ async function answer(value) { if (pendingId !== null) { await api("/api/answer"
 $("yes").onclick = () => answer(true);
 $("no").onclick = () => answer(false);
 $("send").onclick = () => { answer($("reply").value); $("reply").value = ""; };
-$("run").onclick = async () => { const p = $("prompt").value.trim(); if (p) { await api("/api/run", {prompt: p}); refresh(); } };
+function fitPrompt() { const t = $("prompt"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 200) + "px"; }
+$("prompt").addEventListener("input", fitPrompt);
+$("run").onclick = async () => {
+  const p = $("prompt").value.trim();
+  if (!p) return;
+  const r = await api("/api/run", {prompt: p});
+  if (!r || !r.ok) { refresh(); return; }
+  $("prompt").value = ""; fitPrompt(); selectedRunId = null; $("livebtn").hidden = true; renderRuns(); refresh();
+};
 $("stop").onclick = () => api("/api/stop", {});
 // Enter sends, Shift+Enter adds a newline; click() keeps the buttons' disabled state in charge
 for (const [box, btn] of [["prompt", "run"], ["reply", "send"]])
@@ -801,7 +823,7 @@ $("sapply").onclick = async () => {
   refresh();
 };
 $("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
-let selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
+let lastSig = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
 function renderRuns() {
   const container = $("runslist");
   while (container.firstChild) container.removeChild(container.firstChild);
@@ -838,6 +860,7 @@ async function selectRun(r) {
     const d = await api("/api/run_detail?id=" + encodeURIComponent(r.id));
     if (selectedRunId !== r.id) return;
     $("pastprompt").textContent = d.prompt || "";
+    $("userbubble").hidden = !d.prompt;
     $("pastanswer").textContent = d.finished ? d.answer : "(this run did not finish)";
     $("pastoutcome").textContent = d.outcome || "";
     $("feed").textContent = (d.feed || []).join("\\n") || "(empty run log)";
@@ -868,7 +891,7 @@ async function refresh() {
   if (!p) pendingId = null;
   const viewing = selectedRunId !== null;
   $("pastcard").hidden = !viewing;
-  $("runcard").hidden = !s.can_run || viewing;
+  $("runcard").hidden = !s.can_run;
   $("setcard").hidden = !s.can_run;
   if (s.can_run) fillSettings(s);
   $("sapply").disabled = s.status === "running";
@@ -877,6 +900,7 @@ async function refresh() {
   if (s.status === "running") { startedAt = s.started_at ? s.started_at * 1000 : (startedAt || Date.now()); tick(); }
   else { startedAt = null; }
   const done = s.answer || s.error;
+  if (!viewing) { $("pastprompt").textContent = s.prompt || ""; $("userbubble").hidden = !s.prompt; }
   $("result").hidden = viewing || (!done && !s.prompt);
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
   $("outcome").textContent = s.outcome || "";
@@ -890,6 +914,8 @@ async function refresh() {
     $("feed").textContent = (s.feed || []).join("\\n") || "(nothing yet)";
   }
   if ($("filescard").open) loadFiles();
+  const sig = [s.run_id, s.answer, s.error, (s.feed || []).length, p && p.id].join("|");
+  if (!viewing && sig !== lastSig) { lastSig = sig; window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"}); }
   const key = [s.run_id, s.status, s.summary].join("|");
   if (key !== runsKey) { runsKey = key; loadRuns(); }
 }
