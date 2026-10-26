@@ -369,3 +369,22 @@ Task: "What files and folders are in the folder downloads/? Give the exact total
 | Gemma 4 E4B | 3/3, mean 10s, 2.3 steps, 10.5K input tokens | 2/3, mean 34s, 3.3 steps, 14.4K input tokens |
 
 Without the tool, the failures were a miscount (Qwen: "50 files + 4 folders = 54") and a run that ended by saying the listing was "in the previous response" (Gemma). With the tool, every run called `list_dir` once and copied the harness's count. Samples are small (3 per cell) and the check covers the count and folder names only, not sizes, which the original exploratory failure also got wrong. Schema cost (`tests/tool_schema_tokens.py`, one run each): Qwen 3.5 9B 108 tokens, Gemma 4 E4B 110.
+
+## Rung 5: write a skill, then reuse it (#4)
+
+`tests/skill_reuse.py`: Tidepool `detail` (the vessel list has no capacity; each vessel must be fetched), an isolated empty skills folder per trial, Ollama with a server context of 32768, 3 trials per model per condition. Each trial: a discovery run, then the same prompt in a fresh agent. Only skill writes are approved. A skill counts as good if it was written, contains no secrets, does not copy the answer (Kestrel, 340) and names the API path.
+
+**Without being asked** (the standing line in the system prompt only: "When a task teaches you something reusable, save a short skill"): 0 of 6 skills written, 3 trials per model. Neither model ever called `write_skill`; they went straight to `final_answer`. Because no skill existed, the 12 runs in this condition double as a no-skill baseline: Qwen 3.5 9B 5/6 passed, 10.5 steps, 50.2K input tokens, 64s mean; Gemma 4 E4B 5/6 passed, 8.7 steps, 37.5K input tokens, 47s.
+
+**With a sentence added to the discovery prompt** asking for a skill ("save a short skill with write_skill ... so next time it is quicker"):
+
+| Model | Skills written, good | Discovery run (writes the skill) | Reuse run (skill loaded) |
+|---|---|---|---|
+| Qwen 3.5 9B | 3/3, 2 good (one copied the answer into the skill) | 3/3, 11.7 steps, 57.3K tokens, 62s | 3/3, 7.0 steps, 33.3K tokens, 43s |
+| Gemma 4 E4B | 3/3, 3 good | 3/3, 10.3 steps, 46.7K tokens, 62s | 3/3, 7.3 steps, 32.0K tokens, 34s |
+
+Against the no-skill baseline above, reuse took about a third fewer steps and tokens on Qwen (7.0 against 10.5 steps, 33.3K against 50.2K tokens) and about 15 percent fewer on Gemma (7.3 against 8.7 steps, 32.0K against 37.5K tokens). The skills were short (343 to 546 characters) and described the two-step lookup (list, then fetch each vessel for `hold_tons`). Every skill passed the secrets check, but Tidepool has no key, so that check could not catch a model pasting one; only the redaction on write backs it up.
+
+Not writing a skill unprompted is tracked in [#48](https://github.com/aurora7795/smolpaw/issues/48).
+
+Caveats: 3 trials per cell; one task on one invented API; the baseline comes from a different set of runs (the unasked condition), not interleaved; the discovery runs include the extra prompt sentence and the write step, so they are not a clean baseline; the reuse comparison starts from a skill the same model wrote moments earlier.

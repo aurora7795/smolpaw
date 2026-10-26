@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- `tests/skill_reuse.py` (#4, rung 5): on the Tidepool `detail` variant with an isolated empty skills folder, a discovery run, checks on the skill it wrote (written, no secrets, no copy of the answer, names the API path), then the same task again with the skill available. `--ask-for-skill` adds a sentence to the discovery prompt asking for one. Results in RESULTS.md.
 - `list_dir(path)` tool (#46): exact names, sizes, subfolder item counts and a true entry count, formatted by the harness instead of transcribed by the model from `ls -la`. Same scoping as `read_file` (free in `workspace/` and `skills/`, asks elsewhere, `.ssh` blocked), capped at 200 listed entries with the true count kept, logged and shown in the web feed. Schema costs about 108 to 110 prompt tokens. `tests/eval.py --listing` (isolated 55-entry fixture) and `--without-tool` measure it; see RESULTS.md. 10 new tests.
 - Recent runs now show a title above each run's summary line: the first sentence of the run's prompt, secret-redacted and clipped to 80 characters. It is a cheap stand-in for a real summary; model-written summaries are tracked in #47. 3 new tests.
 
