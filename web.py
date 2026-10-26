@@ -378,6 +378,23 @@ def _list_runs() -> list[dict]:
     return runs
 
 
+def _run_detail(path: Path) -> dict | None:
+    """What a past run asked and answered, for the page's chat view; logs are already redacted."""
+    try:
+        entries = [json.loads(raw) for raw in path.read_text().splitlines() if raw.strip()]
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    start = next((e for e in entries if e.get("kind") == "start"), None)
+    if not start:
+        return None
+    final = next((e for e in entries if e.get("kind") == "final"), None)
+    actions = "\n  ".join(str(a) for a in (final or {}).get("actions", [])) or "no changes made"
+    return {"prompt": g._redact(str(start.get("prompt", ""))),
+            "answer": g._redact(str(final.get("answer", ""))) if final else "",
+            "outcome": f"[Harness says]\n  {g._redact(actions)}" if final else "",
+            "finished": final is not None}
+
+
 def _files_payload() -> dict:
     """Read-only view of notes.md, skills/*.md and memory.md, secret-redacted and clipped."""
     def read_safe(p: Path) -> str:
@@ -458,7 +475,7 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, _files_payload())
             if path == "/api/runs":
                 return self._send(200, _list_runs())
-            if path == "/api/run_feed":
+            if path in ("/api/run_feed", "/api/run_detail"):
                 run_id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                 if not run_id or "/" in run_id or "\\" in run_id:
                     return self._send(404, {"error": "not found"})
@@ -471,6 +488,9 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 matched = next((f for f in files if f.name == run_id), None)
                 if not matched:
                     return self._send(404, {"error": "not found"})
+                if path == "/api/run_detail":
+                    detail = _run_detail(matched)
+                    return self._send(200, {**detail, "feed": feed(matched)} if detail else {"error": "not found"})
                 return self._send(200, feed(matched))
             return self._send(404, {"error": "not found"})
 
@@ -606,13 +626,21 @@ input[type="checkbox"] { width:auto; cursor:pointer; }
 aside { padding:16px 16px 0; }
 main { display:flex; flex-direction:column; }
 #content, .col { display:contents; }
-#recentcard { order:1; }
+#newchat { margin:0 0 4px; flex:none; }
+.recents { margin-top:10px; }
+.recents h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px 8px; }
+#runslist { max-height:35vh; overflow-y:auto; }
+.runitem { font-family:inherit; font-size:14px; color:var(--ink); padding:7px 10px; margin-bottom:2px; }
+.runitem.on { background:var(--bg); color:var(--accent); }
+.runtitle { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-weight:500; }
 @media (min-width:900px) {
-  body { display:grid; grid-template-columns:220px minmax(0,1fr); min-height:100vh; }
+  body { display:grid; grid-template-columns:280px minmax(0,1fr); min-height:100vh; }
   aside { position:sticky; top:0; height:100vh; padding:20px 14px; border-right:1px solid var(--line);
           background:var(--card); display:flex; flex-direction:column; gap:6px; overflow-y:auto; }
   aside h1 { font-size:22px; margin:0 0 12px 8px; }
   aside .meta { margin:auto 8px 0; font-size:12px; }
+  .recents { flex:1; min-height:0; display:flex; flex-direction:column; }
+  #runslist { max-height:none; flex:1; }
   .nav { display:block; text-align:left; background:transparent; color:var(--muted); font-weight:600;
          padding:10px 12px; border-radius:8px; flex:none; }
   .nav:hover { background:var(--bg); color:var(--ink); }
@@ -622,20 +650,22 @@ main { display:flex; flex-direction:column; }
   .col { display:block; }
   .side { position:sticky; top:24px; }
   [data-views] { display:none; }
-  body[data-view=chat] [data-views~=chat], body[data-view=runs] [data-views~=runs],
-  body[data-view=files] [data-views~=files], body[data-view=settings] [data-views~=settings] { display:block; }
+  body[data-view=chat] [data-views~=chat], body[data-view=files] [data-views~=files],
+  body[data-view=settings] [data-views~=settings] { display:block; }
   body[data-view=files] #content, body[data-view=settings] #content { grid-template-columns:minmax(0,760px); }
   #setcard > summary, #filescard > summary { display:none; }
   #prompt { min-height:120px; }
-  .feed pre, #recentcard .runitem { font-size:13px; }
+  .feed pre { font-size:13px; }
 }
 </style></head><body data-view="chat">
 <aside><h1>SmolPaw</h1>
-  <button class="nav on" data-view="chat">Chat</button><button class="nav" data-view="runs">Runs</button>
+  <button id="newchat">+ New chat</button>
+  <button class="nav on" data-view="chat">Chat</button>
   <button class="nav" data-view="files">Files</button><button class="nav" data-view="settings">Settings</button>
+  <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
 <main><div id="content"><div class="col">
-<div class="card pending" id="pending" data-views="chat runs files settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
+<div class="card pending" id="pending" data-views="chat files settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
   <div class="row" id="yesno"><button class="yes" id="yes">Yes</button><button class="no" id="no">No</button></div>
   <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
     <div class="row"><button id="send">Send answer</button></div></div></div>
@@ -654,6 +684,8 @@ main { display:flex; flex-direction:column; }
   </div></details>
 <div class="card" id="result" data-views="chat" hidden><div class="cardhead"><h2>Answer</h2><button class="copybtn" id="copy">Copy</button></div>
   <pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre></div>
+<div class="card" id="pastcard" data-views="chat" hidden><h2>Request</h2><pre id="pastprompt"></pre>
+  <h2 style="margin-top:12px">Answer</h2><pre id="pastanswer"></pre><pre id="pastoutcome" style="margin-top:10px"></pre></div>
 <details class="card" id="outcard" data-views="chat" hidden open><summary id="outlabel">Output</summary><pre id="outtext"></pre></details>
 <details class="card" id="filescard" data-views="files"><summary>Files</summary>
   <div class="filesec">
@@ -664,9 +696,8 @@ main { display:flex; flex-direction:column; }
     <h2 style="margin-top:12px">Memory (memory.md)</h2>
     <pre id="fmemory">(empty)</pre>
   </div></details>
-<div class="card" id="recentcard" data-views="runs"><h2>Recent runs</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
 </div><div class="col side">
-<div class="card feed" data-views="chat runs"><div class="cardhead"><h2>Activity</h2><button class="copybtn" id="livebtn" hidden>Current run</button></div>
+<div class="card feed" data-views="chat"><div class="cardhead"><h2>Activity</h2><button class="copybtn" id="livebtn" hidden>Current run</button></div>
   <div class="meta" id="actsummary" style="margin-bottom:8px"></div>
   <pre id="feed">(nothing yet)</pre></div>
 </div></div></div></main><script>
@@ -770,49 +801,59 @@ $("sapply").onclick = async () => {
   refresh();
 };
 $("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
-let selectedRunId = null, lastRunId = null, runsKey = null;
+let selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
+function renderRuns() {
+  const container = $("runslist");
+  while (container.firstChild) container.removeChild(container.firstChild);
+  if (!runsData.length) {
+    const p = document.createElement("pre");
+    p.textContent = "(no runs yet)";
+    container.appendChild(p);
+    return;
+  }
+  for (const r of runsData) {
+    const row = document.createElement("div");
+    row.className = "runitem" + (r.id === selectedRunId ? " on" : "");
+    row.title = r.summary;
+    const t = document.createElement("div");
+    t.className = "runtitle";
+    t.textContent = r.title || r.summary;
+    row.appendChild(t);
+    const m = document.createElement("div");
+    m.className = "runmeta";
+    m.textContent = r.summary.split(" · ")[0].replace("T", " ").slice(0, 16);
+    row.appendChild(m);
+    row.onclick = () => selectRun(r);
+    container.appendChild(row);
+  }
+}
 async function loadRuns() {
+  try { runsData = (await api("/api/runs")) || []; renderRuns(); } catch (e) {}
+}
+async function selectRun(r) {
+  selectedRunId = r.id;
+  setView("chat");
+  renderRuns();
   try {
-    const runs = await api("/api/runs");
-    const container = $("runslist");
-    while (container.firstChild) container.removeChild(container.firstChild);
-    if (!runs || !runs.length) {
-      const p = document.createElement("pre");
-      p.textContent = "(no runs yet)";
-      container.appendChild(p);
-      return;
-    }
-    for (const r of runs) {
-      const row = document.createElement("div");
-      row.className = "runitem";
-      if (r.title) {
-        const t = document.createElement("div");
-        t.className = "runtitle";
-        t.textContent = r.title;
-        row.appendChild(t);
-      }
-      const m = document.createElement("div");
-      m.className = "runmeta";
-      m.textContent = r.summary;
-      row.appendChild(m);
-      row.onclick = async () => {
-        selectedRunId = r.id;
-        try {
-          const lines = await api("/api/run_feed?id=" + encodeURIComponent(r.id));
-          $("feed").textContent = (lines || []).join("\\n") || "(empty run log)";
-          $("actsummary").textContent = r.summary;
-          $("livebtn").hidden = false;
-        } catch (e) {}
-      };
-      container.appendChild(row);
-    }
+    const d = await api("/api/run_detail?id=" + encodeURIComponent(r.id));
+    if (selectedRunId !== r.id) return;
+    $("pastprompt").textContent = d.prompt || "";
+    $("pastanswer").textContent = d.finished ? d.answer : "(this run did not finish)";
+    $("pastoutcome").textContent = d.outcome || "";
+    $("feed").textContent = (d.feed || []).join("\\n") || "(empty run log)";
+    $("actsummary").textContent = r.summary;
+    $("livebtn").hidden = false;
+    refresh();
   } catch (e) {}
 }
-$("livebtn").onclick = () => {
+function showLive() {
   selectedRunId = null;
   $("livebtn").hidden = true;
+  renderRuns();
   refresh();
-};
+}
+$("newchat").onclick = () => { showLive(); setView("chat"); $("prompt").focus(); };
+$("livebtn").onclick = showLive;
 async function refresh() {
   let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach SmolPaw"; return; }
   $("meta").textContent = [s.mode, s.backend, s.model, s.status, s.progress].filter(Boolean).join(" · ");
@@ -825,7 +866,9 @@ async function refresh() {
     if (navigator.vibrate) navigator.vibrate(200);
   }
   if (!p) pendingId = null;
-  $("runcard").hidden = !s.can_run;
+  const viewing = selectedRunId !== null;
+  $("pastcard").hidden = !viewing;
+  $("runcard").hidden = !s.can_run || viewing;
   $("setcard").hidden = !s.can_run;
   if (s.can_run) fillSettings(s);
   $("sapply").disabled = s.status === "running";
@@ -834,10 +877,10 @@ async function refresh() {
   if (s.status === "running") { startedAt = s.started_at ? s.started_at * 1000 : (startedAt || Date.now()); tick(); }
   else { startedAt = null; }
   const done = s.answer || s.error;
-  $("result").hidden = !done && !s.prompt;
+  $("result").hidden = viewing || (!done && !s.prompt);
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
   $("outcome").textContent = s.outcome || "";
-  $("outcard").hidden = !(done && s.tool_output);
+  $("outcard").hidden = viewing || !(done && s.tool_output);
   if (s.tool_output) { $("outlabel").textContent = "Output of " + s.tool_output.label; $("outtext").textContent = s.tool_output.text; }
   if (lastRunId !== null && s.run_id !== lastRunId) selectedRunId = null;
   lastRunId = s.run_id;
@@ -858,7 +901,7 @@ function setView(v) {
   try { localStorage.setItem("smolpawView", v); } catch (e) {}
 }
 for (const b of document.querySelectorAll(".nav")) b.onclick = () => setView(b.dataset.view);
-try { const v = localStorage.getItem("smolpawView"); if (["chat", "runs", "files", "settings"].includes(v)) setView(v); } catch (e) {}
+try { const v = localStorage.getItem("smolpawView"); if (["chat", "files", "settings"].includes(v)) setView(v); } catch (e) {}
 wide.onchange = openPanels; openPanels();
 refresh(); setInterval(refresh, 1500);
 </script></body></html>
