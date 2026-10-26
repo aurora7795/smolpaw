@@ -163,6 +163,7 @@ check("nothing starts while an interactive run is in progress", sched.tick() is 
 agent.gate.set()
 wait_idle(sess)
 agent.gate = None
+check("a run that changed nothing shows no [Harness says] block on the page", sess.outcome == "")
 approvals.pending = {"id": 1, "kind": "confirm", "text": "x"}
 check("nothing starts while an approval prompt is pending", sched.tick() is None)
 approvals.pending = None

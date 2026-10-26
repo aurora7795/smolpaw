@@ -311,6 +311,8 @@ class Session:
         try:
             self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context,
                                                     schedule)
+            if not g.ACTIONS:  # nothing to report; the Activity feed already shows the run (the terminal keeps its line)
+                self.outcome = ""
         except Exception as exc:  # noqa: BLE001 - shown on the page, as the CLI prints it
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
@@ -569,10 +571,10 @@ def _run_detail(path: Path) -> dict | None:
     if not start:
         return None
     final = next((e for e in entries if e.get("kind") == "final"), None)
-    actions = "\n  ".join(str(a) for a in (final or {}).get("actions", [])) or "no changes made"
+    actions = "\n  ".join(str(a) for a in (final or {}).get("actions", []))
     return {"prompt": g._redact(str(start.get("prompt", ""))),
             "answer": g._redact(str(final.get("answer", ""))) if final else "",
-            "outcome": f"[Harness says]\n  {g._redact(actions)}" if final else "",
+            "outcome": f"[Harness says]\n  {g._redact(actions)}" if final and actions else "",
             "finished": final is not None}
 
 

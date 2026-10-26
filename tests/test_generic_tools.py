@@ -1327,7 +1327,7 @@ f_finished.write_text("\n".join([
     json.dumps({"t": "2026-10-25T10:00:04", "kind": "shell", "command": "ls", "read_only": True, "exit": 0}),
     json.dumps({"t": "2026-10-25T10:00:07", "kind": "http", "method": "GET", "url": "http://x", "status": 200}),
     json.dumps({"t": "2026-10-25T10:00:12", "kind": "final", "answer": "done",
-                "input_tokens": 12345, "output_tokens": 678}),
+                "actions": ["declined: write notes.txt"], "input_tokens": 12345, "output_tokens": 678}),
 ]) + "\n")
 
 f_unfinished = fake_log_dir / "20261025-110000-model_b.jsonl"
@@ -1379,6 +1379,15 @@ detail = http.get(f"{base}/api/run_detail?id={f_finished.name}", headers=hdr, ti
 check("/api/run_detail returns prompt, answer, outcome and feed for a finished run",
       detail["prompt"] == "do something" and detail["answer"] == "done" and detail["finished"]
       and detail["outcome"].startswith("[Harness says]") and any("$ ls" in fl for fl in detail["feed"]))
+f_clean = fake_log_dir / "20261025-130000-model_c.jsonl"
+f_clean.write_text("\n".join([
+    json.dumps({"t": "2026-10-25T13:00:00", "kind": "start", "model": "model_c", "prompt": "just asking"}),
+    json.dumps({"t": "2026-10-25T13:00:03", "kind": "final", "answer": "fine", "actions": []}),
+]) + "\n")
+detail_c = http.get(f"{base}/api/run_detail?id={f_clean.name}", headers=hdr, timeout=5).json()
+check("/api/run_detail shows no [Harness says] block for a run that changed nothing",
+      detail_c["finished"] and detail_c["outcome"] == "" and detail_c["answer"] == "fine")
+f_clean.unlink()
 detail_u = http.get(f"{base}/api/run_detail?id={f_unfinished.name}", headers=hdr, timeout=5).json()
 check("/api/run_detail marks an unfinished run and gives no answer",
       detail_u["prompt"] == "unfinished task" and not detail_u["finished"] and detail_u["answer"] == "")
