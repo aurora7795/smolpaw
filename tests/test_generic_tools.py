@@ -1310,7 +1310,8 @@ check("query string like ?path=../.env returns exactly the fixed files",
 # 6. POST to /api/files returns 404
 check("POST to /api/files returns 404",
       http.post(f"{base}/api/files", json={}, headers=hdr, timeout=5).status_code == 404)
-check("web page contains filescard", 'id="filescard"' in http.get(f"{base}/?t={token}", timeout=5).text)
+_page_html = http.get(f"{base}/?t={token}", timeout=5).text
+check("web page puts the read-only files inside Settings", 'id="fnotes"' in _page_html and 'id="filescard"' not in _page_html)
 
 g.NOTES, g.SKILLS, g.MEMORY = saved_notes, saved_skills, saved_memory
 

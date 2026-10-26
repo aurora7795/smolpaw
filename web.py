@@ -696,6 +696,9 @@ button:disabled { opacity:.45; }
 .runmeta { color:var(--muted); font-size:12px; }
 summary { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; cursor:pointer; }
 summary:focus { outline:none; }
+details.sub { margin-top:8px; }
+details.sub > summary { text-transform:none; letter-spacing:0; font-size:14px; }
+details.sub > pre, details.sub > div { margin-top:8px; }
 .filesec { margin-top:12px; }
 .filesec h3 { font-size:12px; font-weight:600; color:var(--muted); margin:8px 0 2px; }
 .runitem { padding:6px 8px; border-radius:6px; cursor:pointer; font-size:12px; font-family:ui-monospace, Menlo, monospace; color:var(--muted); margin-bottom:4px; }
@@ -747,19 +750,17 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   main { padding:0 32px; }
   #content { padding-top:24px; }
   [data-views] { display:none; }
-  body[data-view=chat] [data-views~=chat], body[data-view=files] [data-views~=files],
-  body[data-view=settings] [data-views~=settings] { display:block; }
-  body[data-view=chat] #thread { display:flex; }
-  body[data-view=chat] #history:empty { display:none; }
-  body[data-view=files] #dock, body[data-view=settings] #dock { background:transparent; }
-  #setcard > summary, #filescard > summary { display:none; }
+  body[data-view=chat] [data-views~=chat], body[data-view=settings] [data-views~=settings] { display:block; }
+  body:not([data-view=chat]) #thread { display:none; }
+  body[data-view=settings] #dock { background:transparent; }
+  #setcard > summary { display:none; }
   .feed pre { font-size:13px; }
 }
 </style></head><body data-view="chat">
 <aside><h1>SmolPaw</h1>
   <button id="newchat">+ New chat</button>
   <button class="nav on" data-view="chat">Chat</button>
-  <button class="nav" data-view="files">Files</button><button class="nav" data-view="settings">Settings</button>
+  <button class="nav" data-view="settings">Settings</button>
   <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
 <main><div id="content">
@@ -773,8 +774,8 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <div class="cardhead"><div class="meta" id="actsummary" style="margin:0"></div><button class="copybtn" id="livebtn" hidden>Current run</button></div>
     <pre id="feed">(nothing yet)</pre></details>
 </div>
-<details class="card" id="setcard" data-views="settings" hidden><summary>Settings</summary>
-  <div class="filesec">
+<details class="card" id="setcard" data-views="settings"><summary>Settings</summary>
+  <div class="filesec" id="setform" hidden>
     <h3>Backend</h3><select id="sbackend"></select>
     <h3>Model</h3><input id="smodel" list="smodels" autocomplete="off"><datalist id="smodels"></datalist>
     <h3>Step limit</h3><input id="ssteps" type="number" min="1" max="50">
@@ -782,19 +783,16 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <h3>Run summaries</h3><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input id="ssummaries" type="checkbox"> Model-written one-sentence summaries for recent runs</label>
     <div class="row"><button id="sapply">Apply</button></div>
     <div class="meta" id="smsg"></div>
-  </div></details>
-<details class="card" id="filescard" data-views="files"><summary>Files</summary>
+  </div>
   <div class="filesec">
-    <h2>Notes (notes.md)</h2>
-    <pre id="fnotes">(empty)</pre>
-    <h2 style="margin-top:12px">Skills (skills/)</h2>
-    <div id="fskills"><pre>(none)</pre></div>
-    <h2 style="margin-top:12px">Memory (memory.md)</h2>
-    <pre id="fmemory">(empty)</pre>
+    <h2>Files (read-only)</h2>
+    <details class="sub"><summary>Notes (notes.md)</summary><pre id="fnotes">(empty)</pre></details>
+    <details class="sub"><summary>Skills (skills/)</summary><div id="fskills"><pre>(none)</pre></div></details>
+    <details class="sub"><summary>Memory (memory.md)</summary><pre id="fmemory">(empty)</pre></details>
   </div></details>
 </div>
 <div id="dock">
-<div class="card pending" id="pending" data-views="chat files settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
+<div class="card pending" id="pending" data-views="chat settings" hidden><h2 id="pkind">Approval needed</h2><pre id="ptext"></pre>
   <div class="row" id="yesno"><button class="yes" id="yes">Yes</button><button class="no" id="no">No</button></div>
   <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
     <div class="row"><button id="send">Send answer</button></div></div></div>
@@ -899,7 +897,7 @@ function fillSettings(s) {
   $("ssummaries").checked = !!s.run_summaries;
 }
 $("sbackend").onchange = () => { $("smodel").value = ""; loadModels(); };
-$("setcard").ontoggle = () => { if ($("setcard").open) loadModels(); };
+$("setcard").ontoggle = () => { if ($("setcard").open) { loadModels(); loadFiles(); } };
 $("sapply").onclick = async () => {
   const r = await fetch("/api/settings", {method: "POST", cache: "no-store",
     headers: {"X-Token": token, "Content-Type": "application/json"},
@@ -909,7 +907,6 @@ $("sapply").onclick = async () => {
   $("smsg").textContent = r.ok ? "Applied." : r.status === 409 ? "A request is running; try again when it finishes." : "Invalid settings.";
   refresh();
 };
-$("filescard").ontoggle = () => { if ($("filescard").open) loadFiles(); };
 let lastSig = null, selectedThread = "", historyKey = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
 function renderRuns() {
   const container = $("runslist");
@@ -992,7 +989,7 @@ async function refresh() {
   if (!p) pendingId = null;
   const viewing = selectedRunId !== null;
   $("runcard").hidden = !s.can_run;
-  $("setcard").hidden = !s.can_run;
+  $("setform").hidden = !s.can_run;
   if (s.can_run) fillSettings(s);
   $("sapply").disabled = s.status === "running";
   $("run").disabled = s.status === "running"; $("stop").disabled = s.status !== "running";
@@ -1017,21 +1014,21 @@ async function refresh() {
     $("actsummary").textContent = s.summary || "";
     $("feed").textContent = s.prompt ? ((s.feed || []).join("\\n") || "(nothing yet)") : "(nothing yet)";
   }
-  if ($("filescard").open) loadFiles();
+  if ($("setcard").open && document.body.dataset.view === "settings") loadFiles();
   const sig = [s.run_id, s.answer, s.error, (s.feed || []).length, (s.turns || []).length, p && p.id].join("|");
   if (!viewing && sig !== lastSig) { lastSig = sig; window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"}); }
   const key = [s.run_id, s.status, s.summary].join("|");
   if (key !== runsKey) { runsKey = key; loadRuns(); }
 }
 const wide = window.matchMedia("(min-width:900px)");
-function openPanels() { $("setcard").open = wide.matches; $("filescard").open = wide.matches; }
+function openPanels() { $("setcard").open = wide.matches; }
 function setView(v) {
   document.body.dataset.view = v;
   for (const b of document.querySelectorAll(".nav")) b.classList.toggle("on", b.dataset.view === v);
   try { localStorage.setItem("smolpawView", v); } catch (e) {}
 }
 for (const b of document.querySelectorAll(".nav")) b.onclick = () => setView(b.dataset.view);
-try { const v = localStorage.getItem("smolpawView"); if (["chat", "files", "settings"].includes(v)) setView(v); } catch (e) {}
+try { const v = localStorage.getItem("smolpawView"); if (["chat", "settings"].includes(v)) setView(v); } catch (e) {}
 wide.onchange = openPanels; openPanels();
 refresh(); setInterval(refresh, 1500);
 </script></body></html>
