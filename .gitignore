@@ -25,5 +25,6 @@ build/
 notes.md
 memory.md
 logs/
+schedules.json
 workspace/*
 !workspace/.gitkeep
