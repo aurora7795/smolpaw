@@ -493,5 +493,85 @@ if concurrent_tmp.exists():
 if store_tmp.exists():
     store_tmp.unlink()
 
+# --- mark_outcome and status fields (#54) ---
+outcome_tmp = tmp / "outcome.json"
+schedules.PATH = outcome_tmp
+s_out = schedules.add("test outcome prompt", "*/5 * * * *")
+sid_out = s_out["id"]
+
+# mark_outcome stores status and error
+schedules.mark_outcome(sid_out, "ok")
+loaded = [s for s in schedules.load() if s["id"] == sid_out][0]
+check("mark_outcome stores ok status and empty error", loaded.get("last_status") == "ok" and loaded.get("last_error") == "")
+
+schedules.mark_outcome(sid_out, "error", "ValueError")
+loaded = [s for s in schedules.load() if s["id"] == sid_out][0]
+check("mark_outcome stores error status and error string", loaded.get("last_status") == "error" and loaded.get("last_error") == "ValueError")
+
+# rejects an unknown status (ValueError) and unknown id (KeyError)
+def rejects_unknown_status() -> bool:
+    try:
+        schedules.mark_outcome(sid_out, "invalid_status")
+        return False
+    except ValueError:
+        return True
+
+def rejects_unknown_id() -> bool:
+    try:
+        schedules.mark_outcome("nonexistent_id", "ok")
+        return False
+    except KeyError:
+        return True
+
+check("mark_outcome rejects unknown status with ValueError", rejects_unknown_status())
+check("mark_outcome rejects unknown id with KeyError", rejects_unknown_id())
+
+# leaves last_run and next_run unchanged
+t_ran = datetime(2026, 10, 26, 12, 0)
+schedules.mark_ran(sid_out, t_ran)
+before_outcome = [s for s in schedules.load() if s["id"] == sid_out][0]
+last_run_before = before_outcome["last_run"]
+next_run_before = before_outcome["next_run"]
+schedules.mark_outcome(sid_out, "stopped")
+after_outcome = [s for s in schedules.load() if s["id"] == sid_out][0]
+check("mark_outcome leaves last_run unchanged", after_outcome.get("last_run") == last_run_before)
+check("mark_outcome leaves next_run unchanged", after_outcome.get("next_run") == next_run_before)
+check("mark_outcome stores stopped status", after_outcome.get("last_status") == "stopped" and after_outcome.get("last_error") == "")
+
+# mark_ran sets "running" and clears a previous error
+schedules.mark_outcome(sid_out, "error", "RuntimeError")
+loaded_err = [s for s in schedules.load() if s["id"] == sid_out][0]
+check("status is error before mark_ran", loaded_err.get("last_status") == "error" and loaded_err.get("last_error") == "RuntimeError")
+schedules.mark_ran(sid_out, datetime(2026, 10, 26, 12, 5))
+loaded_after_ran = [s for s in schedules.load() if s["id"] == sid_out][0]
+check("mark_ran sets last_status to running", loaded_after_ran.get("last_status") == "running")
+check("mark_ran clears last_error", loaded_after_ran.get("last_error") == "")
+
+# a schedule with no last_status field loads and behaves as before
+old_entry = {
+    "id": "old-id-1234",
+    "prompt": "old prompt without status",
+    "cron": "*/10 * * * *",
+    "enabled": True,
+    "last_run": None,
+    "next_run": "2026-10-26T12:00:00",
+}
+old_json_content = json.dumps([old_entry], indent=2)
+outcome_tmp.write_text(old_json_content, encoding="utf-8")
+loaded_old = schedules.load()
+check("old schedule without last_status loads", len(loaded_old) == 1 and loaded_old[0]["id"] == "old-id-1234")
+check("old schedule has no last_status field", "last_status" not in loaded_old[0])
+check("old schedule has no last_error field", "last_error" not in loaded_old[0])
+check("old schedule behaves with due()", len(schedules.due(datetime(2026, 10, 26, 12, 5))) == 1)
+check("old schedule behaves with set_enabled()", schedules.set_enabled("old-id-1234", False) is True)
+
+# an old file without the fields is not rewritten by load()
+outcome_tmp.write_text(old_json_content, encoding="utf-8")
+_ = schedules.load()
+check("old file without fields is not rewritten by load()", outcome_tmp.read_text(encoding="utf-8") == old_json_content)
+
+if outcome_tmp.exists():
+    outcome_tmp.unlink()
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

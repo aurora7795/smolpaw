@@ -17,6 +17,7 @@ import threading
 PATH: Path = Path(__file__).resolve().parent / "schedules.json"
 MAX_PROMPT: int = 4_000
 _LOCK: threading.RLock = threading.RLock()
+STATUSES: tuple[str, ...] = ("running", "ok", "error", "stopped", "needs_approval")
 
 MONTH_NAMES: dict[str, int] = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -318,6 +319,26 @@ def mark_ran(id: str, now: datetime) -> None:
                 found = True
                 s["last_run"] = now.isoformat()
                 s["next_run"] = next_run(s["cron"], now).isoformat()
+                s["last_status"] = "running"
+                s["last_error"] = ""
+                break
+        if not found:
+            raise KeyError(f"Schedule not found: {id}")
+        _atomic_save(schedules)
+
+
+def mark_outcome(id: str, status: str, error: str = "") -> None:
+    """Record the outcome of a finished run for a schedule."""
+    if status not in STATUSES:
+        raise ValueError(f"Invalid status: {status!r}, must be one of {STATUSES}")
+    with _LOCK:
+        schedules = load()
+        found = False
+        for s in schedules:
+            if s.get("id") == id:
+                found = True
+                s["last_status"] = status
+                s["last_error"] = error
                 break
         if not found:
             raise KeyError(f"Schedule not found: {id}")

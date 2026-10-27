@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import generic_tools as g
+import schedules
 from agent import BACKENDS, MAX_STEPS, build_agent, load_env, run_request
 from scheduler import Scheduler
 from smolagents.models import ChatMessage, MessageRole
@@ -308,12 +309,14 @@ class Session:
                 deferred.append(g._redact(desc))
                 return False
             g.CONFIRM, g.ASK = confirm_later, lambda question: NO_ANSWER
+        exc_type = ""
         try:
             self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context,
                                                     schedule)
             if not g.ACTIONS:  # nothing to report; the Activity feed already shows the run (the terminal keeps its line)
                 self.outcome = ""
         except Exception as exc:  # noqa: BLE001 - shown on the page, as the CLI prints it
+            exc_type = type(exc).__name__
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
             if schedule:
@@ -339,6 +342,21 @@ class Session:
                         "actions": list(deferred),
                         "t": run_t,
                     })
+                if schedule:
+                    if self._run_id != run_id:
+                        status = "stopped"
+                    elif self.error:
+                        status = "error"
+                    elif deferred:
+                        status = "needs_approval"
+                    else:
+                        status = "ok"
+                    # Only the exception class name: messages, prompt, answer or tool output can contain private data or secrets
+                    error = exc_type if status == "error" else ""
+                    try:
+                        schedules.mark_outcome(schedule, status, error)
+                    except (OSError, ValueError, KeyError):
+                        pass
                 self.status = "idle"
             if self.run_summaries and log_file and answer and not has_error:
                 threading.Thread(target=self._summarize, args=(run_id, prompt, answer, log_file), daemon=True).start()
