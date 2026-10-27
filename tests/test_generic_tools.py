@@ -25,7 +25,10 @@ def fake_confirm(desc: str) -> bool:
 
 
 g.CONFIRM = fake_confirm
+real_logs = g.ROOT / "logs"
+logs_snapshot = {(p.name, p.stat().st_size) for p in real_logs.iterdir()} if real_logs.exists() else set()
 tmp = Path(tempfile.mkdtemp())
+g.LOG_DIR = tmp / "logs"
 g.WORKSPACE = tmp / "workspace"
 g.SKILLS = tmp / "skills"
 g.MEMORY = tmp / "memory.md"
@@ -1993,6 +1996,8 @@ _start = json.loads(g._log_file.read_text().splitlines()[0]) if g._log_file and 
 check("an interactive run's start log entry has no schedule field", _start.get("kind") == "start" and "schedule" not in _start)
 g.LOG_DIR = saved_ld_ia
 g.CONFIRM, g.ASK = _ia_saved
+current_logs = {(p.name, p.stat().st_size) for p in real_logs.iterdir()} if real_logs.exists() else set()
+check("real logs folder is untouched", current_logs == logs_snapshot)
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
