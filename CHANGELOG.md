@@ -11,6 +11,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 - Cron parser and schedule store (`schedules.py`, #20): pure-Python 5-field cron expression parser (`minute hour day-of-month month day-of-week`) supporting steps, ranges, comma-separated lists, month and weekday names, strictly-after run calculations (`next_run`), and standard Vixie-cron day matching (DOM or DOW when both restricted). Atomic thread-safe schedule persistence in `schedules.json` (`load`, `add`, `remove`, `set_enabled`, `due`, `mark_ran`) ensuring missed slots fire once after sleep or restart and corrupt files raise without modification. Tests in `tests/test_schedules.py`.
 
 ### Fixed
+- `tests/test_generic_tools.py`: run logs (model `m`, prompt `p`) were written to the real `logs/` directory during test runs, cluttering the web UI's Recents list and `tests/export_findings.py`. `g.LOG_DIR` is now pointed at a temporary folder for the whole run, with a final assertion verifying that the real `logs/` folder is untouched (#50).
 - `web.py`: the conversation (including Activity) no longer shows on the Settings page on a wide screen.
 - `web.py`: on a narrow window the Files and Settings panels no longer sit open above the conversation. They now come after it and collapse when the window is narrow.
 
