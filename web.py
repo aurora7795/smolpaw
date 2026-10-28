@@ -243,6 +243,8 @@ class Session:
                 schedule_timeout = float(raw) if raw != "" else 900.0
             except ValueError:
                 schedule_timeout = 900.0
+            if not 0 <= schedule_timeout < 86_400 * 365:  # negative, nan or inf: a bad value must not drop the limit
+                schedule_timeout = 900.0
         self.schedule_timeout = float(schedule_timeout)
         self.call_model = call_model
         self._lock = threading.Lock()

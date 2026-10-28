@@ -7,6 +7,7 @@ Uses a fake agent, an injected clock and temporary schedules.json, logs/ and wor
 
 import itertools
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -753,6 +754,18 @@ agent.gate.set()
 wait_idle(sess)
 check("limit 0 scheduled run finishes cleanly once unblocked",
       sess.status == "idle" and schedules.load()[0].get("last_status") == "ok")
+
+# 5. Bad SCHEDULE_TIMEOUT values fall back to the default instead of dropping the limit
+saved_env = os.environ.get("SCHEDULE_TIMEOUT")
+try:
+    for raw, want in (("inf", 900.0), ("nan", 900.0), ("-5", 900.0), ("abc", 900.0), ("", 900.0), ("0", 0.0), ("60", 60.0)):
+        os.environ["SCHEDULE_TIMEOUT"] = raw
+        check(f"SCHEDULE_TIMEOUT={raw!r} gives {want}", make()[0].schedule_timeout == want)
+finally:
+    if saved_env is None:
+        os.environ.pop("SCHEDULE_TIMEOUT", None)
+    else:
+        os.environ["SCHEDULE_TIMEOUT"] = saved_env
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
