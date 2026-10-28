@@ -35,6 +35,7 @@ The filter used so far. Safe: mechanical, self-contained, testable tasks with a 
 | [#27](https://github.com/aurora7795/smolpaw/issues/27) | new tools (`remember`, `recall`) | scoped fix | The "token budget" test measured a hand-built schema, hiding a real overrun (179 to 182 real tokens against the roughly 147 claimed and the 100 to 150 budget). Wrong number. | unmeasured | not recorded | yes: the budget check caught a real problem |
 | [#28](https://github.com/aurora7795/smolpaw/issues/28) | new tool (`fetch_page`) | scoped fix | Dropped the wrong-API-path HTML warning that `http_request` has. Missed requirement. | unmeasured | not recorded | yes |
 | [#53](https://github.com/aurora7795/smolpaw/issues/53) | scheduler feature (wall-clock limit) | scoped fix | Robustness gap: `SCHEDULE_TIMEOUT=inf` made the timer thread raise `OverflowError` (no limit, no message); negative and `nan` silently disabled the limit. No correctness bug in the stop path; all five suites passed, scheduler suite stable over 6 runs. | 7,694 tokens (109,550 to 117,244), partial: the baseline was read after the diff had already been loaded, so this undercounts. The figure covers the tests, the edge-case probes, the fix and the merge. | 9ab1b16 | yes: close to mergeable as delivered; one small fix and a test. |
+| [#70](https://github.com/aurora7795/smolpaw/issues/70) | safety-adjacent feature (undo copies for approved writes) | scoped fix | (1) Correctness: copy names truncated at 150 characters or stripped of `..` let different files share copies and retention, so saving one deleted another's backups. (2) Safety gap: copies were `0644` in a `0755` folder even for `0600` originals. (3) Test quality: tests 2 to 4 failed on `main` only through `hasattr` guards, test 9 patched the save function instead of making it fail, test 7 never wrote a path with `..`. Held up: the approval logic untouched, tool schemas identical to `main` (checked with `get_tool_json_schema`, so no prompt tokens added), nothing written to the real `.undo/`, failure to save never blocks a write. | 26,299 tokens (151,669 to 177,968), baseline taken before reading anything; covers the diff, the tests, the edge-case probes, the fix and the merge. | 8fbed9a | yes: close to mergeable, the defects were small and fixed in one commit. The review cost more than #53's because the diff is larger and sits next to the confirmation layer. |
 
 Rows for #3 to #28 were written from memory notes after the fact, so their cost and fix-commit columns are blank. Rows from #53 on are filled in as the review happens.
 
@@ -42,6 +43,6 @@ Rows for #3 to #28 were written from memory notes after the fact, so their cost 
 
 Update after each row.
 
-- Delegated issues logged: 5
-- Clean: 0, scoped fix: 4, rework: 0, rejected: 1
-- Verdict yes: 4, no: 1, unclear: 0
+- Delegated issues logged: 6
+- Clean: 0, scoped fix: 5, rework: 0, rejected: 1
+- Verdict yes: 5, no: 1, unclear: 0
