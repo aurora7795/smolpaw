@@ -17,9 +17,11 @@ import platform
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import threading
+import time
 import warnings
 from datetime import datetime
 from html.parser import HTMLParser
@@ -39,6 +41,9 @@ SKILLS = ROOT / "skills"
 NOTES = ROOT / "notes.md"
 MEMORY = ROOT / "memory.md"
 LOG_DIR = ROOT / "logs"
+UNDO_DIR = ROOT / ".undo"
+UNDO_MAX_BYTES = 1_000_000
+UNDO_KEEP = 10
 
 READ_ONLY_CMDS = {"ls", "cat", "head", "grep", "find", "wc", "stat", "file"}
 FIND_UNSAFE = {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf"}
@@ -214,6 +219,80 @@ def _in_scope(path: str) -> bool:
 
 def _is_secret_file(path: Path) -> bool:
     return path.name.startswith(".env") or ".ssh" in path.parts
+
+
+# --- undo / reversible writes -----------------------------------------------------
+
+def _undo_tag(target: Path | str) -> str:
+    raw = str(target).replace("\\", "/").strip()
+    raw = re.sub(r"\.\.+", "", raw)
+    clean = re.sub(r"[/]+", "__", raw).strip("_")
+    if len(clean) > 150:
+        clean = clean[-150:].lstrip("_")
+    return clean or "file"
+
+
+def _undo_name(target: Path | str, now: datetime | None = None) -> str:
+    if now is None:
+        now = datetime.now()
+    ts = now.strftime("%Y%m%d-%H%M%S-%f")
+    tag = _undo_tag(target)
+    return f"{ts}__{tag}"
+
+
+def _prune_undo(target: Path | str) -> None:
+    if not UNDO_DIR.exists():
+        return
+    tag = _undo_tag(target)
+    suffix = f"__{tag}"
+    undo_dir_resolved = UNDO_DIR.resolve()
+    copies = []
+    for f in UNDO_DIR.iterdir():
+        if f.is_file() and f.name.endswith(suffix):
+            try:
+                if f.resolve().parent == undo_dir_resolved:
+                    copies.append(f)
+            except OSError:
+                pass
+    copies.sort(key=lambda x: x.name)
+    if len(copies) > UNDO_KEEP:
+        for f in copies[:len(copies) - UNDO_KEEP]:
+            try:
+                if f.resolve().parent == undo_dir_resolved:
+                    f.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _save_undo(p: Path) -> tuple[Path | None, str | None]:
+    """Copy pre-edit regular file to UNDO_DIR. Returns (saved_path, None) or (None, reason)."""
+    if _is_secret_file(p):
+        return None, "not saved: could not copy"
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return None, None
+    if not stat.S_ISREG(st.st_mode):
+        return None, "not saved: could not copy"
+    if st.st_size > UNDO_MAX_BYTES:
+        return None, "not saved: too large"
+    try:
+        data = p.read_bytes()
+    except (OSError, PermissionError):
+        return None, "not saved: could not copy"
+    try:
+        UNDO_DIR.mkdir(parents=True, exist_ok=True)
+        name = _undo_name(p)
+        dest = UNDO_DIR / name
+        while dest.exists():
+            time.sleep(0.0005)
+            name = _undo_name(p)
+            dest = UNDO_DIR / name
+        dest.write_bytes(data)
+        _prune_undo(p)
+        return dest, None
+    except Exception:
+        return None, "not saved: could not copy"
 
 
 # --- shell ------------------------------------------------------------------------
@@ -908,6 +987,7 @@ def write_file(path: str, text: str) -> str:
     if not _approved(f"Write {len(text)} chars to {p}{where}:\n{text[:500]}"):
         _log("write_file", path=path, chars=len(text), result="declined")
         return DECLINED
+    saved_undo, undo_reason = _save_undo(p)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text)
@@ -915,8 +995,16 @@ def write_file(path: str, text: str) -> str:
         _log("write_file", path=path, chars=len(text), result=f"error ({type(exc).__name__})")
         ACTIONS.append(f"write failed: {p}")
         return f"ERROR: {exc}"
-    ACTIONS.append(f"wrote {p} ({len(text)} chars)")
-    _log("write_file", path=path, chars=len(text), result="ok")
+    undo_note = ""
+    extra_log = {}
+    if saved_undo:
+        undo_note = f" (previous content saved at {saved_undo})"
+        extra_log["undo"] = str(saved_undo)
+    elif undo_reason:
+        undo_note = f" ({undo_reason})"
+        extra_log["undo"] = undo_reason
+    ACTIONS.append(f"wrote {p} ({len(text)} chars){undo_note}")
+    _log("write_file", path=path, chars=len(text), result="ok", **extra_log)
     return f"SUCCESS: wrote {len(text)} chars to {p}."
 
 
@@ -985,14 +1073,23 @@ def write_skill(name: str, text: str) -> str:
     if not _approved(f"{verb} skill '{p.stem}':\n{text[:1500]}"):
         _log("write_skill", name=name, chars=len(text), result="declined")
         return DECLINED
+    saved_undo, undo_reason = _save_undo(p)
     try:
         SKILLS.mkdir(exist_ok=True)
         p.write_text(_redact(text))
     except OSError as exc:
         _log("write_skill", name=name, chars=len(text), result=f"error ({type(exc).__name__})")
         raise
-    ACTIONS.append(f"saved skill {p.stem}")
-    _log("write_skill", name=name, chars=len(text), result="ok")
+    undo_note = ""
+    extra_log = {}
+    if saved_undo:
+        undo_note = f" (previous content saved at {saved_undo})"
+        extra_log["undo"] = str(saved_undo)
+    elif undo_reason:
+        undo_note = f" ({undo_reason})"
+        extra_log["undo"] = undo_reason
+    ACTIONS.append(f"saved skill {p.stem}{undo_note}")
+    _log("write_skill", name=name, chars=len(text), result="ok", **extra_log)
     return f"SUCCESS: saved skill '{p.stem}'."
 
 

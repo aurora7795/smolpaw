@@ -27,8 +27,14 @@ def fake_confirm(desc: str) -> bool:
 g.CONFIRM = fake_confirm
 real_logs = g.ROOT / "logs"
 logs_snapshot = {(p.name, p.stat().st_size) for p in real_logs.iterdir()} if real_logs.exists() else set()
+real_undo = g.ROOT / ".undo"
+undo_snapshot = {(p.name, p.stat().st_size) for p in real_undo.iterdir()} if real_undo.exists() else set()
 tmp = Path(tempfile.mkdtemp())
+saved_initial_undo_dir = getattr(g, "UNDO_DIR", None)
+saved_initial_undo_max = getattr(g, "UNDO_MAX_BYTES", None)
+saved_initial_undo_keep = getattr(g, "UNDO_KEEP", None)
 g.LOG_DIR = tmp / "logs"
+g.UNDO_DIR = tmp / "undo"
 g.WORKSPACE = tmp / "workspace"
 g.SKILLS = tmp / "skills"
 g.MEMORY = tmp / "memory.md"
@@ -44,6 +50,9 @@ def check(name: str, cond: bool) -> None:
 
 
 check.failed = 0
+check("UNDO_DIR is ROOT / .undo", saved_initial_undo_dir == g.ROOT / ".undo")
+check("UNDO_MAX_BYTES is 1_000_000", saved_initial_undo_max == 1_000_000)
+check("UNDO_KEEP is 10", saved_initial_undo_keep == 10)
 
 
 def asked() -> bool:
@@ -1998,6 +2007,199 @@ g.LOG_DIR = saved_ld_ia
 g.CONFIRM, g.ASK = _ia_saved
 current_logs = {(p.name, p.stat().st_size) for p in real_logs.iterdir()} if real_logs.exists() else set()
 check("real logs folder is untouched", current_logs == logs_snapshot)
+
+# ---- reversible file overwrites (.undo) ----
+
+# 1. Approved overwrite of an existing file: old content saved byte-for-byte before new content lands
+test1_file = g.WORKSPACE / "undo_test1.txt"
+old_content1 = b"original byte content \x00\x01\xff with special chars\n"
+test1_file.write_bytes(old_content1)
+undo_dir1 = tmp / "undo_t1"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir1
+answer["value"] = True
+res1 = g.write_file("undo_test1.txt", "new content 1")
+t1_copies = list(undo_dir1.iterdir()) if undo_dir1.exists() else []
+check("1. approved overwrite of an existing file: old content is saved byte-for-byte before new content lands",
+      test1_file.read_text() == "new content 1"
+      and len(t1_copies) == 1
+      and t1_copies[0].read_bytes() == old_content1)
+g.UNDO_DIR = saved_undo_dir
+
+# 2. Declined write: nothing is saved and original file is unchanged
+test2_file = g.WORKSPACE / "undo_test2.txt"
+test2_file.write_text("original content 2")
+undo_dir2 = tmp / "undo_t2"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir2
+answer["value"] = False
+res2 = g.write_file("undo_test2.txt", "declined content 2")
+t2_copies = list(undo_dir2.iterdir()) if undo_dir2.exists() else []
+check("2. declined write: nothing is saved and the original file is unchanged",
+      hasattr(g, "_save_undo")
+      and res2 == g.DECLINED
+      and test2_file.read_text() == "original content 2"
+      and len(t2_copies) == 0)
+g.UNDO_DIR = saved_undo_dir
+
+# 3. New file: nothing is saved
+test3_file = g.WORKSPACE / "undo_test3_new.txt"
+if test3_file.exists():
+    test3_file.unlink()
+undo_dir3 = tmp / "undo_t3"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir3
+answer["value"] = True
+res3 = g.write_file("undo_test3_new.txt", "brand new file content")
+t3_copies = list(undo_dir3.iterdir()) if undo_dir3.exists() else []
+check("3. new file: nothing is saved",
+      hasattr(g, "_save_undo")
+      and test3_file.read_text() == "brand new file content"
+      and len(t3_copies) == 0
+      and "previous content saved at" not in g.ACTIONS[-1]
+      and "not saved:" not in g.ACTIONS[-1])
+g.UNDO_DIR = saved_undo_dir
+
+# 4. Secrets file (.env): write is blocked and nothing is saved
+test4_env = g.WORKSPACE / ".env"
+old_env = test4_env.read_text()
+undo_dir4 = tmp / "undo_t4"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir4
+answer["value"] = True
+res4 = g.write_file(".env", "MALICIOUS_KEY=123")
+t4_copies = list(undo_dir4.iterdir()) if undo_dir4.exists() else []
+check("4. secrets file (.env): write is blocked and nothing is saved",
+      hasattr(g, "_save_undo")
+      and res4.startswith("BLOCKED")
+      and test4_env.read_text() == old_env
+      and len(t4_copies) == 0)
+g.UNDO_DIR = saved_undo_dir
+
+# 5. File over the size cap: write still happens, nothing is saved, report says not saved: too large
+test5_file = g.WORKSPACE / "undo_test5_large.txt"
+test5_file.write_bytes(b"x" * (getattr(g, "UNDO_MAX_BYTES", 1_000_000) + 100))
+undo_dir5 = tmp / "undo_t5"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir5
+answer["value"] = True
+res5 = g.write_file("undo_test5_large.txt", "small replacement")
+t5_copies = list(undo_dir5.iterdir()) if undo_dir5.exists() else []
+check("5. file over the size cap: the write still happens, nothing is saved, and the report says not saved: too large",
+      test5_file.read_text() == "small replacement"
+      and len(t5_copies) == 0
+      and "not saved: too large" in g.ACTIONS[-1])
+g.UNDO_DIR = saved_undo_dir
+
+# 6. Retention: after 12 overwrites of same path only newest 10 copies remain; different path untouched
+undo_dir6 = tmp / "undo_t6"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir6
+answer["value"] = True
+g.write_file("undo_test6_b.txt", "b_initial")
+g.write_file("undo_test6_b.txt", "b_overwritten")
+b_copies_before = [f.name for f in undo_dir6.iterdir() if f.is_file() and "undo_test6_b" in f.name] if undo_dir6.exists() else []
+
+g.write_file("undo_test6_a.txt", "v0")
+for i in range(1, 13):
+    g.write_file("undo_test6_a.txt", f"v{i}")
+
+a_copies = sorted([f for f in undo_dir6.iterdir() if f.is_file() and "undo_test6_a" in f.name], key=lambda x: x.name) if undo_dir6.exists() else []
+b_copies_after = [f.name for f in undo_dir6.iterdir() if f.is_file() and "undo_test6_b" in f.name] if undo_dir6.exists() else []
+check("6. retention: after 12 overwrites of the same path only the newest 10 copies remain; a different path's copies are untouched",
+      len(b_copies_before) == 1
+      and b_copies_after == b_copies_before
+      and len(a_copies) == 10
+      and [f.read_text() for f in a_copies] == [f"v{i}" for i in range(2, 12)])
+g.UNDO_DIR = saved_undo_dir
+
+# 7. A path containing .. or separators produces a saved name inside UNDO_DIR only
+undo_dir7 = tmp / "undo_t7"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir7
+answer["value"] = True
+sub_dir = g.WORKSPACE / "sub_undo"
+sub_dir.mkdir(exist_ok=True)
+(sub_dir / "nested.txt").write_text("old nested")
+g.write_file("sub_undo/nested.txt", "new nested")
+nested_copies = list(undo_dir7.iterdir()) if undo_dir7.exists() else []
+check("7. a path containing .. or separators produces a saved name inside UNDO_DIR only",
+      len(nested_copies) == 1
+      and nested_copies[0].parent.resolve() == undo_dir7.resolve()
+      and ".." not in nested_copies[0].name
+      and "/" not in nested_copies[0].name
+      and "\\" not in nested_copies[0].name
+      and hasattr(g, "_undo_name")
+      and (undo_dir7 / g._undo_name("../../escape.txt")).parent.resolve() == undo_dir7.resolve()
+      and ".." not in g._undo_name("../../escape.txt")
+      and "/" not in g._undo_name("../../escape.txt")
+      and "\\" not in g._undo_name("../../escape.txt"))
+g.UNDO_DIR = saved_undo_dir
+
+# 8. Saved path appears in ACTIONS and in log entry; no file contents appear in either
+undo_dir8 = tmp / "undo_t8"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir8
+test8_file = g.WORKSPACE / "undo_test8.txt"
+secret_content8 = "SECRET_OLD_CONTENT_XYZ987_DO_NOT_LEAK"
+test8_file.write_text(secret_content8)
+test8_log = tmp / "undo_test8_log.jsonl"
+saved_log_file, g._log_file = g._log_file, test8_log
+answer["value"] = True
+g.write_file("undo_test8.txt", "new content 8")
+t8_copies = list(undo_dir8.iterdir()) if undo_dir8.exists() else []
+saved_path_str = str(t8_copies[0]) if t8_copies else ""
+t8_entries = [json.loads(l) for l in test8_log.read_text().splitlines() if json.loads(l).get("kind") == "write_file"] if test8_log.exists() else []
+entry8 = t8_entries[-1] if t8_entries else {}
+check("8. the saved path appears in ACTIONS and in the log entry; no file contents appear in either",
+      bool(saved_path_str)
+      and saved_path_str in g.ACTIONS[-1]
+      and entry8.get("undo") == saved_path_str
+      and secret_content8 not in g.ACTIONS[-1]
+      and secret_content8 not in json.dumps(entry8))
+g._log_file = saved_log_file
+g.UNDO_DIR = saved_undo_dir
+
+# 9. Failure to save does not stop the write
+undo_dir9 = tmp / "undo_t9"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir9
+test9_file = g.WORKSPACE / "undo_test9.txt"
+test9_file.write_text("old text 9")
+answer["value"] = True
+saved_save_undo = getattr(g, "_save_undo", None)
+g._save_undo = lambda p: (None, "not saved: could not copy")
+res9 = g.write_file("undo_test9.txt", "new text 9")
+check("9. a failure to save (make UNDO_DIR unwritable or patch the copy to raise) does not stop the write",
+      res9.startswith("SUCCESS")
+      and test9_file.read_text() == "new text 9"
+      and "not saved: could not copy" in g.ACTIONS[-1])
+if saved_save_undo:
+    g._save_undo = saved_save_undo
+else:
+    delattr(g, "_save_undo")
+g.UNDO_DIR = saved_undo_dir
+
+# 10. write_skill overwriting an existing skill saves old content same way
+undo_dir10 = tmp / "undo_t10"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir10
+test10_log = tmp / "undo_test10_log.jsonl"
+saved_log_file, g._log_file = g._log_file, test10_log
+g.SKILLS.mkdir(exist_ok=True)
+skill_file = g.SKILLS / "undo_test_skill.md"
+old_skill_content = "# Old Skill\nold instructions for skill\n"
+skill_file.write_text(old_skill_content)
+answer["value"] = True
+res10 = g.write_skill("undo_test_skill", "# New Skill\nnew instructions for skill\n")
+t10_copies = list(undo_dir10.iterdir()) if undo_dir10.exists() else []
+saved_skill_path_str = str(t10_copies[0]) if t10_copies else ""
+t10_entries = [json.loads(l) for l in test10_log.read_text().splitlines() if json.loads(l).get("kind") == "write_skill"] if test10_log.exists() else []
+entry10 = t10_entries[-1] if t10_entries else {}
+check("10. write_skill overwriting an existing skill saves the old content the same way",
+      res10.startswith("SUCCESS")
+      and skill_file.read_text() == "# New Skill\nnew instructions for skill\n"
+      and len(t10_copies) == 1
+      and t10_copies[0].read_bytes() == old_skill_content.encode("utf-8")
+      and saved_skill_path_str in g.ACTIONS[-1]
+      and entry10.get("undo") == saved_skill_path_str
+      and old_skill_content not in g.ACTIONS[-1]
+      and old_skill_content not in json.dumps(entry10))
+g._log_file = saved_log_file
+g.UNDO_DIR = saved_undo_dir
+
+current_undo = {(p.name, p.stat().st_size) for p in real_undo.iterdir()} if real_undo.exists() else set()
+check("real .undo folder is untouched", not real_undo.exists() if not undo_snapshot else current_undo == undo_snapshot)
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
