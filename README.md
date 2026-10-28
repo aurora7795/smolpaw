@@ -238,12 +238,14 @@ minute   hour   day-of-month   month   day-of-week
 .venv/bin/python tests/test_schedules.py
 .venv/bin/python tests/test_scheduler.py
 .venv/bin/python tests/test_noninteractive.py
+.venv/bin/python tests/test_fake_mail.py
 ```
 
-`test_generic_tools.py` checks the confirmation layer, path scoping, secret handling, tool messages and the web page's server. `test_schedules.py` covers the cron parser and schedule store, `test_scheduler.py` the scheduler thread, read-only scheduled runs and deferred approvals, and `test_noninteractive.py` non-interactive (`-p`) and JSON-lines modes, exit codes, approvals declining, and error conditions. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
+`test_generic_tools.py` checks the confirmation layer, path scoping, secret handling, tool messages and the web page's server. `test_schedules.py` covers the cron parser and schedule store, `test_scheduler.py` the scheduler thread, read-only scheduled runs and deferred approvals, `test_noninteractive.py` non-interactive (`-p`) and JSON-lines modes, exit codes, approvals declining, and error conditions, and `test_fake_mail.py` the local in-memory SMTP and IMAP test servers. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised, and [tests/fake_mail.py](tests/fake_mail.py) is an in-memory SMTP/IMAP server for testing mail tools without a real mailbox:
 
 ```bash
 .venv/bin/python tests/fake_api.py 8765 [easy|hint|detail|paged]
+.venv/bin/python tests/fake_mail.py 8766 8767
 ```
 
 Repeatable runs and measurements:
@@ -275,7 +277,7 @@ scheduler.py          Thread that runs due schedules in read-only mode
 radarr_tools.py       Hand-written single-service tools (baseline for comparisons)
 skills/               Skills the agent follows or writes (api-discovery.md is hand-written)
 notes.example.md      Template for notes.md (gitignored)
-tests/                Safety tests and the Tidepool test API
+tests/                Safety tests, Tidepool test API, and fake mail server
 workspace/            The agent's working folder (contents gitignored)
 logs/                 Run logs (gitignored)
 PLAN.md               Goals, decisions, test ladder, next steps (tracked as GitHub issues)
