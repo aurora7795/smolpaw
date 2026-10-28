@@ -175,7 +175,7 @@ The model is told never to ask for a password, token or API key directly — a s
 
 ### Reversible file overwrites (.undo/)
 
-Before an approved overwrite of an existing file (via `write_file` or `write_skill`), SmolPaw saves a copy of the old content to `.undo/` (gitignored in the repository root) as a safety net. Up to 10 copies (`UNDO_KEEP = 10`) are kept per original path, with older copies pruned automatically. Files exceeding 1 MB (`UNDO_MAX_BYTES = 1_000_000`), non-regular files, or unreadable files are not copied (and the report notes `not saved: too large` or `not saved: could not copy`). Secrets files (like `.env`) are blocked earlier and never copied.
+Before an approved overwrite of an existing file (via `write_file` or `write_skill`), SmolPaw saves a copy of the old content to `.undo/` (gitignored in the repository root) as a safety net. Copies are private to your user (folder `0700`, files `0600`). Up to 10 copies (`UNDO_KEEP = 10`) are kept per original path, with older copies pruned automatically. Files exceeding 1 MB (`UNDO_MAX_BYTES = 1_000_000`), non-regular files, or unreadable files are not copied (and the report notes `not saved: too large` or `not saved: could not copy`). Secrets files (like `.env`) are blocked earlier and never copied.
 
 To restore a file by hand, copy the saved file from `.undo/` back to its original location (for example `cp .undo/<filename> <target>`).
 

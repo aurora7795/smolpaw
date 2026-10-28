@@ -11,6 +11,7 @@ safety rule lives here, not in the prompt, so the model cannot talk its way past
 """
 
 import functools
+import hashlib
 import json
 import os
 import platform
@@ -224,12 +225,15 @@ def _is_secret_file(path: Path) -> bool:
 # --- undo / reversible writes -----------------------------------------------------
 
 def _undo_tag(target: Path | str) -> str:
-    raw = str(target).replace("\\", "/").strip()
-    raw = re.sub(r"\.\.+", "", raw)
+    """Readable, separator-free name for a path, plus a short hash so paths that sanitise or truncate
+    to the same text (long paths, `a..b` against `ab`) keep separate copies and separate retention."""
+    full = str(target).replace("\\", "/").strip()
+    raw = re.sub(r"\.\.+", "", full)
     clean = re.sub(r"[/]+", "__", raw).strip("_")
-    if len(clean) > 150:
-        clean = clean[-150:].lstrip("_")
-    return clean or "file"
+    if len(clean) > 100:
+        clean = clean[-100:].lstrip("_")
+    digest = hashlib.sha1(full.encode("utf-8", "replace")).hexdigest()[:10]
+    return f"{clean or 'file'}__{digest}"
 
 
 def _undo_name(target: Path | str, now: datetime | None = None) -> str:
@@ -281,14 +285,15 @@ def _save_undo(p: Path) -> tuple[Path | None, str | None]:
     except (OSError, PermissionError):
         return None, "not saved: could not copy"
     try:
-        UNDO_DIR.mkdir(parents=True, exist_ok=True)
+        UNDO_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)  # copies may hold private files
         name = _undo_name(p)
         dest = UNDO_DIR / name
         while dest.exists():
             time.sleep(0.0005)
             name = _undo_name(p)
             dest = UNDO_DIR / name
-        dest.write_bytes(data)
+        with os.fdopen(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as fh:
+            fh.write(data)
         _prune_undo(p)
         return dest, None
     except Exception:

@@ -5,6 +5,7 @@ The Radarr GET test is live and skipped if RADARR_URL/RADARR_API_KEY are unset.
 
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -2196,6 +2197,69 @@ check("10. write_skill overwriting an existing skill saves the old content the s
       and old_skill_content not in g.ACTIONS[-1]
       and old_skill_content not in json.dumps(entry10))
 g._log_file = saved_log_file
+g.UNDO_DIR = saved_undo_dir
+
+# 11. Review additions: different paths never share copies or retention, even when sanitising or
+#     truncation would give the same text
+undo_dir11 = tmp / "undo_t11"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir11
+saved_keep, g.UNDO_KEEP = g.UNDO_KEEP, 2
+long_tail = "d" * 150
+long_a = g.WORKSPACE / ("A" + long_tail) / "f.txt"
+long_b = g.WORKSPACE / ("B" + long_tail) / "f.txt"
+for lp in (long_a, long_b):
+    lp.parent.mkdir(parents=True, exist_ok=True)
+    lp.write_text("v0")
+answer["value"] = True
+for i in range(1, 4):
+    g.write_file(str(long_a), f"a{i}")
+for i in range(1, 3):
+    g.write_file(str(long_b), f"b{i}")
+by_content = sorted(f.read_text() for f in undo_dir11.iterdir())
+check("11a. two long paths with the same tail keep separate copies and separate retention",
+      g._undo_tag(long_a) != g._undo_tag(long_b) and by_content == ["a1", "a2", "b1", "v0"])
+check("11b. a..b.txt and ab.txt do not share a tag", g._undo_tag(g.WORKSPACE / "a..b.txt") != g._undo_tag(g.WORKSPACE / "ab.txt"))
+g.UNDO_KEEP = saved_keep
+g.UNDO_DIR = saved_undo_dir
+
+# 12. Copies are private: folder 0700, files 0600
+if os.name == "posix":
+    undo_dir12 = tmp / "undo_t12"
+    saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir12
+    priv = g.WORKSPACE / "undo_test12.txt"
+    priv.write_text("private")
+    priv.chmod(0o600)
+    answer["value"] = True
+    g.write_file("undo_test12.txt", "new")
+    copy12 = list(undo_dir12.iterdir())
+    check("12. the undo folder is 0700 and the copy is 0600",
+          len(copy12) == 1 and stat.S_IMODE(undo_dir12.stat().st_mode) == 0o700
+          and stat.S_IMODE(copy12[0].stat().st_mode) == 0o600)
+    g.UNDO_DIR = saved_undo_dir
+
+# 13. A real failure to save (UNDO_DIR is a regular file) does not stop the write and is reported
+blocker = tmp / "undo_t13_blocker"
+blocker.write_text("not a folder")
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, blocker
+f13 = g.WORKSPACE / "undo_test13.txt"
+f13.write_text("old 13")
+answer["value"] = True
+res13 = g.write_file("undo_test13.txt", "new 13")
+check("13. a real save failure leaves the write intact and says not saved: could not copy",
+      res13.startswith("SUCCESS") and f13.read_text() == "new 13" and "not saved: could not copy" in g.ACTIONS[-1])
+g.UNDO_DIR = saved_undo_dir
+
+# 14. A path with .. components resolves, saves inside UNDO_DIR, and the name carries no separators
+undo_dir14 = tmp / "undo_t14"
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, undo_dir14
+f14 = g.WORKSPACE / "undo_test14.txt"
+f14.write_text("old 14")
+answer["value"] = True
+g.write_file("sub_undo/../undo_test14.txt", "new 14")
+c14 = list(undo_dir14.iterdir())
+check("14. a path written with .. components saves one copy inside UNDO_DIR",
+      len(c14) == 1 and c14[0].parent.resolve() == undo_dir14.resolve() and c14[0].read_bytes() == b"old 14"
+      and ".." not in c14[0].name and "/" not in c14[0].name)
 g.UNDO_DIR = saved_undo_dir
 
 current_undo = {(p.name, p.stat().st_size) for p in real_undo.iterdir()} if real_undo.exists() else set()
