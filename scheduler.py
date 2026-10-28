@@ -18,11 +18,14 @@ POLL_SECONDS = 30.0
 
 class Scheduler:
     def __init__(self, session, approvals, poll: float = POLL_SECONDS,
-                 clock: Callable[[], datetime] = datetime.now):
+                 clock: Callable[[], datetime] = datetime.now,
+                 schedule_timeout: float | None = None):
         self.session, self.approvals = session, approvals
         self.poll, self.clock = poll, clock
         self._stop = threading.Event()
         self._last_error = ""
+        if schedule_timeout is not None:
+            self.session.schedule_timeout = float(schedule_timeout)
 
     def tick(self) -> str | None:
         """Start the oldest due schedule if nothing else is running; return its id, else None."""

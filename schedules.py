@@ -17,7 +17,7 @@ import threading
 PATH: Path = Path(__file__).resolve().parent / "schedules.json"
 MAX_PROMPT: int = 4_000
 _LOCK: threading.RLock = threading.RLock()
-STATUSES: tuple[str, ...] = ("running", "ok", "error", "stopped", "needs_approval")
+STATUSES: tuple[str, ...] = ("running", "ok", "error", "stopped", "needs_approval", "timeout")
 
 MONTH_NAMES: dict[str, int] = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,

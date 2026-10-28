@@ -230,17 +230,29 @@ class Session:
 
     def __init__(self, agent, model: str, approvals: Approvals, backend: str = "lmstudio",
                  max_steps: int = MAX_STEPS, run_summaries: bool | None = None,
-                 call_model: Callable[[str], str] | None = None):
+                 call_model: Callable[[str], str] | None = None,
+                 schedule_timeout: float | None = None):
         self.agent, self.model, self.approvals = agent, model, approvals
         self.backend, self.max_steps = backend, max_steps
         if run_summaries is None:
             run_summaries = os.environ.get("SMOLPAW_RUN_SUMMARIES", "1").lower() not in ("0", "false", "no", "off")
         self.run_summaries = run_summaries
+        if schedule_timeout is None:
+            raw = os.environ.get("SCHEDULE_TIMEOUT", "900")
+            try:
+                schedule_timeout = float(raw) if raw != "" else 900.0
+            except ValueError:
+                schedule_timeout = 900.0
+            if not 0 <= schedule_timeout < 86_400 * 365:  # negative, nan or inf: a bad value must not drop the limit
+                schedule_timeout = 900.0
+        self.schedule_timeout = float(schedule_timeout)
         self.call_model = call_model
         self._lock = threading.Lock()
         self.status, self.prompt, self.answer, self.outcome, self.error = "idle", "", "", "", ""
         self.started_at = 0.0
         self._run_id = 0
+        self._timer: threading.Timer | None = None
+        self._timed_out_run_id: int | None = None
         self.thread: str | None = None  # id of the current chat; follow-ups share it
         self.history: list[tuple[str, str]] = []  # finished turns before the current prompt/answer
         self._scheduled_chat = False  # the current thread belongs to a scheduled run; interactive runs must not join it
@@ -278,6 +290,13 @@ class Session:
             run_id = self._run_id
             self.status, self.prompt, self.answer, self.outcome, self.error = "running", prompt, "", "", ""
             self.started_at = time.time()
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            if schedule and self.schedule_timeout > 0:
+                self._timer = threading.Timer(self.schedule_timeout, self._on_timeout, args=(run_id, schedule))
+                self._timer.daemon = True
+                self._timer.start()
         threading.Thread(target=self._run, args=(prompt, run_id, context, self.thread, schedule), daemon=True).start()
         return True
 
@@ -319,12 +338,17 @@ class Session:
             exc_type = type(exc).__name__
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
+            with self._lock:
+                if self._timer is not None:
+                    self._timer.cancel()
+                    self._timer = None
             if schedule:
                 g.CONFIRM, g.ASK = saved_hooks
             log_file = g._log_file
             answer = self.answer
             has_error = bool(self.error)
             with self._lock:
+                timed_out = bool(schedule and self._timed_out_run_id == run_id)
                 if deferred and self._run_id == run_id:  # not for a stopped run
                     if log_file:
                         g._log("deferred", actions=deferred)
@@ -343,7 +367,9 @@ class Session:
                         "t": run_t,
                     })
                 if schedule:
-                    if self._run_id != run_id:
+                    if timed_out:
+                        status = "timeout"
+                    elif self._run_id != run_id:
                         status = "stopped"
                     elif self.error:
                         status = "error"
@@ -357,6 +383,8 @@ class Session:
                         schedules.mark_outcome(schedule, status, error)
                     except (OSError, ValueError, KeyError):
                         pass
+                    if timed_out and log_file:
+                        g._log("timeout", schedule=schedule, limit=self.schedule_timeout)
                 self.status = "idle"
             if self.run_summaries and log_file and answer and not has_error:
                 threading.Thread(target=self._summarize, args=(run_id, prompt, answer, log_file), daemon=True).start()
@@ -376,15 +404,37 @@ class Session:
                 pass
             return True
 
+    def _on_timeout(self, run_id: int, schedule: str) -> None:
+        """Called when a scheduled run hits the wall-clock time limit."""
+        self._stop(timeout=True, expected_run_id=run_id)
+
     def stop(self) -> None:
+        """Stop the currently running request.
+
+        Note on cooperative interruption: agent.interrupt() is cooperative and only
+        takes effect between steps. A model call or tool that never returns will not be
+        killed. The session status remains 'running' until the worker thread actually
+        ends, preserving generic_tools module-global state from overlapping runs.
+        """
+        self._stop(timeout=False)
+
+    def _stop(self, timeout: bool = False, expected_run_id: int | None = None) -> None:
         with self._lock:
+            if expected_run_id is not None and (self._run_id != expected_run_id or self.status != "running"):
+                return
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            if timeout:
+                self._timed_out_run_id = self._run_id
             self._run_id += 1
         self.agent.interrupt()
         self.approvals.cancel()
 
     def configure(self, backend: str, model: str, max_steps: int, timeout: float,
-                  run_summaries: bool | None = None) -> bool:
-        """Switch backend, model, step limit, prompt timeout and run summaries between requests; refused while one runs."""
+                  run_summaries: bool | None = None,
+                  schedule_timeout: float | None = None) -> bool:
+        """Switch backend, model, step limit, prompt timeout, run summaries, and schedule timeout between requests; refused while one runs."""
         with self._lock:
             if self.status == "running":
                 return False
@@ -395,6 +445,8 @@ class Session:
             self.approvals.timeout = timeout
             if run_summaries is not None:
                 self.run_summaries = run_summaries
+            if schedule_timeout is not None:
+                self.schedule_timeout = float(schedule_timeout)
             return True
 
 
@@ -469,6 +521,8 @@ def feed(log_path: Path | None = None) -> list[str]:
             lines.append(f"{t} recall {e.get('query') or '(all)'} -> {e.get('result')}")
         elif kind in ("start", "final"):
             lines.append(f"{t} {kind}")
+        elif kind == "timeout":
+            lines.append(f"{t} timeout (schedule {e.get('schedule')}, limit {e.get('limit')}s)")
     return [g._redact(line) for line in lines]
 
 
