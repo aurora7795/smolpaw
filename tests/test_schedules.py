@@ -538,6 +538,10 @@ check("mark_outcome leaves last_run unchanged", after_outcome.get("last_run") ==
 check("mark_outcome leaves next_run unchanged", after_outcome.get("next_run") == next_run_before)
 check("mark_outcome stores stopped status", after_outcome.get("last_status") == "stopped" and after_outcome.get("last_error") == "")
 
+schedules.mark_outcome(sid_out, "timeout")
+after_timeout = [s for s in schedules.load() if s["id"] == sid_out][0]
+check("mark_outcome stores timeout status", after_timeout.get("last_status") == "timeout" and after_timeout.get("last_error") == "")
+
 # mark_ran sets "running" and clears a previous error
 schedules.mark_outcome(sid_out, "error", "RuntimeError")
 loaded_err = [s for s in schedules.load() if s["id"] == sid_out][0]

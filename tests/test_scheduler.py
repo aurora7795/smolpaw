@@ -85,10 +85,12 @@ models = itertools.count()
 T0 = datetime(2026, 10, 26, 12, 0)
 
 
-def make(agent: FakeAgent | None = None) -> tuple[web.Session, web.Approvals, FakeAgent]:
+def make(agent: FakeAgent | None = None,
+         schedule_timeout: float | None = None) -> tuple[web.Session, web.Approvals, FakeAgent]:
     agent = agent or FakeAgent()
     approvals = web.Approvals()
-    return web.Session(agent, "m", approvals, "lmstudio", 5, run_summaries=False), approvals, agent
+    return web.Session(agent, "m", approvals, "lmstudio", 5, run_summaries=False,
+                       schedule_timeout=schedule_timeout), approvals, agent
 
 
 def next_model(sess: web.Session) -> None:
@@ -666,6 +668,91 @@ try:
 finally:
     g.LOG_DIR = saved_log_dir
     g._secrets = lambda: []
+
+# --- scheduled run time limits (#53) -----------------------------------------------------------
+
+# 1. A scheduled run that hangs is stopped after the limit and the Session returns to idle;
+#    recorded status and log entry show the timeout; hooks are restored afterwards.
+reset_schedules()
+sess, approvals, agent = make(schedule_timeout=0.2)
+agent.gate = threading.Event()
+s_hang = schedules.add("hanging scheduled run", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+sched.tick()
+wait_running(sess)
+check("hanging run starts running", sess.status == "running")
+wait_idle(sess)
+check("a scheduled run that hangs is stopped after the limit and the Session returns to idle", sess.status == "idle")
+
+entry_timeout = schedules.load()[0]
+check("the recorded status shows the timeout",
+      entry_timeout.get("last_status") == "timeout" and entry_timeout.get("last_error") == "")
+check("prompt text never appears in status fields (timeout)",
+      s_hang["prompt"] not in (entry_timeout.get("last_status") or "")
+      and s_hang["prompt"] not in (entry_timeout.get("last_error") or ""))
+timeout_log_entries = [e for e in entries(g._log_file) if e.get("kind") == "timeout"]
+check("the log entry shows the timeout with schedule and limit",
+      len(timeout_log_entries) == 1
+      and timeout_log_entries[0].get("schedule") == s_hang["id"]
+      and timeout_log_entries[0].get("limit") == 0.2)
+check("the timeout log entry never includes prompt text",
+      s_hang["prompt"] not in json.dumps(timeout_log_entries[0]))
+check("hooks are restored afterwards", g.CONFIRM is interactive_confirm and g.ASK is interactive_ask)
+
+# 2. A run that finishes before the limit is unaffected, and its timer does not later stop the NEXT run
+reset_schedules()
+sess, approvals, agent = make()
+sched = Scheduler(sess, approvals, schedule_timeout=0.2, clock=lambda: T0 + timedelta(minutes=5))
+agent.gate = None
+agent.script = lambda a: "fast answer"
+s_fast = schedules.add("fast run", "*/5 * * * *", now=T0)
+next_model(sess)
+sched.tick()
+wait_idle(sess)
+check("a run that finishes before the limit is unaffected",
+      sess.answer == "fast answer" and schedules.load()[0].get("last_status") == "ok")
+
+# Start next run with slow gate, sleep longer than previous 0.2s timer, and verify it is not stopped
+agent.gate = threading.Event()
+next_model(sess)
+sess.start("next interactive run")
+wait_running(sess)
+time.sleep(0.35)
+check("its timer does not later stop the NEXT run", sess.status == "running" and not agent.stopped.is_set())
+agent.gate.set()
+wait_idle(sess)
+check("next run finishes cleanly after gate unblocks", sess.status == "idle")
+
+# 3. An interactive run with the same slow agent is NOT stopped
+sess, approvals, agent = make(schedule_timeout=0.2)
+agent.gate = threading.Event()
+next_model(sess)
+sess.start("interactive slow run")
+wait_running(sess)
+time.sleep(0.35)
+check("an interactive run with the same slow agent is NOT stopped",
+      sess.status == "running" and not agent.stopped.is_set())
+agent.gate.set()
+wait_idle(sess)
+check("interactive slow run finished when unblocked", sess.status == "idle")
+
+# 4. Limit 0 disables the timer
+reset_schedules()
+sess, approvals, agent = make(schedule_timeout=0.0)
+agent.gate = threading.Event()
+s_nolim = schedules.add("no limit run", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+sched.tick()
+wait_running(sess)
+time.sleep(0.35)
+check("limit 0 disables the timer: scheduled run not stopped",
+      sess.status == "running" and not agent.stopped.is_set())
+agent.gate.set()
+wait_idle(sess)
+check("limit 0 scheduled run finishes cleanly once unblocked",
+      sess.status == "idle" and schedules.load()[0].get("last_status") == "ok")
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
