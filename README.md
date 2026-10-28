@@ -249,13 +249,15 @@ minute   hour   day-of-month   month   day-of-week
 .venv/bin/python tests/test_scheduler.py
 .venv/bin/python tests/test_noninteractive.py
 .venv/bin/python tests/test_fake_mail.py
+.venv/bin/python tests/test_fake_web.py
 ```
 
-`test_generic_tools.py` checks the confirmation layer, path scoping, secret handling, tool messages and the web page's server. `test_schedules.py` covers the cron parser and schedule store, `test_scheduler.py` the scheduler thread, read-only scheduled runs and deferred approvals, `test_noninteractive.py` non-interactive (`-p`) and JSON-lines modes, exit codes, approvals declining, and error conditions, and `test_fake_mail.py` the local in-memory SMTP and IMAP test servers. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised, and [tests/fake_mail.py](tests/fake_mail.py) is an in-memory SMTP/IMAP server for testing mail tools without a real mailbox:
+`test_generic_tools.py` checks the confirmation layer, path scoping, secret handling, tool messages and the web page's server. `test_schedules.py` covers the cron parser and schedule store, `test_scheduler.py` the scheduler thread, read-only scheduled runs and deferred approvals, `test_noninteractive.py` non-interactive (`-p`) and JSON-lines modes, exit codes, approvals declining, and error conditions, `test_fake_mail.py` the local in-memory SMTP and IMAP test servers, and `test_fake_web.py` the fake web server and its search endpoint (page sizes, which facts show without a query, determinism across processes, and the real `fetch_page` and `web_search` against it). An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised, [tests/fake_mail.py](tests/fake_mail.py) is an in-memory SMTP/IMAP server for testing mail tools without a real mailbox, and [tests/fake_web.py](tests/fake_web.py) is a fake web server and SearXNG search endpoint for repeatable web-fetching tests:
 
 ```bash
 .venv/bin/python tests/fake_api.py 8765 [easy|hint|detail|paged]
 .venv/bin/python tests/fake_mail.py 8766 8767
+.venv/bin/python tests/fake_web.py 8768
 ```
 
 Repeatable runs and measurements:

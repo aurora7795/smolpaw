@@ -6,7 +6,7 @@ Build, run and workflow rules for this repository. Several rules are adapted fro
 
 * **Setup**: `./setup.sh` (creates `.venv` and installs smolagents), then `cp .env.example .env` and `cp notes.example.md notes.md`.
 * **Run**: `.venv/bin/python agent.py --model <lm-studio-model-id>` (see the README for flags).
-* **Tests**: `tests/test_generic_tools.py`, `tests/test_schedules.py`, `tests/test_scheduler.py`, `tests/test_noninteractive.py` and `tests/test_fake_mail.py`, each run with `.venv/bin/python` (all must pass before every commit).
+* **Tests**: `tests/test_generic_tools.py`, `tests/test_schedules.py`, `tests/test_scheduler.py`, `tests/test_noninteractive.py`, `tests/test_fake_mail.py` and `tests/test_fake_web.py`, each run with `.venv/bin/python` (all must pass before every commit).
 * **Web harness**: `.venv/bin/python web.py --backend ollama --host 0.0.0.0` answers `[y/N]` prompts from a browser (see the README).
 * **Invented test API**: `.venv/bin/python tests/fake_api.py 8765`.
 * **Export findings**: `.venv/bin/python tests/export_findings.py` bundles every run log in `logs/` into one Markdown report (see [TESTING.md](TESTING.md), for exploratory testing on a second machine).
