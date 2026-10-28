@@ -52,6 +52,10 @@ Build, run and workflow rules for this repository. Several rules are adapted fro
 * No placeholders, dummy text or TODOs in docs. Describe what actually exists. Report numbers as measured, including small sample sizes and caveats, and correct earlier figures if they were wrong.
 * A measurement in RESULTS.md is not finished until its script and fixture are committed to the repo (ideally `tests/eval.py` or a sibling using its conventions and JSON log shape). It needs a pass/fail check against real output (the file written, the API actually called), not just the model's final spoken answer, and it must run against an isolated workspace/notes, never the real `workspace/` or `notes.md`. A result nobody else can rerun from the repo doesn't go in RESULTS.md, however plausible the numbers look.
 
+## 5a. Delegated work
+
+* Work handed to antigravity is reviewed here before it lands on `main`, and recorded in [DELEGATION.md](DELEGATION.md). Before starting a review, note the session's context tokens (`get_usage`); when it finishes, add one row with the outcome, defects found, review cost and a verdict, and update the running totals. Do not delegate measurements, the confirmation layer or `agent.py`'s core flow (the filter is in that file).
+
 ## 6. Project-specific rules
 
 * The confirmation layer in `generic_tools.py` is a safety boundary. Do not weaken it (auto-allowed actions, path scoping, `.env` blocking, secret redaction) without the user's explicit say-so, and add a test for any change to it.
