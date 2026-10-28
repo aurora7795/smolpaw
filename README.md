@@ -173,6 +173,14 @@ An approved shell command runs with your user's permissions, so read the prompt,
 
 The model is told never to ask for a password, token or API key directly — a service's key belongs in `notes.md`/`.env`, where it is injected automatically and the model never sees it. It can still get asked anyway (small models do not always follow instructions), so the credential redaction above is the real backstop, not the instruction.
 
+### Reversible file overwrites (.undo/)
+
+Before an approved overwrite of an existing file (via `write_file` or `write_skill`), SmolPaw saves a copy of the old content to `.undo/` (gitignored in the repository root) as a safety net. Copies are private to your user (folder `0700`, files `0600`). Up to 10 copies (`UNDO_KEEP = 10`) are kept per original path, with older copies pruned automatically. Files exceeding 1 MB (`UNDO_MAX_BYTES = 1_000_000`), non-regular files, or unreadable files are not copied (and the report notes `not saved: too large` or `not saved: could not copy`). Secrets files (like `.env`) are blocked earlier and never copied.
+
+To restore a file by hand, copy the saved file from `.undo/` back to its original location (for example `cp .undo/<filename> <target>`).
+
+This safety net is not a replacement for the `[y/N]` prompt: always review proposed writes before approving them.
+
 ## Tools
 
 `run_shell`, `http_request`, `fetch_page` (fetch a web page and return text trimmed to match a query), `web_search` (search the web for up to 5 results with title, URL and snippet), `openapi_search` (search a service's OpenAPI spec for endpoints), `read_file`, `list_dir` (exact names, sizes and entry count of a folder), `write_file`, `ask_user`, `list_skills`, `read_skill`, `write_skill`, `remember` (save a fact to long-term memory with user approval), `recall` (search long-term memory for previously remembered facts). `http_request` turns ordinary web pages into plain text (the title and visible text, only the `<main>` part when a page has one, without scripts, menus or footers), so the model can read them. `fetch_page` trims large web pages to excerpts matching a query with surrounding context, so long pages do not flood memory. `remember` and `recall` provide on-demand memory without inlining stored facts into the prompt: facts stay in `memory.md` until the model asks for them. Pre-flight validation in `http_request` catches empty required query parameters (`term`, `query`, `q`) and empty-body writes before sending. When a service listed in `notes.md` answers with an HTML page, it warns instead, because that means a wrong API path (the service's web interface) and small models read those pages as answers. Requests carry a `SmolPaw` user agent, since some sites refuse requests without one.
