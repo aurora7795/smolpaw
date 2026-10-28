@@ -767,5 +767,210 @@ finally:
     else:
         os.environ["SCHEDULE_TIMEOUT"] = saved_env
 
+# --- scheduler robustness: summary in flight and failed mark_ran (#59) ---------
+
+# 1. While a summary is held in flight (use the existing call_model hook with a gate),
+#    a due schedule does not start; after the gate is released it starts on the next tick.
+reset_schedules()
+summary_gate = threading.Event()
+summary_started = threading.Event()
+
+
+def gated_summary_model(text: str) -> str:
+    summary_started.set()
+    summary_gate.wait(5)
+    return "gated summary"
+
+
+sess, approvals, agent = make()
+sess.run_summaries = True
+sess.call_model = gated_summary_model
+s_held1 = schedules.add("first schedule", "*/5 * * * *", now=T0)
+s_held2 = schedules.add("second schedule", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+
+sched.tick()
+wait_idle(sess)
+summary_started.wait(5)
+
+check("while a summary is held in flight, a due schedule does not start", sched.tick() is None)
+
+summary_gate.set()
+for _ in range(100):
+    if not getattr(sess, "summarizing", False):
+        break
+    time.sleep(0.01)
+
+next_model(sess)
+check("after the summary gate is released the schedule starts on the next tick",
+      sched.tick() == s_held2["id"])
+wait_idle(sess)
+
+# 2. A summary hung longer than the bound does not block the schedule forever
+#    (inject the bound or the clock so the test is fast).
+reset_schedules()
+hung_gate = threading.Event()
+hung_started = threading.Event()
+
+
+def hung_summary_model(text: str) -> str:
+    hung_started.set()
+    hung_gate.wait(5)
+    return "hung summary"
+
+
+sess, approvals, agent = make()
+sess.run_summaries = True
+sess.call_model = hung_summary_model
+s_hung1 = schedules.add("first schedule hung", "*/5 * * * *", now=T0)
+s_hung2 = schedules.add("second schedule hung", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+
+sched.tick()
+wait_idle(sess)
+hung_started.wait(5)
+
+t0_tick = sched.tick()
+clock["now"] += timedelta(seconds=121)
+t1_tick = sched.tick()
+check("a summary hung longer than the bound does not block the schedule forever",
+      t0_tick is None and t1_tick == s_hung2["id"])
+
+hung_gate.set()
+wait_idle(sess)
+
+# 3. The summarizing flag is cleared when the summary raises.
+reset_schedules()
+raise_gate = threading.Event()
+raise_started = threading.Event()
+
+
+def exploding_summary_model(text: str) -> str:
+    raise_started.set()
+    raise_gate.wait(5)
+    raise RuntimeError("summary exploded")
+
+
+sess, approvals, agent = make()
+sess.run_summaries = True
+sess.call_model = exploding_summary_model
+next_model(sess)
+sess.start("prompt for summary failure")
+wait_idle(sess)
+raise_started.wait(5)
+
+was_summarizing = getattr(sess, "summarizing", False)
+raise_gate.set()
+for _ in range(100):
+    if not getattr(sess, "summarizing", False):
+        break
+    time.sleep(0.01)
+
+is_summarizing = getattr(sess, "summarizing", True)
+check("the summarizing flag is cleared when the summary raises",
+      was_summarizing is True and is_summarizing is False)
+
+# 4. With schedules.mark_ran patched to raise: the first tick starts the run,
+#    a second tick after the run ends does not start it again, and a new slot
+#    (patch restored, next_run changed) does run.
+reset_schedules()
+sess, approvals, agent = make()
+s_fail_mr = schedules.add("task with failing mark_ran", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+
+real_mark_ran = schedules.mark_ran
+
+
+def broken_mark_ran(sid: str, now: datetime) -> None:
+    raise OSError("schedules.json disk full")
+
+
+schedules.mark_ran = broken_mark_ran
+try:
+    sched.tick()
+    wait_idle(sess)
+    first_tick_started = len(agent.inputs) == 1
+
+    sched.tick()
+    wait_idle(sess)
+    second_tick_skipped = len(agent.inputs) == 1
+finally:
+    schedules.mark_ran = real_mark_ran
+
+clock["now"] = T0 + timedelta(minutes=10)
+scheds = schedules.load()
+scheds[0]["next_run"] = clock["now"].isoformat()
+schedules._atomic_save(scheds)
+
+next_model(sess)
+sched.tick()
+wait_idle(sess)
+new_slot_ran = len(agent.inputs) == 2
+
+check("with mark_ran raising, the first tick starts the run", first_tick_started)
+check("a second tick after the run ends does not start it again", second_tick_skipped)
+check("and a new slot (patch restored, next_run changed) does run", new_slot_ran)
+
+# 5. The in-memory dict does not grow without bound.
+reset_schedules()
+sess, approvals, agent = make()
+s_bound = schedules.add("repeating task", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+
+for i in range(1, 6):
+    clock["now"] = T0 + timedelta(minutes=5 * i)
+    sched.tick()
+    wait_idle(sess)
+
+started_dict = getattr(sched, "_started", None)
+dict_bounded_across_runs = started_dict is not None and len(started_dict) <= 1
+
+capped_ok = False
+if started_dict is not None:
+    max_cap = getattr(sched, "_max_started", 1000)
+    for i in range(max_cap + 100):
+        sched._started[f"dummy_{i}"] = f"2026-10-28T00:{i:04d}"
+        if len(sched._started) > max_cap:
+            if hasattr(sched, "_prune_started"):
+                sched._prune_started()
+    capped_ok = len(sched._started) <= max_cap
+
+check("the in-memory dict does not grow without bound",
+      dict_bounded_across_runs and capped_ok)
+
+# 6. Review additions (#59). The cap itself: ids that exist with a matching next_run are kept by the first
+#    pass of _prune_started, so only the cap can trim them (the dummy ids in test 5 are dropped as unknown).
+reset_schedules()
+sess, approvals, agent = make()
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+sched._max_started = 3
+for i in range(6):
+    sc_i = schedules.add(f"cap schedule {i}", "*/5 * * * *", now=T0)
+    sched._started[sc_i["id"]] = sc_i["next_run"]
+sched._prune_started()
+check("the cap trims entries that are otherwise still valid", len(sched._started) == 3)
+
+# 7. A stale wait start does not cut a later summary's wait short: a summary is seen, an interactive
+#    run follows (ticks return early), then a new summary begins with a schedule due.
+reset_schedules()
+sess, approvals, agent = make()
+s_stale = schedules.add("stale wait schedule", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+sess._summarizing.set()
+sched.tick()  # first summary seen
+sess._summarizing.clear()
+sess.status = "running"  # an interactive run, ten minutes long
+clock["now"] = T0 + timedelta(minutes=15)
+sched.tick()
+sess.status = "idle"
+sess._summarizing.set()  # its summary has just begun
+started_during_fresh_summary = sched.tick()
+sess._summarizing.clear()
+check("a stale wait start does not let a schedule start during a fresh summary", started_during_fresh_summary is None)
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
