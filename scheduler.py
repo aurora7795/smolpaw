@@ -51,21 +51,17 @@ class Scheduler:
 
     def tick(self) -> str | None:
         """Start the oldest due schedule if nothing else is running; return its id, else None."""
+        summarizing = getattr(self.session, "summarizing", False)
+        if not summarizing:  # before the early return, or a stale start would cut the next summary's wait short
+            self._summary_since = None
         if self.session.status == "running" or self.approvals.pending:
             return None
         now = self.clock()
-        if getattr(self.session, "summarizing", False):
+        if summarizing:
             if self._summary_since is None:
                 self._summary_since = now
-            elapsed = (
-                (now - self._summary_since).total_seconds()
-                if isinstance(now, datetime) and isinstance(self._summary_since, datetime)
-                else float(now) - float(self._summary_since)
-            )
-            if elapsed < self.summary_wait:
+            if (now - self._summary_since).total_seconds() < self.summary_wait:
                 return None
-        else:
-            self._summary_since = None
 
         self._prune_started()
 

@@ -942,5 +942,35 @@ if started_dict is not None:
 check("the in-memory dict does not grow without bound",
       dict_bounded_across_runs and capped_ok)
 
+# 6. Review additions (#59). The cap itself: ids that exist with a matching next_run are kept by the first
+#    pass of _prune_started, so only the cap can trim them (the dummy ids in test 5 are dropped as unknown).
+reset_schedules()
+sess, approvals, agent = make()
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+sched._max_started = 3
+for i in range(6):
+    sc_i = schedules.add(f"cap schedule {i}", "*/5 * * * *", now=T0)
+    sched._started[sc_i["id"]] = sc_i["next_run"]
+sched._prune_started()
+check("the cap trims entries that are otherwise still valid", len(sched._started) == 3)
+
+# 7. A stale wait start does not cut a later summary's wait short: a summary is seen, an interactive
+#    run follows (ticks return early), then a new summary begins with a schedule due.
+reset_schedules()
+sess, approvals, agent = make()
+s_stale = schedules.add("stale wait schedule", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+sess._summarizing.set()
+sched.tick()  # first summary seen
+sess._summarizing.clear()
+sess.status = "running"  # an interactive run, ten minutes long
+clock["now"] = T0 + timedelta(minutes=15)
+sched.tick()
+sess.status = "idle"
+sess._summarizing.set()  # its summary has just begun
+started_during_fresh_summary = sched.tick()
+sess._summarizing.clear()
+check("a stale wait start does not let a schedule start during a fresh summary", started_during_fresh_summary is None)
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)
