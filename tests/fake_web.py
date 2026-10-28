@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 HOST = "127.0.0.1"
-DEFAULT_PORT = 8766
+DEFAULT_PORT = 8768  # 8766 and 8767 are fake_mail.py's SMTP and IMAP ports
 
 # Fixed word list containing exclusively letters (no digits 0-9).
 FILLER_WORDS = [
@@ -208,11 +208,11 @@ def _search_pages(query: str, base_url: str) -> dict:
     results = []
     for _score, slug in scored:
         title = PAGE_SPECS[slug]["title"]
-        first_fact = PAGE_SPECS[slug]["facts"][0][2]
         results.append({
             "title": title,
             "url": f"{base_url}/pages/{slug}",
-            "content": f"{title}. {first_fact}",
+            # Never a fact: a task must fetch the page to answer, not read it off the search result.
+            "content": f"{title}. Reference page with background, measurements and notes.",
         })
     return {"results": results}
 
@@ -279,7 +279,7 @@ def start(port: int = 0) -> tuple[HTTPServer, str]:
 if __name__ == "__main__":
     port_arg = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
     server_inst = ThreadedHTTPServer((HOST, port_arg), FakeWebHandler)
-    print(f"FakeWeb running on http://{HOST}:{port_arg}. Press Ctrl-C to stop.", flush=True)
+    print(f"FakeWeb running on http://{HOST}:{server_inst.server_address[1]}. Press Ctrl-C to stop.", flush=True)
     try:
         server_inst.serve_forever()
     except KeyboardInterrupt:

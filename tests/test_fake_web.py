@@ -5,6 +5,8 @@ Run with: .venv/bin/python tests/test_fake_web.py
 Tests must not write to the real workspace/, notes.md or logs/.
 """
 
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -13,14 +15,14 @@ import tempfile
 from pathlib import Path
 from urllib.request import urlopen
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
 import generic_tools as g
 from tests.fake_web import (
     FACT_SENTENCES,
     FACTS,
-    PAGE_TITLES,
-    PAGE_SPECS,
+    PAGE_HTML,
     start,
 )
 
@@ -98,8 +100,8 @@ try:
         top_res = g.fetch_page(page_url, "")
         check(f"fetch_page {s} empty query is long (near 2500 char cap)", len(top_res) >= 2500)
         facts_in_top = [f["value"] in top_res for f in FACTS[s]]
-        check(f"fetch_page {s} empty query does NOT contain all six fact values", not all(facts_in_top))
-        check(f"fetch_page {s} empty query contains at least one fact value", any(facts_in_top))
+        check(f"fetch_page {s} empty query shows exactly the first three facts (a task needs a query for the rest)",
+              facts_in_top == [True, True, True, False, False, False])
 
         # Query for each fact finds its value
         for f in FACTS[s]:
@@ -134,6 +136,12 @@ try:
                     break
             check(f"web_search for {s} facts places {s} as the best match first", first_url == f"{base_url}/pages/{s}")
 
+        raw = json.load(urlopen(f"{base_url}/search?q=Tarn+Alpine+Refuge&format=json"))
+        check("search breaks ties by page order (tarn, then orrin, vale)",
+              [r["url"].rsplit("/", 1)[1] for r in raw["results"]] == ["tarn", "orrin", "vale"])
+        every_value = [f["value"] for s in slugs for f in FACTS[s]]
+        check("no search result contains a fact value (a page must be fetched to answer)",
+              not any(v in json.dumps(raw) for v in every_value))
     finally:
         if saved_provider is not None:
             os.environ["SMOLPAW_SEARCH_PROVIDER"] = saved_provider
@@ -161,6 +169,14 @@ try:
         with urlopen(f"{base_url}/search?{q_test}") as resp:
             check(f"search endpoint does not crash on '{q_test[:25]}...'", resp.status == 200)
 
+    # Same bytes in other processes, whatever the hash seed (the pages are built at import time)
+    here = hashlib.sha256("".join(PAGE_HTML[k] for k in sorted(PAGE_HTML)).encode()).hexdigest()
+    probe = ("import sys, hashlib; sys.path.insert(0, r'%s'); from tests.fake_web import PAGE_HTML as P; "
+             "print(hashlib.sha256(''.join(P[k] for k in sorted(P)).encode()).hexdigest())" % ROOT)
+    other = {seed: subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                                  env={**os.environ, "PYTHONHASHSEED": seed}).stdout.strip() for seed in ("1", "999")}
+    check("page bytes are identical in other processes with different hash seeds", set(other.values()) == {here})
+
     # --- Clean shutdown ------------------------------------------------------------
 
     server.shutdown()
@@ -170,14 +186,17 @@ try:
     # --- CLI invocation check ------------------------------------------------------
 
     proc = subprocess.Popen(
-        [sys.executable, "-u", "tests/fake_web.py", "0"],
+        [sys.executable, "-u", str(ROOT / "tests" / "fake_web.py"), "0"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     try:
         banner = proc.stdout.readline()
-        check("CLI fake_web.py starts and announces port", "FakeWeb running on http://127.0.0.1:" in banner)
+        cli_port = int(re.search(r"127\.0\.0\.1:(\d+)", banner).group(1)) if "127.0.0.1:" in banner else 0
+        check("CLI fake_web.py announces the port it really bound", cli_port > 0)
+        with urlopen(f"http://127.0.0.1:{cli_port}/pages/orrin") as resp:
+            check("CLI fake_web.py serves a page on that port", resp.status == 200)
     finally:
         proc.terminate()
         proc.wait(timeout=2.0)
