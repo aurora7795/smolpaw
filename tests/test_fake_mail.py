@@ -182,6 +182,18 @@ with FakeMailServer() as server:
     typ, dat = imap.search(None, "FROM", '"nonexistent"')
     check("IMAP SEARCH with no matches returns empty list", dat == [b""])
 
+    for label, crit in (("NOT SEEN", ("NOT", "SEEN")), ("SINCE", ("SINCE", "1-Jan-2020")),
+                        ("OR", ("OR", "SEEN", "UNSEEN")), ("a bare FROM", ("FROM",)),
+                        ("a bad criterion after a mismatch", ("FROM", "nobody", "LARGER", "5"))):
+        try:
+            typ, dat = imap.search(None, *crit)
+            rejected = typ != "OK"
+        except imaplib.IMAP4.error:
+            rejected = True
+        check(f"IMAP SEARCH {label} is rejected with BAD instead of a wrong result", rejected)
+    typ, dat = imap.search(None, "UNSEEN", "FROM", '"bob"')
+    check("IMAP SEARCH still works after a rejected search", typ == "OK")
+
     # 6. FETCH body text and verify injection text verbatim
     typ, dat = imap.fetch("2", "(BODY[TEXT])")
     check("IMAP FETCH BODY[TEXT] succeeds", typ == "OK")

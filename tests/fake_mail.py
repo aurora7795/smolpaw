@@ -121,59 +121,38 @@ def _parse_msg_set(spec: str, max_count: int) -> list[int]:
 
 
 def _match_search(msg: ImapMessage, tokens: list[str]) -> bool:
-    """Check if an IMAP message matches all search tokens."""
+    """Check if an IMAP message matches all search tokens.
+
+    Raises ValueError for an unsupported keyword or a missing argument, so the
+    server can answer BAD instead of silently returning a wrong result.
+    """
+    text_fields = {
+        "FROM": lambda m: m.sender,
+        "TO": lambda m: m.to,
+        "SUBJECT": lambda m: m.subject,
+        "BODY": lambda m: m.body,
+        "TEXT": lambda m: m.body + "\n" + m.raw.decode("utf-8", "replace"),
+    }
+    matched = True
     i = 0
     while i < len(tokens):
         token = tokens[i].upper()
         if token == "ALL":
             i += 1
-        elif token == "UNSEEN":
-            if r"\Seen" in msg.flags:
-                return False
+        elif token in ("SEEN", "UNSEEN"):
+            if (r"\Seen" in msg.flags) != (token == "SEEN"):
+                matched = False
             i += 1
-        elif token == "SEEN":
-            if r"\Seen" not in msg.flags:
-                return False
-            i += 1
-        elif token == "FROM":
+        elif token in text_fields:
             if i + 1 >= len(tokens):
-                return False
-            query = tokens[i + 1].strip('"').lower()
-            if query not in msg.sender.lower():
-                return False
-            i += 2
-        elif token == "TO":
-            if i + 1 >= len(tokens):
-                return False
-            query = tokens[i + 1].strip('"').lower()
-            if query not in msg.to.lower():
-                return False
-            i += 2
-        elif token == "SUBJECT":
-            if i + 1 >= len(tokens):
-                return False
-            query = tokens[i + 1].strip('"').lower()
-            if query not in msg.subject.lower():
-                return False
-            i += 2
-        elif token == "BODY":
-            if i + 1 >= len(tokens):
-                return False
-            query = tokens[i + 1].strip('"').lower()
-            if query not in msg.body.lower():
-                return False
-            i += 2
-        elif token == "TEXT":
-            if i + 1 >= len(tokens):
-                return False
-            query = tokens[i + 1].strip('"').lower()
-            raw_text = msg.raw.decode("utf-8", "replace").lower()
-            if query not in msg.body.lower() and query not in raw_text:
-                return False
+                raise ValueError(f"{token} needs an argument")
+            if tokens[i + 1].strip('"').lower() not in text_fields[token](msg).lower():
+                matched = False
             i += 2
         else:
-            i += 1
-    return True
+            raise ValueError(f"unsupported search criterion {tokens[i]}")
+        # keep scanning after a mismatch so bad criteria later in the query still raise
+    return matched
 
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -410,7 +389,11 @@ class ImapHandler(socketserver.StreamRequestHandler):
                         tokens = search_str.replace("(", " ").replace(")", " ").split()
 
                     msgs = self.server.mail_server.mailboxes[selected_mailbox]
-                    matches = [idx + 1 for idx, m in enumerate(msgs) if _match_search(m, tokens)]
+                    try:
+                        matches = [idx + 1 for idx, m in enumerate(msgs) if _match_search(m, tokens)]
+                    except ValueError as exc:
+                        self.wfile.write(f"{tag} BAD {exc}\r\n".encode())
+                        continue
                     if matches:
                         res_str = " ".join(str(m) for m in matches)
                         self.wfile.write(f"* SEARCH {res_str}\r\n".encode())
