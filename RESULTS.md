@@ -303,6 +303,35 @@ Does the runtime skip re-reading the start of a prompt that has not changed? Ran
 
 Caveats: one Mac, three repeats per row and three agent runs per cell. Ollama ran with the context its app is set to (32,768), not the 16,384 of the earlier Ollama comparison; LM Studio was loaded at 32,768 to match. Prompts are random words, not real text, and a single request at a time. The agent's `gemma` rows say nothing either way about caching. Memory use was not measured. Raw numbers are in `logs/prefix-cache-*.json` (gitignored); rerun with `tests/prefix_cache.py` (see its docstring).
 
+## What a changed tool block or edited history costs to re-read (#69, #73, `tests/prefix_cache_tools.py`, 2026-10-28)
+
+#29 showed a changed first line costs a full re-read. This asks the question tool routing (#69) and snipping old results (#73) depend on: when the tool block shrinks, or an old tool result is shortened, how much of the prompt is read again? The requests are the real ones (SmolPaw's system prompt and 15 tool schemas, isolated notes and skills, as in `tests/first_call_tokens.py`), followed by one tool call with a 3,000-token result of random words and one small tool exchange, so every request ends on a tool result as an agent step does. About 7,000 to 7,500 tokens in all, one output token asked for, 3 repeats per cell, each repeat starting with a fresh first line so nothing is cached. "Subset" is the 6 file tools (what a routed category would send). Medians, seconds; the three repeats agreed within about 1.5s, except Ollama Qwen's slow calls, which ranged from 22 to 33s.
+
+| Condition | Ollama Qwen | Ollama Gemma | LM Studio Qwen | LM Studio Gemma |
+|---|---|---|---|---|
+| cold (all tools, nothing cached) | 31.7 | 10.6 | 33.7 | 11.4 |
+| warm (same prefix, different last exchange) | 25.7 | 10.6 | 6.3 | 0.4 |
+| warm2 | 0.6 | 0.2 | 6.3 | 0.4 |
+| **subset (tool block shrinks, same history)** | **27.4** | **9.4** | **29.2** | **5.5** |
+| subset again | 25.4 | 5.2 | 0.8 | 0.6 |
+| subset, third call | 0.6 | 0.2 | 0.8 | 0.6 |
+| all tools again (same history as before) | 0.7 | 0.2 | 6.3 | 0.4 |
+| **snipped (old result cut to first half plus last quarter)** | **22.3** | **5.4** | **12.4** | **1.7** |
+| snipped again | 4.1 | 1.3 | 0.8 | 0.5 |
+| snipped, third call | 0.6 | 0.2 | 0.8 | 0.5 |
+
+Ollama also reports tokens read again (prompt tokens minus `cached_tokens`): on the subset call 6,330 of 6,496 tokens on Qwen and 6,185 of 6,185 on Gemma; on the snipped call 5,002 of 6,722 on Qwen and 3,485 of 6,322 on Gemma.
+
+- **Changing the tool block re-reads nearly the whole prompt, history included.** On LM Studio the subset call took 29.2s on Qwen against 0.8s once cached (cold: 33.7s), and 5.5s on Gemma against 0.6s (cold: 11.4s). Ollama read almost every token again. So the tool block is early enough in the prompt that anything after it, including the conversation, is read again.
+- **After that the new tool set is as cheap as the old one.** LM Studio from the second call, Ollama from the third, the same warm-up #29 found for any new prefix. Ollama also kept the old full-tool prefix: going back to all tools cost 0.2 to 0.7s. LM Studio Gemma did the same (0.4s). LM Studio Qwen took 6.3s, the same as its plain warm calls here, so that is a trait of Qwen on LM Studio with this prompt, not an effect of the tool change.
+- **Editing an old tool result costs a re-read from the edit point onward, not the whole prompt.** LM Studio: 12.4s on Qwen and 1.7s on Gemma against 33.7s and 11.4s cold. Ollama's first snipped call is mixed up with its warm-up (22.3s on Qwen, 5.4s on Gemma); the second call was 4.1s and 1.3s.
+
+What this means for #69: a router that picks a category and then widens the tool set after the first tool call (SmallCode's design, see the note on the issue), or one that switches category between requests of a thread, makes the next call read the whole prompt again. At the cold reading speeds above that is worked out as about 20 to 33s on Qwen and 7 to 12s on Gemma for a 4.4K to 7.4K prompt, against the first-call saving of 5 to 8s and 1.4 to 2.1s (phase 0 note on #69). A router that never widens avoids that cost but cannot recover from a wrong pick except by another full re-read. Either way the routing is a net loss on these models once there is any history, and nothing was built.
+
+What this means for #73: the speed case is weaker than the issue assumed. Old tokens that are already cached cost almost nothing to re-send (0.2 to 0.8s whatever the size), so snipping saves little time on a warm run; it costs one re-read from the edit point, and the saving remains on a cold start and in the context window. This is worked out from the figures above, not measured on a snipping implementation.
+
+Caveats: 3 repeats; the old result is random words (a real file or page might tokenise differently); the prompt is longer than a typical early agent step because of the 3,000-token result; Ollama ran at 32K context and LM Studio at 16K; one output token is requested, so generation and thinking time are not measured; `cached_tokens` is reported by Ollama only, so LM Studio's reuse is inferred from the time; the subset is one hand-picked category, not a trained router.
+
 ## Hand-written Radarr tools (baseline, Bonsai + ToolCallingAgent)
 
 | Stage | Result |
