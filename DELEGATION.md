@@ -34,13 +34,14 @@ The filter used so far. Safe: mechanical, self-contained, testable tasks with a 
 | [#25](https://github.com/aurora7795/smolpaw/issues/25) | notes.md facts | scoped fix | Token estimate was an unmeasured guess (it landed close). | unmeasured | not recorded | yes |
 | [#27](https://github.com/aurora7795/smolpaw/issues/27) | new tools (`remember`, `recall`) | scoped fix | The "token budget" test measured a hand-built schema, hiding a real overrun (179 to 182 real tokens against the roughly 147 claimed and the 100 to 150 budget). Wrong number. | unmeasured | not recorded | yes: the budget check caught a real problem |
 | [#28](https://github.com/aurora7795/smolpaw/issues/28) | new tool (`fetch_page`) | scoped fix | Dropped the wrong-API-path HTML warning that `http_request` has. Missed requirement. | unmeasured | not recorded | yes |
+| [#53](https://github.com/aurora7795/smolpaw/issues/53) | scheduler feature (wall-clock limit) | scoped fix | Robustness gap: `SCHEDULE_TIMEOUT=inf` made the timer thread raise `OverflowError` (no limit, no message); negative and `nan` silently disabled the limit. No correctness bug in the stop path; all five suites passed, scheduler suite stable over 6 runs. | 7,694 tokens (109,550 to 117,244), partial: the baseline was read after the diff had already been loaded, so this undercounts. The figure covers the tests, the edge-case probes, the fix and the merge. | 9ab1b16 | yes: close to mergeable as delivered; one small fix and a test. |
 
-Rows above were written from memory notes after the fact, so their cost and fix-commit columns are blank. Rows from here on are filled in as the review happens.
+Rows for #3 to #28 were written from memory notes after the fact, so their cost and fix-commit columns are blank. Rows from #53 on are filled in as the review happens.
 
 ## Running totals
 
 Update after each row.
 
-- Delegated issues logged: 4
-- Clean: 0, scoped fix: 3, rework: 0, rejected: 1
-- Verdict yes: 3, no: 1, unclear: 0
+- Delegated issues logged: 5
+- Clean: 0, scoped fix: 4, rework: 0, rejected: 1
+- Verdict yes: 4, no: 1, unclear: 0
