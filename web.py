@@ -253,6 +253,8 @@ class Session:
         self._run_id = 0
         self._timer: threading.Timer | None = None
         self._timed_out_run_id: int | None = None
+        self._summarizing = threading.Event()
+        self._summarizing_run_id: int | None = None
         self.thread: str | None = None  # id of the current chat; follow-ups share it
         self.history: list[tuple[str, str]] = []  # finished turns before the current prompt/answer
         self._scheduled_chat = False  # the current thread belongs to a scheduled run; interactive runs must not join it
@@ -300,24 +302,34 @@ class Session:
         threading.Thread(target=self._run, args=(prompt, run_id, context, self.thread, schedule), daemon=True).start()
         return True
 
+    @property
+    def summarizing(self) -> bool:
+        return self._summarizing.is_set()
+
     def _default_call_model(self, text: str) -> str:
         return call_summary_model(self.agent.model, text)
 
     def _summarize(self, run_id: int, prompt: str, answer: str, log_file: Path) -> None:
-        with self._lock:
-            if self._run_id != run_id or self.status == "running":
-                return
-        caller = self.call_model or self._default_call_model
-        summary = summarize_run(prompt, answer, caller)
-        with self._lock:
-            if self._run_id != run_id or self.status == "running":
-                return
-        if summary:
-            try:
-                sidecar = log_file.with_name(f"{log_file.stem}.summary.txt")
-                sidecar.write_text(summary)
-            except OSError:
-                pass
+        try:
+            with self._lock:
+                if self._run_id != run_id or self.status == "running":
+                    return
+            caller = self.call_model or self._default_call_model
+            summary = summarize_run(prompt, answer, caller)
+            with self._lock:
+                if self._run_id != run_id or self.status == "running":
+                    return
+            if summary:
+                try:
+                    sidecar = log_file.with_name(f"{log_file.stem}.summary.txt")
+                    sidecar.write_text(summary)
+                except OSError:
+                    pass
+        finally:
+            with self._lock:
+                if self._summarizing_run_id == run_id:
+                    self._summarizing_run_id = None
+                    self._summarizing.clear()
 
     def _run(self, prompt: str, run_id: int, context: str = "", thread: str | None = None,
              schedule: str | None = None) -> None:
@@ -385,8 +397,12 @@ class Session:
                         pass
                     if timed_out and log_file:
                         g._log("timeout", schedule=schedule, limit=self.schedule_timeout)
+                will_summarize = bool(self.run_summaries and log_file and answer and not has_error)
+                if will_summarize:
+                    self._summarizing_run_id = run_id
+                    self._summarizing.set()
                 self.status = "idle"
-            if self.run_summaries and log_file and answer and not has_error:
+            if will_summarize:
                 threading.Thread(target=self._summarize, args=(run_id, prompt, answer, log_file), daemon=True).start()
 
     def dismiss_approval(self, id: str) -> bool:

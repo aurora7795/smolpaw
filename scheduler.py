@@ -14,32 +14,72 @@ from datetime import datetime
 import schedules
 
 POLL_SECONDS = 30.0
+SUMMARY_WAIT_SECONDS = 120.0
+MAX_STARTED = 1000
 
 
 class Scheduler:
     def __init__(self, session, approvals, poll: float = POLL_SECONDS,
                  clock: Callable[[], datetime] = datetime.now,
-                 schedule_timeout: float | None = None):
+                 schedule_timeout: float | None = None,
+                 summary_wait: float = SUMMARY_WAIT_SECONDS):
         self.session, self.approvals = session, approvals
         self.poll, self.clock = poll, clock
+        self.summary_wait = float(summary_wait)
         self._stop = threading.Event()
         self._last_error = ""
+        self._summary_since: datetime | None = None
+        self._started: dict[str, str] = {}
+        self._max_started: int = MAX_STARTED
         if schedule_timeout is not None:
             self.session.schedule_timeout = float(schedule_timeout)
+
+    @property
+    def started(self) -> dict[str, str]:
+        return self._started
+
+    def _prune_started(self) -> None:
+        try:
+            current = {s["id"]: s.get("next_run") for s in schedules.load() if isinstance(s, dict) and "id" in s}
+            for sid, next_run in list(self._started.items()):
+                if sid not in current or current[sid] != next_run:
+                    del self._started[sid]
+        except Exception:
+            pass
+        while len(self._started) > self._max_started:
+            self._started.pop(next(iter(self._started)))
 
     def tick(self) -> str | None:
         """Start the oldest due schedule if nothing else is running; return its id, else None."""
         if self.session.status == "running" or self.approvals.pending:
             return None
         now = self.clock()
+        if getattr(self.session, "summarizing", False):
+            if self._summary_since is None:
+                self._summary_since = now
+            elapsed = (
+                (now - self._summary_since).total_seconds()
+                if isinstance(now, datetime) and isinstance(self._summary_since, datetime)
+                else float(now) - float(self._summary_since)
+            )
+            if elapsed < self.summary_wait:
+                return None
+        else:
+            self._summary_since = None
+
+        self._prune_started()
+
         try:
             due = sorted(schedules.due(now), key=lambda s: datetime.fromisoformat(s["next_run"]))
+            due = [s for s in due if self._started.get(s["id"]) != s["next_run"]]
             if not due:
                 self._last_error = ""
                 return None
             chosen = due[0]
             if not self.session.start(chosen["prompt"], schedule=chosen["id"]):
                 return None  # an interactive run got in first; the schedule stays due
+            self._started[chosen["id"]] = chosen["next_run"]
+            self._prune_started()
             schedules.mark_ran(chosen["id"], now)  # even if the run later errors, so it does not retry every tick
             self._last_error = ""
             return chosen["id"]
