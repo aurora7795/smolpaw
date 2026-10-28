@@ -362,6 +362,134 @@ start = entries(g._log_file)[0]
 check("the schedule field appears in a scheduled run's start entry",
       start["kind"] == "start" and start["schedule"] == s5["id"] and "thread" in start)
 
+# --- scheduled run outcomes (#54) -------------------------------------------------------------
+
+# 1. Scheduled run that finishes normally ends "ok"
+reset_schedules()
+sess, approvals, agent = make()
+agent.script = lambda a: "done normal"
+s_ok = schedules.add("normal finish prompt", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+sched.tick()
+wait_idle(sess)
+entry_ok = schedules.load()[0]
+check("scheduled run that finishes normally ends 'ok'",
+      entry_ok.get("last_status") == "ok" and entry_ok.get("last_error") == "")
+check("prompt text never appears in status fields (ok)",
+      s_ok["prompt"] not in (entry_ok.get("last_status") or "")
+      and s_ok["prompt"] not in (entry_ok.get("last_error") or ""))
+
+# 2. Fake agent raises ends "error" with last_error equal to exception class name and no secret
+reset_schedules()
+sess, approvals, agent = make()
+secret_token_in_err = "SUPER_SECRET_LEAK_TEST_TOKEN_XYZ987"
+
+
+def error_with_secret(a):
+    raise ValueError(f"failure with secret: {secret_token_in_err}")
+
+
+agent.script = error_with_secret
+s_err = schedules.add("error prompt with secret", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+sched.tick()
+wait_idle(sess)
+entry_err = schedules.load()[0]
+check("scheduled run whose fake agent raises ends 'error'",
+      entry_err.get("last_status") == "error")
+check("last_error is the exception class name",
+      entry_err.get("last_error") == "ValueError")
+raw_schedules_json = schedules.PATH.read_text(encoding="utf-8")
+check("exception message with secret never appears in schedules.json",
+      secret_token_in_err not in raw_schedules_json)
+check("prompt text never appears in status fields (error)",
+      s_err["prompt"] not in (entry_err.get("last_status") or "")
+      and s_err["prompt"] not in (entry_err.get("last_error") or ""))
+
+# 3. Scheduled run that is stopped ends "stopped"
+reset_schedules()
+sess, approvals, agent = make()
+in_stop_tool = threading.Event()
+release_stopped = threading.Event()
+
+
+def stopped_agent(a):
+    in_stop_tool.set()
+    release_stopped.wait(5)
+    raise AgentError("Agent interrupted.", type("L", (), {"log_error": lambda *a: None})())
+
+
+agent.script = stopped_agent
+s_stop = schedules.add("stopped prompt", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+sched.tick()
+in_stop_tool.wait(5)
+sess.stop()
+release_stopped.set()
+wait_idle(sess)
+entry_stop = schedules.load()[0]
+check("scheduled run that is stopped ends 'stopped'",
+      entry_stop.get("last_status") == "stopped" and entry_stop.get("last_error") == "")
+check("prompt text never appears in status fields (stopped)",
+      s_stop["prompt"] not in (entry_stop.get("last_status") or "")
+      and s_stop["prompt"] not in (entry_stop.get("last_error") or ""))
+
+# 4. Scheduled run that defers an action ends "needs_approval"
+reset_schedules()
+sess, approvals, agent = make()
+
+
+def deferring_agent(a):
+    g.write_file("deferred_file.txt", "content")
+    return "finished work"
+
+
+agent.script = deferring_agent
+s_defer = schedules.add("deferring prompt", "*/5 * * * *", now=T0)
+sched, clock = scheduler_for(sess, approvals, T0 + timedelta(minutes=5))
+next_model(sess)
+sched.tick()
+wait_idle(sess)
+entry_defer = schedules.load()[0]
+check("scheduled run that defers an action ends 'needs_approval'",
+      entry_defer.get("last_status") == "needs_approval" and entry_defer.get("last_error") == "")
+check("prompt text never appears in status fields (needs_approval)",
+      s_defer["prompt"] not in (entry_defer.get("last_status") or "")
+      and s_defer["prompt"] not in (entry_defer.get("last_error") or ""))
+
+# 5. Failing mark_outcome still leaves Session status "idle"
+reset_schedules()
+sess, approvals, agent = make()
+agent.script = lambda a: "ok"
+s_fail = schedules.add("fail corrupt prompt", "*/5 * * * *", now=T0)
+schedules.PATH.write_text("{corrupt json")
+next_model(sess)
+sess.start("fail corrupt prompt", schedule=s_fail["id"])
+wait_idle(sess)
+check("failing mark_outcome (corrupt file) still leaves Session status idle", sess.status == "idle")
+
+reset_schedules()
+ro_dir = tmp / "ro_schedules"
+ro_dir.mkdir(exist_ok=True)
+ro_file = ro_dir / "schedules.json"
+saved_sched_path = schedules.PATH
+schedules.PATH = ro_file
+try:
+    s_fail2 = schedules.add("fail unwritable prompt", "*/5 * * * *", now=T0)
+    ro_dir.chmod(0o555)
+    sess, approvals, agent = make()
+    agent.script = lambda a: "ok"
+    next_model(sess)
+    sess.start("fail unwritable prompt", schedule=s_fail2["id"])
+    wait_idle(sess)
+    check("failing mark_outcome (unwritable directory) still leaves Session status idle", sess.status == "idle")
+finally:
+    ro_dir.chmod(0o755)
+    schedules.PATH = saved_sched_path
+
 # --- deferred approvals (#55) -----------------------------------------------------------------
 
 deferred_tmp = tmp / "deferred_logs"
