@@ -11,6 +11,7 @@ import secrets
 import select
 import sys
 import threading
+import time
 from pathlib import Path
 
 from smolagents import CodeAgent, OpenAIServerModel, ToolCallingAgent
@@ -48,6 +49,8 @@ RADARR_INSTRUCTIONS = (
     "If a tool says NOT ADDED or DRY RUN, say the movie was not added. "
     "Never claim success unless add_movie returned 'Added'."
 )
+
+NO_ANSWER = "(no answer from the user in time. Do not ask again; make your best attempt.)"
 
 
 # Markers for history messages smolagents generated itself, so text a model wrote is never converted.
@@ -187,7 +190,8 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
 
 
 def run_request(agent, model: str, toolset: str, user_input: str, thread: str | None = None,
-                context: str = "", schedule: str | None = None) -> tuple[str, str]:
+                context: str = "", schedule: str | None = None,
+                log_stream: object = sys.stdout) -> tuple[str, str]:
     """Run one request; return the answer and the harness's own account of what changed.
 
     `context` (earlier turns of the same chat) is shown to the model but not logged; `thread` and `schedule` tag the log.
@@ -196,7 +200,7 @@ def run_request(agent, model: str, toolset: str, user_input: str, thread: str | 
     generic_tools.ACTIONS.clear()
     generic_tools.LAST_RESULT = ""
     if toolset == "generic":
-        print(f"[log] {generic_tools.start_log(model, user_input, thread, schedule)}")
+        print(f"[log] {generic_tools.start_log(model, user_input, thread, schedule)}", file=log_stream)
     agent.stall_reason = None
     try:
         response = agent.run(context + user_input)
@@ -206,7 +210,8 @@ def run_request(agent, model: str, toolset: str, user_input: str, thread: str | 
         last = generic_tools.LAST_RESULT if toolset == "generic" else radarr_tools.LAST_ACTION
         response = f"STOPPED EARLY: {agent.stall_reason}. Last tool result -> {last or '(no tool results)'}"
     hit_cap = any(isinstance(getattr(step, "error", None), AgentMaxStepsError)
-                  for step in agent.memory.steps)
+                  for step in getattr(getattr(agent, "memory", None), "steps", []))
+    agent.hit_step_limit = hit_cap
     if hit_cap and toolset == "generic":
         response = (f"STEP LIMIT REACHED: the agent did not finish. Its answer, if any: "
                     f"{str(response).strip() or '(none)'}\nLast tool result -> "
@@ -217,6 +222,93 @@ def run_request(agent, model: str, toolset: str, user_input: str, thread: str | 
         actions = "\n  ".join(generic_tools.ACTIONS) or "no changes made"
         return str(response), f"[Harness says]\n  {actions}"
     return str(response), f"[Radarr says] {radarr_tools.LAST_ACTION}" if radarr_tools.LAST_ACTION else ""
+
+
+def run_noninteractive(agent, model: str, prompt: str, toolset: str = "generic",
+                       json_mode: bool = False, out_stream=sys.stdout,
+                       err_stream=sys.stderr) -> int:
+    """Run one request non-interactively and exit. Approvals are declined; ask_user gets NO_ANSWER."""
+    if toolset != "generic":
+        err_stream.write("Error: -p is only supported with generic tools (not radarr).\n")
+        err_stream.flush()
+        return 1
+
+    saved_hooks = generic_tools.CONFIRM, generic_tools.ASK
+    declined: list[str] = []
+
+    def confirm_decline(desc: str) -> bool:
+        declined.append(generic_tools._redact(desc))
+        return False
+
+    generic_tools.CONFIRM = confirm_decline
+    generic_tools.ASK = lambda question: NO_ANSWER
+
+    stop_tail = threading.Event()
+    tail_thread = None
+
+    if json_mode:
+        generic_tools._log_file = None
+
+        def _tail():
+            log_file = None
+            while not stop_tail.is_set():
+                log_file = generic_tools._log_file
+                if log_file and log_file.exists():
+                    break
+                time.sleep(0.005)
+            if not log_file:
+                log_file = generic_tools._log_file
+            if not log_file or not log_file.exists():
+                return
+            with log_file.open("r", encoding="utf-8") as f:
+                while True:
+                    line = f.readline()
+                    if line:
+                        out_stream.write(line)
+                        out_stream.flush()
+                        try:
+                            entry = json.loads(line)
+                            if isinstance(entry, dict) and entry.get("kind") == "final":
+                                break
+                        except Exception:
+                            pass
+                    else:
+                        if stop_tail.is_set():
+                            for rem in f:
+                                out_stream.write(rem)
+                                out_stream.flush()
+                            break
+                        time.sleep(0.005)
+
+        tail_thread = threading.Thread(target=_tail, daemon=True)
+        tail_thread.start()
+
+    log_target = err_stream if json_mode else out_stream
+    try:
+        response, outcome = run_request(agent, model, toolset, prompt, log_stream=log_target)
+        if not json_mode:
+            out_stream.write(f"{response}\n")
+            if outcome:
+                out_stream.write(f"\n{outcome}\n")
+            out_stream.flush()
+
+        if getattr(agent, "stall_reason", None):
+            return 3
+        if getattr(agent, "hit_step_limit", False) or any(
+            isinstance(getattr(step, "error", None), AgentMaxStepsError)
+            for step in getattr(getattr(agent, "memory", None), "steps", [])
+        ):
+            return 2
+        return 0
+    except Exception as exc:
+        err_stream.write(f"[Error] {exc}\n")
+        err_stream.flush()
+        return 1
+    finally:
+        generic_tools.CONFIRM, generic_tools.ASK = saved_hooks
+        if tail_thread is not None:
+            stop_tail.set()
+            tail_thread.join(timeout=2.0)
 
 
 def terminal_relay(approvals) -> None:
@@ -251,6 +343,10 @@ def terminal_relay(approvals) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--prompt", dest="prompt", default=None,
+                        help="run once non-interactively with this request and exit")
+    parser.add_argument("--json", dest="json_mode", action="store_true",
+                        help="with -p: print run log entries as JSON lines to stdout")
     parser.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio",
                         help="model server: lmstudio (port 1234) or ollama (port 11434)")
     parser.add_argument("--model", default=None,
@@ -268,9 +364,28 @@ def main() -> None:
     parser.add_argument("--web-port", type=int, default=None, help="--web only: default is web.py's own default")
     args = parser.parse_args()
 
+    if args.json_mode and args.prompt is None:
+        parser.error("--json requires -p")
+
     load_env()
     args.model = args.model or BACKENDS[args.backend]["model"]
     max_steps = args.max_steps or int(os.environ.get("MAX_STEPS", MAX_STEPS))
+
+    if args.prompt is not None:
+        if args.tools != "generic":
+            sys.stderr.write("Error: -p is only supported with generic tools (not radarr).\n")
+            sys.exit(1)
+        if args.web:
+            sys.stderr.write("Error: -p cannot be used with --web.\n")
+            sys.exit(1)
+        try:
+            agent = build_agent(args.model, args.agent, max_steps, args.tools, args.backend)
+        except Exception as exc:
+            sys.stderr.write(f"[Error] {exc}\n")
+            sys.exit(1)
+        code = run_noninteractive(agent, args.model, args.prompt, toolset=args.tools, json_mode=args.json_mode)
+        sys.exit(code)
+
     if sys.stdout.isatty():  # keep piped runs and logs clean
         print(BANNER)
     label = args.tools if args.tools == "generic" else f"radarr, {args.agent}"

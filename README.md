@@ -101,6 +101,8 @@ python3 agent.py --model google/gemma-4-e4b
 
 | Flag | Default | Notes |
 |---|---|---|
+| `-p` | none | Non-interactive mode: run once with this request and exit (no banner, no `You:` loop, no `--web`). Generic tools only. Approvals are declined; `ask_user` returns a no-answer reply. Exit codes: 0 finished, 1 error, 2 step limit, 3 stall stop |
+| `--json` | off | With `-p`: stream the run's redacted log entries as JSON lines to stdout as they are written, ending with `final`. Other output (`[log]` line, errors) goes to stderr |
 | `--backend` | `lmstudio` | `lmstudio` (port 1234) or `ollama` (port 11434) |
 | `--model` | `ternary-bonsai-8b-mlx` on LM Studio, `qwen3.5:9b` on Ollama | Model identifier on the chosen backend (see `lms ls` or `ollama list`) |
 | `--tools` | `generic` | `generic`, or `radarr` (a hand-written single-service baseline for comparisons) |
@@ -109,7 +111,9 @@ python3 agent.py --model google/gemma-4-e4b
 | `--web` | off | Also print a URL; `[y/N]` and `ask_user` prompts can be answered there instead of the terminal, whichever comes first. The terminal still runs the agent and types requests as normal — this only adds a second way to answer prompts, for example from a phone, without needing `web.py` as a separate process. |
 | `--web-host`, `--web-port` | `127.0.0.1`, `web.py`'s default | `--web` only. `0.0.0.0` to reach it from other devices (for example over Tailscale) |
 
-Type a request and press Enter; `quit` or Ctrl-C exits. After each answer the harness prints `[Harness says]`: what was actually changed or declined, so you do not have to trust the model's summary. If the agent hits the step cap, the harness says so and shows the last tool result. It also stops early, the same way, if the model makes the same tool call with the same arguments three times running and each attempt fails (an `ERROR:`/`DECLINED:` result, an HTTP 4xx/5xx response, or a parsing error) — no point letting it keep retrying something that is not going to start working.
+Type a request and press Enter; `quit` or Ctrl-C exits. In non-interactive mode (`-p`), the harness prints the answer and the `[Harness says]` report to stdout and exits. Since nobody is at the keyboard, every `[y/N]` approval is declined and `ask_user` receives a no-answer reply (the same read-only policy as scheduled runs), with declined actions reported in `[Harness says]`. Adding `--json` streams each log entry as JSON lines to stdout as it occurs, ending with the `final` entry, while other diagnostics (such as the `[log]` path line and errors) are routed to stderr.
+
+After each answer the harness prints `[Harness says]`: what was actually changed or declined, so you do not have to trust the model's summary. If the agent hits the step cap, the harness says so and shows the last tool result. It also stops early, the same way, if the model makes the same tool call with the same arguments three times running and each attempt fails (an `ERROR:`/`DECLINED:` result, an HTTP 4xx/5xx response, or a parsing error) — no point letting it keep retrying something that is not going to start working.
 
 `[Harness says]` also checks a write's own result, not just its status code: after a POST, PUT, PATCH or DELETE that returns 2xx, a follow-up GET (free, no approval needed) checks what actually happened — a POST is confirmed against its `Location` header or an `id` in the response; a PUT/PATCH's submitted fields are compared against what a GET now returns; a DELETE is confirmed gone (expecting 404). A mismatch or a resource that is still there after a delete is flagged with a loud `WARNING`, not quietly reported as a plain success. This never reaches the model, so it has no prompt cost — it is purely for the human reading the report.
 
@@ -233,9 +237,10 @@ minute   hour   day-of-month   month   day-of-week
 .venv/bin/python tests/test_generic_tools.py
 .venv/bin/python tests/test_schedules.py
 .venv/bin/python tests/test_scheduler.py
+.venv/bin/python tests/test_noninteractive.py
 ```
 
-`test_generic_tools.py` checks the confirmation layer, path scoping, secret handling, tool messages and the web page's server. `test_schedules.py` covers the cron parser and schedule store, and `test_scheduler.py` the scheduler thread, read-only scheduled runs and deferred approvals. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
+`test_generic_tools.py` checks the confirmation layer, path scoping, secret handling, tool messages and the web page's server. `test_schedules.py` covers the cron parser and schedule store, `test_scheduler.py` the scheduler thread, read-only scheduled runs and deferred approvals, and `test_noninteractive.py` non-interactive (`-p`) and JSON-lines modes, exit codes, approvals declining, and error conditions. An optional live check of the Radarr baseline runs if `RADARR_URL` and `RADARR_API_KEY` are set. [tests/fake_api.py](tests/fake_api.py) is "Tidepool", an invented harbour-logbook API for testing whether a model can discover an API it cannot have memorised:
 
 ```bash
 .venv/bin/python tests/fake_api.py 8765 [easy|hint|detail|paged]
