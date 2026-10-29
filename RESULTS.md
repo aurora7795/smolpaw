@@ -528,3 +528,18 @@ What the runs show:
 - **Gemma's wrong-copy edits came with a success message.** The checker, not the model, caught it. This is the same pattern as the long-file rewrites: no read-back, no doubt.
 
 Caveats: 3 runs per cell; synthetic generated files; the approval policy is scripted (it approves what a user shown the `- old` / `+ new` passages would approve); the "without" runs still had `write_file`, `sed -i` and read-only shell, so this compares the toolset with and without `edit_file`, not editing methods in general; the idea of a replace-one-passage tool was reinforced by SmallCode's docs (issue #72), whose claims were not re-checked here, so the evidence in this section is our own runs only. Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking edit --n 3 --label with-edit-file`, then again with `--without-tool edit_file --label without-edit-file`, then the same with `qwen3.5:9b`.
+
+### Repeated passage, with the match places in the error (#88, 2026-10-29)
+
+The logs of the failed `edit_duplicate_passage` runs showed why Gemma edited the wrong copy: `edit_file` refused the first call (the sentence appears twice), the model re-read the file from the start, saw only the first copy (Section Beta, before character 4,000), and sent Beta's surrounding text, which matched uniquely. Section Epsilon's copy is at character 8,266, on the third page. The error said only that `old` appears twice. It now lists each match by character (the offset `read_file` takes) and the heading above it, for example `Matches: at character 2789 under '## Section Beta'; at character 8266 under '## Section Epsilon'.` The text appears only when the error fires, so the prompt is unchanged. Same command, models and approvals as above, `--tracking edit_duplicate_passage --n 3 --label with-match-places`.
+
+| | Before | After |
+|---|---|---|
+| Gemma 4 E4B: passed | 0/3 | 1/3 |
+| Gemma: edited the wrong copy | 2/3 | 0/3 |
+| Qwen 3.5 9B: passed | 0/3 | 0/3 |
+| Qwen: file correct at the end | 2/3 | 3/3 |
+
+- **The wrong-copy edits are gone** (2 of 6 runs before, 0 of 6 after), and the final file was correct in 4 of 6 runs (2 before). That is the change the message was meant to make.
+- **The pass rate barely moved because of the step cap.** All three Qwen files ended up right, but each run kept re-reading the file and running shell commands after the edit, reached 13 steps and counts as a fail. Two Gemma runs also hit the cap without changing the file, repeating `edit_file` calls. Gemma's one pass took 11 steps.
+- 3 runs per cell. I did not read what `old` strings the Gemma runs that hit the cap sent. The Qwen over-checking after a correct edit is also what happened in `edit_one_section` run 3 earlier today; stopping a run that makes no progress is #77.
