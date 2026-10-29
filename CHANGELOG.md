@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+- Scheduled-run time limit field in web Settings (#82): clearing the field and pressing Apply sent 0, which turned the limit off; an empty field now leaves the current value. Tests also cover that the page fills the field from `/api/state` and sends it on Apply (a mutation review found both lines could be deleted without a failing test).
+
 ### Added
 - `edit_file(path, old, new)` tool (#72): replaces one passage in an existing text file and leaves the rest byte for byte (it reads and writes bytes, so other lines keep their line endings). Refuses, without asking, an empty `old`, one that is not found, or one that appears more than once; works only on files in `workspace/` and `skills/` (other paths use `write_file`); `.env` and other secrets files are blocked. It asks before writing, showing the old and new passages, saves the previous content to `.undo/` as `write_file` does, and reports the size change. `write_file` and the confirmation layer are unchanged. It is in `GENERIC_TOOLS` and shows in the web feed as `edit_file`. The tool schema costs 176 tokens on Gemma 4 E4B. The tracking eval's scripted approver approves it inside the run's workspace. Tracking eval with it: edit and append 10 of 12 (1 of 12 before), reading 2 of 6 (RESULTS.md).
 - Scheduled-run time limit in web Settings (#82): reported as `schedule_timeout` in `/api/state` and accepted in `POST /api/settings` as a finite non-boolean number between 0 and 86400 seconds (0 disables the limit), with a corresponding input in the Settings card.

@@ -1113,7 +1113,7 @@ $("sapply").onclick = async () => {
     headers: {"X-Token": token, "Content-Type": "application/json"},
     body: JSON.stringify({backend: $("sbackend").value, model: $("smodel").value,
       max_steps: parseInt($("ssteps").value, 10), timeout: Number($("stimeout").value),
-      schedule_timeout: Number($("sschedtimeout").value),
+      schedule_timeout: $("sschedtimeout").value.trim() === "" ? undefined : Number($("sschedtimeout").value),
       run_summaries: $("ssummaries").checked})});
   $("smsg").textContent = r.ok ? "Applied." : r.status === 409 ? "A request is running; try again when it finishes." : "Invalid settings.";
   refresh();
