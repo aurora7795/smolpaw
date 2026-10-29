@@ -1877,6 +1877,176 @@ check("an unreachable model server gives an empty list", web.list_models("ollama
 web.BACKENDS["ollama"]["url"] = saved_url
 set_srv.shutdown()
 
+# deferred approvals in web view and dismiss endpoint (#81)
+saved_log_dir = g.LOG_DIR
+appr_log_dir = tmp / "deferred_approval_logs"
+appr_log_dir.mkdir(exist_ok=True)
+g.LOG_DIR = appr_log_dir
+
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    da_port = s.getsockname()[1]
+da_appr = web.Approvals(timeout=0)
+da_sess = web.Session(build_agent("m1", "tool", 5, "generic", "lmstudio"), "m1", da_appr, "lmstudio", 5)
+da_srv = web.serve("127.0.0.1", da_port, token, da_appr, da_sess, {"mode": "agent"})
+da_base = f"http://127.0.0.1:{da_port}"
+
+# /api/state: field presence, empty list with no entries
+da_sess.needs_approval = []
+st = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+check("needs_approval field is present in /api/state", "needs_approval" in st)
+check("with no entries needs_approval is an empty list", st["needs_approval"] == [])
+
+# /api/state: ordered newest first
+entry1 = {"id": "run1", "schedule_id": "s1", "prompt": "p1", "actions": ["a1"], "t": "2026-10-29T10:00:00"}
+entry2 = {"id": "run2", "schedule_id": "s2", "prompt": "p2", "actions": ["a2"], "t": "2026-10-29T11:00:00"}
+entry3 = {"id": "run3", "schedule_id": "s3", "prompt": "p3", "actions": ["a3"], "t": "2026-10-29T12:00:00"}
+da_sess.needs_approval = [entry1, entry2, entry3]
+st = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+check("needs_approval is ordered newest first", [e["id"] for e in st["needs_approval"]] == ["run3", "run2", "run1"])
+
+# /api/state: capped at 50 entries, newest first
+da_sess.needs_approval = [{"id": f"cap_run_{i}", "schedule_id": f"s_{i}", "prompt": f"p_{i}",
+                           "actions": [f"a_{i}"], "t": f"2026-10-29T{i:02d}:00:00"} for i in range(60)]
+st = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+check("api/state caps needs_approval at 50 entries newest first",
+      len(st["needs_approval"]) == 50
+      and st["needs_approval"][0]["id"] == "cap_run_59"
+      and st["needs_approval"][-1]["id"] == "cap_run_10")
+
+# /api/state: action strings capped at 500 characters
+long_act = "x" * 600
+da_sess.needs_approval = [{"id": "act_cap", "schedule_id": "s_act", "prompt": "p",
+                           "actions": [long_act], "t": "2026-10-29T10:00:00"}]
+st = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+check("action strings are capped at 500 characters",
+      len(st["needs_approval"][0]["actions"][0]) == 500
+      and st["needs_approval"][0]["actions"][0] == "x" * 500)
+
+# /api/state: registered secret in prompt or action does not appear (re-redacted on the way out)
+saved_notes = g.NOTES
+test_sec_notes = tmp / "notes_for_da_secret.md"
+test_sec_notes.write_text("- svc: http://example.com | key_env=TEST_DA_SECRET\n")
+os.environ["TEST_DA_SECRET"] = "registered-secret-da-99999"
+g.NOTES = test_sec_notes
+da_sess.needs_approval = [{
+    "id": "sec_run",
+    "schedule_id": "s_sec",
+    "prompt": "run task with registered-secret-da-99999 in prompt",
+    "actions": ["execute with registered-secret-da-99999 in action"],
+    "t": "2026-10-29T10:00:00"
+}]
+st = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+dumped = json.dumps(st["needs_approval"])
+check("api/state re-redacts secrets in prompt and actions on the way out",
+      "registered-secret-da-99999" not in dumped and "[REDACTED]" in dumped
+      and st["needs_approval"][0]["prompt"] == "run task with [REDACTED] in prompt"
+      and st["needs_approval"][0]["actions"] == ["execute with [REDACTED] in action"])
+g.NOTES = saved_notes
+del os.environ["TEST_DA_SECRET"]
+
+# empty or odd inputs: empty actions list, empty prompt, prompt with <script> and HTML tags
+script_prompt = "<script>alert('xss')</script><b>bold</b>"
+da_sess.needs_approval = [
+    {"id": "odd_empty_actions", "schedule_id": "s_odd1", "prompt": "some prompt", "actions": [], "t": "2026-10-29T10:00:00"},
+    {"id": "odd_empty_prompt", "schedule_id": "s_odd2", "prompt": "", "actions": ["act1"], "t": "2026-10-29T10:01:00"},
+    {"id": "odd_script", "schedule_id": "s_odd3", "prompt": script_prompt, "actions": ["<script>rm()</script>"], "t": "2026-10-29T10:02:00"},
+]
+st = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+by_id = {e["id"]: e for e in st["needs_approval"]}
+check("odd inputs: empty actions list preserved as empty list", by_id["odd_empty_actions"]["actions"] == [])
+check("odd inputs: empty prompt preserved as empty string", by_id["odd_empty_prompt"]["prompt"] == "")
+check("odd inputs: script and HTML tags carried unchanged as plain text",
+      by_id["odd_script"]["prompt"] == script_prompt and by_id["odd_script"]["actions"] == ["<script>rm()</script>"])
+
+# dismiss: authentication refusal
+e_dismiss = {"id": "dismiss_target_1", "schedule_id": "s_d1", "prompt": "p1", "actions": ["act1"], "t": "2026-10-29T10:00:00"}
+e_keep = {"id": "dismiss_target_2", "schedule_id": "s_d2", "prompt": "p2", "actions": ["act2"], "t": "2026-10-29T10:05:00"}
+da_sess.needs_approval = [e_dismiss, e_keep]
+
+r_notok = http.post(f"{da_base}/api/dismiss_approval", json={"id": "dismiss_target_1"}, timeout=5)
+check("dismiss_approval refuses missing token with 403", r_notok.status_code == 403)
+r_wrong = http.post(f"{da_base}/api/dismiss_approval", headers={"X-Token": "bad"}, json={"id": "dismiss_target_1"}, timeout=5)
+check("dismiss_approval refuses wrong token with 403", r_wrong.status_code == 403)
+
+# dismiss: id validation rejecting missing, non-string, empty, 201-character, slashes and dot-dot
+for label, bad_body in [
+    ("missing id", {}),
+    ("integer id", {"id": 12345}),
+    ("boolean id", {"id": True}),
+    ("list id", {"id": ["foo"]}),
+    ("dict id", {"id": {"x": 1}}),
+    ("empty id", {"id": ""}),
+    ("201-char id", {"id": "x" * 201}),
+    ("forward slash", {"id": "a/b"}),
+    ("backslash", {"id": "a\\b"}),
+    ("parent directory ..", {"id": ".."}),
+    ("subfolder traversal", {"id": "../escape"}),
+]:
+    r_bad = http.post(f"{da_base}/api/dismiss_approval", headers=hdr, json=bad_body, timeout=5)
+    check(f"dismiss_approval endpoint validates id rejecting {label} with 400",
+          r_bad.status_code == 400 and r_bad.json() == {"error": "invalid"} and len(da_sess.needs_approval) == 2)
+
+# dismiss: unknown id gives 404 and changes nothing
+r_unknown = http.post(f"{da_base}/api/dismiss_approval", headers=hdr, json={"id": "nonexistent_id"}, timeout=5)
+check("dismiss_approval returns 404 for unknown id and changes nothing",
+      r_unknown.status_code == 404 and r_unknown.json() == {"ok": False} and len(da_sess.needs_approval) == 2)
+
+# dismiss: valid id removes entry, 200 {"ok": true}, sidecar appears, next /api/state no longer lists it
+r_valid = http.post(f"{da_base}/api/dismiss_approval", headers=hdr, json={"id": "dismiss_target_1"}, timeout=5)
+sidecar_file = appr_log_dir / "dismiss_target_1.handled.txt"
+st_after = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+check("valid id removes entry, returns 200, writes handled sidecar, and next /api/state no longer lists it",
+      r_valid.status_code == 200 and r_valid.json() == {"ok": True}
+      and [e["id"] for e in da_sess.needs_approval] == ["dismiss_target_2"]
+      and sidecar_file.exists() and sidecar_file.read_text() == "handled\n"
+      and [e["id"] for e in st_after["needs_approval"]] == ["dismiss_target_2"])
+
+# dismiss: allowed while run is in progress
+da_sess.status = "running"
+r_while_running = http.post(f"{da_base}/api/dismiss_approval", headers=hdr, json={"id": "dismiss_target_2"}, timeout=5)
+check("dismiss_approval is allowed while run is in progress",
+      r_while_running.status_code == 200 and r_while_running.json() == {"ok": True} and len(da_sess.needs_approval) == 0)
+da_sess.status = "idle"
+
+# viewing and dismissing execute nothing: assert no run starts, status unchanged, and confirm hook uncalled
+confirm_prompts: list[str] = []
+saved_confirm = g.CONFIRM
+g.CONFIRM = lambda d: (confirm_prompts.append(d), False)[1]
+initial_run_id = da_sess._run_id
+initial_status = da_sess.status
+
+da_sess.needs_approval = [{"id": "exec_check", "schedule_id": "s_exec", "prompt": "run rm -rf",
+                           "actions": ["rm -rf /"], "t": "2026-10-29T10:00:00"}]
+st_check = http.get(f"{da_base}/api/state", headers=hdr, timeout=5).json()
+r_dcheck = http.post(f"{da_base}/api/dismiss_approval", headers=hdr, json={"id": "exec_check"}, timeout=5)
+
+check("viewing and dismissing execute nothing: no run starts, status unchanged, confirm hook uncalled",
+      len(confirm_prompts) == 0
+      and da_sess._run_id == initial_run_id
+      and da_sess.status == initial_status
+      and r_dcheck.status_code == 200)
+g.CONFIRM = saved_confirm
+
+# page checks: presence of element id, badge text, dismiss call, textContent, and no innerHTML
+page_html = http.get(f"{da_base}/?t={token}", timeout=5).text
+check("web page contains approvals card element id", 'id="approvalscard"' in page_html)
+check("web page contains badge text and line that renders the badge",
+      'badge.textContent = "needs approval"' in page_html and 'm.appendChild(badge)' in page_html)
+check("web page contains dismiss approval api call",
+      'api("/api/dismiss_approval", {id: a.id})' in page_html)
+check("web page refreshes after a successful dismiss and says 'Could not dismiss' on failure (presence check only)",
+      'refresh();\n        }\n      } catch' in page_html and page_html.count('"Could not dismiss"') == 2)
+check("web page uses textContent for prompt and actions",
+      'p.textContent = (a.prompt || "").slice(0, 200)' in page_html and 'li.textContent = act' in page_html)
+idx_appr_start = page_html.index("function renderApprovals")
+idx_appr_end = page_html.index("function renderHistory")
+appr_code_path = page_html[idx_appr_start:idx_appr_end]
+check("the new code path contains no innerHTML", "innerHTML" not in appr_code_path)
+
+da_srv.shutdown()
+g.LOG_DIR = saved_log_dir
+
 # model-written one-sentence summaries for recent runs (#47)
 # 1. first line only, clipped to 100 characters
 stub_multiline = lambda text: "First line of summary.\nSecond line should be ignored.\nThird line."
