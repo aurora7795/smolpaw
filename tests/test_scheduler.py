@@ -329,16 +329,10 @@ sess, approvals, agent = make()
 schedules.PATH.write_text("{not json")
 sched = Scheduler(sess, approvals, poll=0.01)
 errors: list[str] = []
-orig_report = sched._report
+import scheduler as scheduler_module  # noqa: E402
 
-
-def capture_report(message: str) -> None:
-    if message != sched._last_error:
-        errors.append(f"[scheduler] {message}")
-    sched._last_error = message
-
-
-sched._report = capture_report
+# Shadow print in scheduler.py only, so the real Scheduler._report (and its dedupe) still runs.
+scheduler_module.print = lambda *a, **k: errors.append(" ".join(str(x) for x in a))
 try:
     thread = sched.start()
     time.sleep(0.3)
@@ -354,7 +348,7 @@ try:
     sched.stop()
     thread.join(timeout=5)
 finally:
-    sched._report = orig_report
+    del scheduler_module.print
 check("a corrupt schedules.json does not kill the thread", alive_with_corrupt_file)
 check("it prints one line per distinct error", len([e for e in errors if e.startswith("[scheduler]")]) == 1)
 check("the thread picks the schedule up once the file is fixed", agent.inputs == ["recovers"])
