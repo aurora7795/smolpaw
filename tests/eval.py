@@ -23,6 +23,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import socket
 import subprocess
 import sys
@@ -134,9 +135,51 @@ TRACKING_CASES = ["edit_one_section", "append_keep_all", "read_three_report"]
 SED_EDIT = re.compile(r"^  sed -i(?:\.bak)?(?: '')? 's/([A-Za-z0-9 .,_-]+)/([A-Za-z0-9 .,_-]*)/g?' ([A-Za-z0-9_.-]+)$")
 
 
+PIPE_CMDS = set(g.READ_ONLY_CMDS) | {"tail", "sort", "cut", "tr", "od"}
+UNSAFE_FIND = {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fls"}
+
+
+def read_only_pipeline(cmd: str) -> bool:
+    """True for plain read-only commands joined by `|` (grep ... | head): what a user would approve in a tracking run.
+
+    No `;`, `&`, redirects, `$` or backticks; no absolute or `..` paths; no find actions, `sort -o` or `tail -f`.
+    """
+    cmd = cmd.replace("2>/dev/null", "")
+    if "$" in cmd or "`" in cmd:
+        return False
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return False
+    if any(set(t) <= set("();<>|&") and t != "|" for t in tokens):
+        return False
+    segments, current = [], []
+    for t in [*tokens, "|"]:
+        if t == "|":
+            segments.append(current)
+            current = []
+        else:
+            current.append(t)
+    for argv in segments:
+        if not argv or argv[0] not in PIPE_CMDS:
+            return False
+        args = argv[1:]
+        if any(a.startswith(("/", "~")) or ".." in a.split("/") for a in args):
+            return False
+        if argv[0] == "find" and UNSAFE_FIND & set(args):
+            return False
+        if argv[0] == "sort" and any(a == "-o" or a.startswith("--output") for a in args):
+            return False
+        if argv[0] == "tail" and any(a in ("-f", "-F") or a.startswith("--follow") for a in args):
+            return False
+    return True
+
+
 def workspace_write_confirm(workspace: Path) -> Callable[[str], bool]:
-    """Scripted answers for tracking runs: yes to write_file inside this run's workspace and to a literal
-    `sed -i` replacement on a file in it (what a user would approve for an edit), no to everything else."""
+    """Scripted answers for tracking runs: yes to write_file inside this run's workspace, to a literal
+    `sed -i` replacement on a file in it and to read-only pipelines (what a user would approve), no to the rest."""
     prefix = str(workspace.resolve())
 
     def confirm(desc: str) -> bool:
@@ -144,7 +187,9 @@ def workspace_write_confirm(workspace: Path) -> Callable[[str], bool]:
         first = lines[0]
         if first.startswith("Run shell command in workspace/") and len(lines) == 2:
             m = SED_EDIT.match(lines[1])
-            return bool(m) and (workspace / m.group(3)).is_file()
+            if m:
+                return (workspace / m.group(3)).is_file()
+            return read_only_pipeline(lines[1].strip())
         return bool(re.match(r"Write \d+ chars to ", first)) and "OUTSIDE workspace/" not in first \
             and first.split(" to ", 1)[1].startswith(prefix + os.sep)
 

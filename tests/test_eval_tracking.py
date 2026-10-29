@@ -79,6 +79,14 @@ try:
     check("sed with the e or w flag is declined", not sh("sed -i 's/a/b/e' a.md") and not sh("sed -i 's/a/b/w out' a.md"))
     check("sed chained with another command is declined",
           not sh("sed -i 's/a/b/' a.md; rm a.md") and not sh("sed -i 's/a/b/' a.md && cat a.md") and not sh("sed -i 's/a/b/' a.md | cat"))
+    check("read-only pipelines are approved",
+          sh("grep -oE '[0-9]+' a.md | head -20") and sh("cat a.md | tail -50") and sh("head -c 100 a.md | od -c | head -10")
+          and sh("grep -n 'a|b' a.md 2>/dev/null") and sh("find . -name 'a.md' | head -5"))
+    check("pipelines with writes, chaining, substitution or outside paths are declined",
+          not sh("cat a.md > b.md") and not sh("cat a.md; rm a.md") and not sh("cat a.md && ls") and not sh("cat a.md || echo no")
+          and not sh("cat $(ls)") and not sh("cat `ls`") and not sh("cat /etc/hosts | head") and not sh("cat ../a.md")
+          and not sh("ls | xargs rm") and not sh("find . -delete") and not sh("find . -exec rm {} +")
+          and not sh("sort -o a.md a.md") and not sh("tail -f a.md") and not sh("grep a a.md | tee b.md") and not sh("cat a.md | sh"))
     check("other editors and interpreters are declined",
           not sh("awk '{print}' a.md") and not sh("python3 -c 'print(1)'") and not sh("perl -pi -e 's/a/b/' a.md"))
     check("reading outside the workspace is declined", not confirm("Read file outside workspace/:\n  /etc/hosts"))
