@@ -1027,6 +1027,16 @@ def write_file(path: str, text: str) -> str:
     return f"SUCCESS: wrote {len(text)} chars to {p}."
 
 
+def _match_places(text: str, old: str, shown: int = 5) -> str:
+    """Where `old` occurs in text, as read_file offsets plus the heading above each match, so a model can find the copy it wants."""
+    places, start = [], text.find(old)
+    while start != -1 and len(places) < shown:
+        heading = next((ln.strip() for ln in reversed(text[:start].splitlines()) if ln.lstrip().startswith("#")), "")
+        places.append(f"at character {start}" + (f" under {_redact(heading)[:60]!r}" if heading else ""))
+        start = text.find(old, start + len(old))
+    return "Matches: " + "; ".join(places) + ("; more after that." if text.count(old) > shown else ".")
+
+
 @tool
 def edit_file(path: str, old: str, new: str) -> str:
     """Replace one passage in an existing text file and keep the rest as it is. Prefer this to write_file for a change to part of a file. Always asks the user first. Only files in workspace/ and skills/.
@@ -1055,7 +1065,8 @@ def edit_file(path: str, old: str, new: str) -> str:
         _log("edit_file", path=path, result=f"no unique match ({hits})")
         if hits == 0:
             return f"ERROR: old was not found in {path}; the file is unchanged. Use read_file and copy the passage exactly."
-        return f"ERROR: old appears {hits} times in {path}; the file is unchanged. Include more surrounding text so it matches once."
+        return (f"ERROR: old appears {hits} times in {path}; the file is unchanged. {_match_places(before, old)} "
+                "Add words around the one you want, from that place, so it matches once.")
     after = before.replace(old, new)
     if not _approved(f"Edit {p}: replace {len(old)} chars with {len(new)}\n- {old[:300]}\n+ {new[:300]}"):
         _log("edit_file", path=path, result="declined")
