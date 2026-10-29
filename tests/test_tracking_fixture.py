@@ -483,6 +483,11 @@ try:
     passed, reason = checker_dup(ws_mut_dup)
     check("case_dup mutation 7: dropped heading fails", not passed and "dropped" in reason)
 
+    # Mutation 8: a whitespace-only change (the edit applied, final newline stripped) fails
+    (ws_mut_dup / CASE_DUP_FILENAME).write_text(correct_edit_dup.rstrip("\n"), encoding="utf-8")
+    passed, reason = checker_dup(ws_mut_dup)
+    check("case_dup mutation 8: final newline stripped fails", not passed)
+
     # Missing file fails
     (ws_mut_dup / CASE_DUP_FILENAME).unlink()
     passed, reason = checker_dup(ws_mut_dup)
