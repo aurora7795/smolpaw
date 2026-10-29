@@ -4,7 +4,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 
 ## Summary
 
-- Long files break both working models (#87, n=3 per cell, Ollama): editing or appending to a file longer than the 4,000-character read clip passed 0 of 12 runs, mostly because the model wrote back the clipped view it had seen and said nothing was lost; reporting figures from long files passed 3 of 6. See "Do small models keep track of what they read and write?".
+- Long files break both working models (#87, n=3 per cell, Ollama): editing or appending to a file longer than the 4,000-character read clip passed 0 of 12 runs, mostly because the model wrote back the clipped view it had seen and said nothing was lost; reporting figures from long files passed 3 of 6. With a paged `read_file` (#86): edit and append 1 of 12, reading 3 of 6, all within noise. See "Do small models keep track of what they read and write?".
 - A lean harness with generic tools works with small local models, but only some of them. Gemma 4 E4B and Qwen 3.5 9B can follow a skill and discover an unseen API. Bonsai 8B (ternary) cannot do discovery. Nanbeige 3B produced garbage under LM Studio.
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
 - OpenClaw's prompt is still about 5.5 to 5.9 times larger than SmolPaw's (about 24K tokens against 4.1K to 4.4K on the first call, measured 2026-10-26; it was about 3K in early builds, before more tools were added). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against roughly 7s to 20s for SmolPaw's current prompt, which is the efficiency gap this project is aiming at.
@@ -472,5 +472,20 @@ Caveats:
 - **The result depends on the scripted approvals.** The eval approves `write_file` inside the run's own workspace, a literal `sed -i` replacement on a fixture file, and read-only pipelines (`grep … | head`); it declines every other shell command. Models that tried `cat >> file`, `echo >>`, `python3 -c` or `awk` to write were declined, so a user who approved those would see more passes on the append and edit cases. Two earlier rounds under stricter approvals (first only `write_file`, then also `sed -i`) were discarded after the logs showed the declined commands were correct attempts; their 0/9 and 0/9 results are not comparable and are not reported. The final policy was fixed after seeing logs from earlier rounds, so it is tuned, not neutral.
 - 3 runs per cell: one pass in three is a signal, not a rate.
 - `read_three_report` checks the answer with unordered regexes for the three figures, so an answer that lists them without matching figures to files would pass.
-- Unmeasured: the paged `read_file` of #86, `edit_file` (#72), the read-before-write guard (#71) and snipping (#73). This run is the baseline for them.
+- Unmeasured here: `edit_file` (#72), the read-before-write guard (#71) and snipping (#73). This run is the baseline for them; the paged `read_file` of #86 is measured below.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking all --n 3`, then the same with `qwen3.5:9b`. `tests/test_eval_tracking.py` checks the runner without a model.
+
+### With a paged `read_file` (#86, 2026-10-29)
+
+Same command, models, context and approvals, after `read_file` gained `offset` and a footer (`[characters 0-4000 of 6151; call read_file again with offset=4000 to continue]`). The schema grows from 106 to 153 tokens on Gemma (`tests/tool_schema_tokens.py`, 47 more per call). Logs: `logs/eval-20261029-0840*` to `0904*`.
+
+| Case | Gemma 4 E4B before | after | Qwen 3.5 9B before | after |
+|---|---|---|---|---|
+| `edit_one_section` | 0/3 | 0/3 | 0/3 | 0/3 |
+| `append_keep_all` | 0/3 | 1/3 | 0/3 | 0/3 |
+| `read_three_report` | 1/3 | 0/3 | 2/3 | 3/3 |
+
+- **The models now page.** Every Gemma and Qwen edit and append run that reached a write called `read_file` two to four times, so the footer is being used. The one new edit/append pass was Gemma append run 3 (prefix intact, section once).
+- **Edits still fail, for a different reason.** The checker no longer reports a clipped view for Gemma edits, but all 3 runs wrote a file that differed from the expected bytes (run 3 also lost a section heading) while the answer said the change was made. I did not diff what was written, so the cause (retyping the file from several pages) is a likely explanation, not a measured one. Qwen still wrote back about 4,000 characters in 2 of 3 append runs (checker: 4,004 of 6,151) and one run left almost nothing; its edit runs hit the 12-step cap twice, at up to 119,000 input tokens.
+- **Reading moved in opposite directions.** Qwen went from 2/3 to 3/3; Gemma from 1/3 to 0/3, where its answers said a file had no key figure or gave 1 for refuge_inventory. With 3 runs per cell neither move is distinguishable from noise.
+- **Total:** edit and append 1 of 12 (before 0 of 12); reading 3 of 6 (before 3 of 6). Paging alone does not make these models safe to write long files: they must still reproduce the whole file in one `write_file`. That is what `edit_file` (#72) and the read-before-write guard (#71) target.
