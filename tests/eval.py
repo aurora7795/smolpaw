@@ -129,6 +129,8 @@ def ensure_model(model: str, ctx: int, backend: str = "lmstudio") -> int | None:
 
 
 TRACKING_CASES = ["edit_one_section", "append_keep_all", "read_three_report"]
+EDIT_CASES = ["edit_duplicate_passage", "edit_last_line", "edit_special_chars", "edit_across_clip", "edit_crlf"]
+TRACKING_GROUPS = {"all": TRACKING_CASES, "edit": EDIT_CASES}  # `all` stays the original three, so earlier results stay comparable
 
 
 # A literal text replacement on one file: no flags beyond g, so no e or w, and no pipes, `;` or paths.
@@ -282,7 +284,7 @@ def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[s
     out = ROOT / "logs" / f"eval-{stamp}-{args.backend}-{safe_name(args.model)}-{label}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
-                               "history": "text" if args.text_history else "native",
+                               "history": "text" if args.text_history else "native", "without_tool": args.without_tool,
                                "loaded_context": ctx, "prompt": prompt, "expect": expects,
                                "runs": results}, indent=2))
     print(f"  saved {out.relative_to(ROOT)}")
@@ -290,7 +292,7 @@ def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[s
 
 def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
     """Run one tracking case n times, each in a fresh fixture workspace, and save the results (#87)."""
-    label = args.label or f"tracking-{case_name}"
+    label = f"tracking-{case_name}" + (f"-{args.label}" if args.label else "")
     print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
     results, prompt, expects = [], "", []
     for i in range(1, args.n + 1):
@@ -322,10 +324,10 @@ def main() -> None:
     ap.add_argument("--tidepool", metavar="VARIANT", help="serve the fake Tidepool API (easy|hint|detail|paged)")
     ap.add_argument("--listing", action="store_true",
                     help="folder-listing task on a generated 55-entry downloads/ in an isolated workspace (#46)")
-    ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, "all"],
+    ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, *EDIT_CASES, *TRACKING_GROUPS],
                     help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
                          "run, passing on the file written to disk or the figures reported (#87): "
-                         + "|".join(TRACKING_CASES) + "|all")
+                         + "|".join([*TRACKING_CASES, *EDIT_CASES, *TRACKING_GROUPS]))
     ap.add_argument("--without-tool", action="append", default=[],
                     help="drop a generic tool by name for this run, to compare (for example list_dir)")
     ap.add_argument("--label", default="")
@@ -388,7 +390,7 @@ def main() -> None:
         if not args.no_load:
             ctx = ensure_model(args.model, args.ctx, args.backend)
         if args.tracking:
-            for case_name in (TRACKING_CASES if args.tracking == "all" else [args.tracking]):
+            for case_name in TRACKING_GROUPS.get(args.tracking, [args.tracking]):
                 run_tracking(args, tmp, case_name, ctx)
             return
         label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "custom")
