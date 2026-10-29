@@ -150,6 +150,31 @@ answer["value"] = True
 check("write approved", g.write_file("c.txt", "x").startswith("SUCCESS") and asked())
 check("outside-scope read asks", "hello" not in g.read_file("../../outside") and asked())
 
+# paged read_file (#86)
+big = "".join(f"{i % 10}" for i in range(g.MAX_OUT * 2 + 1500))  # 9,500 characters
+(g.WORKSPACE / "big.txt").write_text(big)
+(g.WORKSPACE / "exact.txt").write_text("x" * g.MAX_OUT)
+p0 = g.read_file("big.txt")
+check("first page of a long file is MAX_OUT characters plus a footer with the next offset",
+      p0.startswith(big[:g.MAX_OUT]) and p0.endswith(f"[characters 0-{g.MAX_OUT} of {len(big)}; call read_file again with offset={g.MAX_OUT} to continue]"))
+p1 = g.read_file("big.txt", offset=g.MAX_OUT)
+check("the next offset continues exactly where the page ended", p1.startswith(big[g.MAX_OUT:g.MAX_OUT * 2]) and "offset=8000 to continue" in p1)
+p2 = g.read_file("big.txt", offset=2 * g.MAX_OUT)
+check("the last page says end of file", p2.startswith(big[2 * g.MAX_OUT:]) and p2.endswith(f"[characters 8000-{len(big)} of {len(big)}; end of file]"))
+pages = [g.read_file("big.txt", offset=o).rsplit("\n[characters", 1)[0] for o in (0, 4000, 8000)]
+check("the pages join back into the whole file", "".join(pages) == big)
+check("an offset past the end says so", "past the end" in g.read_file("big.txt", offset=99999))
+check("a negative offset reads from the start", g.read_file("big.txt", offset=-5) == p0)
+check("a file of exactly MAX_OUT characters has no footer", g.read_file("exact.txt") == "x" * g.MAX_OUT)
+check("a short file read at offset 0 is unchanged", g.read_file("a.txt") == (g.WORKSPACE / "a.txt").read_text())
+(g.WORKSPACE / "sec.txt").write_text("x" * 3995 + "page-edge-secret-4242" + "y" * 500)  # the secret straddles the page boundary
+saved_secrets = g._secrets
+g._secrets = lambda: ["page-edge-secret-4242"]
+sec_pages = [g.read_file("sec.txt", offset=o) for o in (0, 3000)]
+g._secrets = saved_secrets
+check("paging redacts a secret that straddles a page boundary",
+      all("page-edge" not in pg and "secret-4242" not in pg for pg in sec_pages) and "[REDACTED]" in sec_pages[1])
+
 # list_dir
 (g.WORKSPACE / "ld").mkdir()
 (g.WORKSPACE / "ld" / "sub").mkdir()

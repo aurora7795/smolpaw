@@ -151,6 +151,19 @@ def redact_pasted_secrets(text: str) -> str:
 LOG_OUT = 500  # chars of shell output kept in the run log, so a run can be audited afterwards
 
 
+def _page(text: str, offset: int = 0) -> str:
+    """One MAX_OUT page of text from offset; a long file gets a footer naming the characters shown and the next offset."""
+    total = len(text)
+    if total <= MAX_OUT and offset <= 0:
+        return text
+    offset = max(offset, 0)
+    if offset >= total:
+        return f"[offset {offset} is past the end of the file ({total} characters)]"
+    end = min(offset + MAX_OUT, total)
+    more = f"call read_file again with offset={end} to continue" if end < total else "end of file"
+    return f"{text[offset:end]}\n[characters {offset}-{end} of {total}; {more}]"
+
+
 def _clip(text: str) -> str:
     return text if len(text) <= MAX_OUT else text[:MAX_OUT] + f"\n... [truncated, {len(text)} chars total]"
 
@@ -907,11 +920,12 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
 
 @tool
 @_remember
-def read_file(path: str) -> str:
-    """Read a text file. Files in workspace/ and skills/ are read immediately; other paths ask the user first. Paths are relative to workspace/.
+def read_file(path: str, offset: int = 0) -> str:
+    """Read a text file, up to 4000 characters at a time. Files in workspace/ and skills/ are read immediately; other paths ask the user first. Paths are relative to workspace/.
 
     Args:
         path: File path, e.g. "notes.txt" or "../skills/radarr.md".
+        offset: Character to start from. A long file ends with a note giving the next offset.
     """
     p = _resolve(path)
     if _is_secret_file(p):
@@ -926,7 +940,7 @@ def read_file(path: str) -> str:
         _log("read_file", path=path, result=f"error ({type(exc).__name__})")
         return f"ERROR: {exc}"
     _log("read_file", path=path, result="ok")
-    return _clip(_redact(content))
+    return _page(_redact(content), offset)
 
 
 def _size(n: int) -> str:
