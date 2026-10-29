@@ -187,6 +187,13 @@ check("edit_file asks first and shows the old and new text", asked() and "- gamm
 before = ef.read_text(); prompts.clear()
 r = g.edit_file("ef.txt", "420 kWh", "980 kWh")
 check("edit_file refuses an old text that matches twice, without asking", "2 times" in r and ef.read_text() == before and not asked())
+(g.WORKSPACE / "dup.md").write_text("# Doc\n## Beta\nsame line.\n" + "x" * 50 + "\n## Epsilon\nsame line.\n")
+r = g.edit_file("dup.md", "same line.", "other")
+check("a repeated old text names where each match is, by character and heading",
+      "2 times" in r and "at character 14 under '## Beta'" in r and "under '## Epsilon'" in r and (g.WORKSPACE / "dup.md").read_text().count("same line.") == 2)
+(g.WORKSPACE / "dup2.txt").write_text("a a a a a a a a")
+check("a repeated old text without headings gives offsets only and caps the list",
+      "at character 0;" in g.edit_file("dup2.txt", "a", "b") and "more after that" in g.edit_file("dup2.txt", "a", "b"))
 r = g.edit_file("ef.txt", "no such text", "x")
 check("edit_file refuses an old text that is not found, without asking", "not found" in r and ef.read_text() == before and not asked())
 check("edit_file refuses an empty old text", g.edit_file("ef.txt", "", "x").startswith("ERROR") and ef.read_text() == before)
