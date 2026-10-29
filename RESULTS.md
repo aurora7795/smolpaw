@@ -4,6 +4,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 
 ## Summary
 
+- Long files break both working models (#87, n=3 per cell, Ollama): editing or appending to a file longer than the 4,000-character read clip passed 0 of 12 runs, mostly because the model wrote back the clipped view it had seen and said nothing was lost; reporting figures from long files passed 3 of 6. See "Do small models keep track of what they read and write?".
 - A lean harness with generic tools works with small local models, but only some of them. Gemma 4 E4B and Qwen 3.5 9B can follow a skill and discover an unseen API. Bonsai 8B (ternary) cannot do discovery. Nanbeige 3B produced garbage under LM Studio.
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
 - OpenClaw's prompt is still about 5.5 to 5.9 times larger than SmolPaw's (about 24K tokens against 4.1K to 4.4K on the first call, measured 2026-10-26; it was about 3K in early builds, before more tools were added). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against roughly 7s to 20s for SmolPaw's current prompt, which is the efficiency gap this project is aiming at.
@@ -447,3 +448,29 @@ The tokens of the first model call for the request "hello", counted by Ollama (`
 - This confirms the +165 and +154 first-call figures an outside report gave for `web_search` (checked here, not taken on trust).
 - Other tools' individual in-prompt costs were not measured, only the whole and the `web_search` difference. Reading time at this size is worked out from the speeds in the prefill table above (about 20s on Qwen, about 7s on Gemma, cold), not timed. OpenClaw's 24K figure comes from one run on a different tokenizer, so the ratio is approximate.
 
+
+
+## Do small models keep track of what they read and write? (#87, 2026-10-29)
+
+`tests/eval.py --tracking all --n 3`, on the fixture in `tests/tracking_fixture.py`: each run gets a fresh isolated workspace, files longer than the 4,000-character read clip, and every fact the task needs beyond that clip. Ollama, 32K context (the app's setting; the script's 16K default only warns), 12-step cap, native history, native MLX builds, 3 runs per cell. Pass means the file on disk equals the expected bytes (edit and append cases) or the answer holds all three figures (read case), and the run did not hit the step cap. Logs: `logs/eval-20261029-*-tracking-*.json` (the last six per model are the ones reported here).
+
+| Case | Gemma 4 E4B | Qwen 3.5 9B |
+|---|---|---|
+| `edit_one_section`: change one value in a 12,390-character file, leave the rest | 0/3 | 0/3 |
+| `append_keep_all`: add a section to a 6,151-character file, keep the rest | 0/3 | 0/3 |
+| `read_three_report`: report one figure from each of three ~6,000-character files | 1/3 | 2/3 |
+
+What the runs show:
+
+- **Writing back a clipped view is the main failure.** In all 3 Gemma `append_keep_all` runs the model called `read_file` once (seeing 4,000 of 6,151 characters; one run first tried a declined shell append), then `write_file` with that view plus the new section, and answered that the section was added. The file lost its last 2,151 characters each time and the answer said nothing about it. The same happened in 1 Qwen append run. Gemma `edit_one_section` run 3 also wrote back with a section missing.
+- **Claims of success without a write.** Qwen `edit_one_section` run 3 answered that the sentence "has been updated" (a forced answer after the step cap) with no write made; Gemma run 2 said the file "should now have" the change. Neither model reads the file back to check, and nothing in the harness asks them to.
+- **The shell route is slow and fragile.** Qwen hit the 12-step cap in all 6 edit and append runs, mostly on shell attempts, at 80,000 to 106,000 input tokens per run (Gemma's runs that reached `write_file` took 3 to 4 steps and 14,700 to 19,700). `sed -i 's/…/…/' file` failed with exit 1 on this Mac in several runs: BSD `sed` needs `sed -i '' …`.
+- **Reading is possible but unreliable.** The 3 passes in `read_three_report` (Gemma 1, Qwen 2) found the figure with `grep`/`cat` pipelines. The 2 Gemma failures reported each file's character count (5,875, 6,298 and 6,093) as the key figure; the Qwen failure hit the step cap and gave a made-up 847 for the first file. Every run in this case had 2 or 3 clipped tool results (`clipped_results`).
+
+Caveats:
+
+- **The result depends on the scripted approvals.** The eval approves `write_file` inside the run's own workspace, a literal `sed -i` replacement on a fixture file, and read-only pipelines (`grep … | head`); it declines every other shell command. Models that tried `cat >> file`, `echo >>`, `python3 -c` or `awk` to write were declined, so a user who approved those would see more passes on the append and edit cases. Two earlier rounds under stricter approvals (first only `write_file`, then also `sed -i`) were discarded after the logs showed the declined commands were correct attempts; their 0/9 and 0/9 results are not comparable and are not reported. The final policy was fixed after seeing logs from earlier rounds, so it is tuned, not neutral.
+- 3 runs per cell: one pass in three is a signal, not a rate.
+- `read_three_report` checks the answer with unordered regexes for the three figures, so an answer that lists them without matching figures to files would pass.
+- Unmeasured: the paged `read_file` of #86, `edit_file` (#72), the read-before-write guard (#71) and snipping (#73). This run is the baseline for them.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking all --n 3`, then the same with `qwen3.5:9b`. `tests/test_eval_tracking.py` checks the runner without a model.
