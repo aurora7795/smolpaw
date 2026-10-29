@@ -11,6 +11,7 @@ import argparse
 import hmac
 import itertools
 import json
+import math
 import os
 import re
 import secrets
@@ -729,7 +730,8 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                     **info, "can_run": s is not None,
                     **({"backends": sorted(BACKENDS), "backend": s.backend, "model": s.model,
                         "max_steps": s.max_steps, "timeout": approvals.timeout,
-                        "run_summaries": s.run_summaries} if s else {}),
+                        "run_summaries": s.run_summaries,
+                        "schedule_timeout": s.schedule_timeout} if s else {}),
                     "status": s.status if s else info.get("status", "running"),
                     "started_at": s.started_at if s and s.status == "running" else None,
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
@@ -799,13 +801,19 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 backend, model = body.get("backend"), body.get("model")
                 steps, timeout = body.get("max_steps"), body.get("timeout")
                 summaries = body.get("run_summaries", session.run_summaries)
+                sched_timeout = body.get("schedule_timeout", session.schedule_timeout)
                 if (backend not in BACKENDS or not isinstance(model, str) or not model.strip()
                         or len(model) > 200 or isinstance(steps, bool) or not isinstance(steps, int)
                         or not 1 <= steps <= 50 or isinstance(timeout, bool)
                         or not isinstance(timeout, (int, float)) or not 0 <= timeout <= 3600
-                        or not isinstance(summaries, bool)):
+                        or not isinstance(summaries, bool)
+                        or isinstance(sched_timeout, bool)
+                        or not isinstance(sched_timeout, (int, float))
+                        or not math.isfinite(sched_timeout)
+                        or not 0 <= sched_timeout <= 86400):
                     return self._send(400, {"error": "invalid settings"})
-                ok = session.configure(backend, model.strip(), steps, float(timeout), summaries)
+                ok = session.configure(backend, model.strip(), steps, float(timeout), summaries,
+                                       schedule_timeout=float(sched_timeout))
                 return self._send(200 if ok else 409, {"ok": ok})
             if path == "/api/stop" and session:
                 session.stop()
@@ -978,6 +986,7 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <h3>Model</h3><input id="smodel" list="smodels" autocomplete="off"><datalist id="smodels"></datalist>
     <h3>Step limit</h3><input id="ssteps" type="number" min="1" max="50">
     <h3>Prompt timeout (seconds, 0 waits forever)</h3><input id="stimeout" type="number" min="0" max="3600">
+    <h3>Scheduled-run time limit (seconds, 0 disables)</h3><input id="sschedtimeout" type="number" min="0" max="86400">
     <h3>Run summaries</h3><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input id="ssummaries" type="checkbox"> Model-written one-sentence summaries for recent runs</label>
     <div class="row"><button id="sapply">Apply</button></div>
     <div class="meta" id="smsg"></div>
@@ -1092,6 +1101,7 @@ function fillSettings(s) {
   }
   sel.value = s.backend; $("smodel").value = s.model;
   $("ssteps").value = s.max_steps; $("stimeout").value = s.timeout;
+  $("sschedtimeout").value = s.schedule_timeout;
   $("ssummaries").checked = !!s.run_summaries;
 }
 $("sbackend").onchange = () => { $("smodel").value = ""; loadModels(); };
@@ -1101,6 +1111,7 @@ $("sapply").onclick = async () => {
     headers: {"X-Token": token, "Content-Type": "application/json"},
     body: JSON.stringify({backend: $("sbackend").value, model: $("smodel").value,
       max_steps: parseInt($("ssteps").value, 10), timeout: Number($("stimeout").value),
+      schedule_timeout: Number($("sschedtimeout").value),
       run_summaries: $("ssummaries").checked})});
   $("smsg").textContent = r.ok ? "Applied." : r.status === 409 ? "A request is running; try again when it finishes." : "Invalid settings.";
   refresh();

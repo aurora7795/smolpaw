@@ -1757,6 +1757,48 @@ check("settings toggle disables run_summaries", set_sess.run_summaries is False)
 r_bad = http.post(f"{set_base}/api/settings", json={**good, "timeout": 5, "run_summaries": "invalid"}, headers=hdr, timeout=5)
 check("settings refuse invalid run_summaries type", r_bad.status_code == 400)
 check("web page contains run summaries toggle", 'id="ssummaries"' in http.get(f"{set_base}/?t={token}", timeout=5).text)
+
+# scheduled-run time limit in settings (#82)
+st = http.get(f"{set_base}/api/state", headers=hdr, timeout=5).json()
+check("/api/state includes schedule_timeout with current value",
+      "schedule_timeout" in st and st["schedule_timeout"] == set_sess.schedule_timeout)
+
+for val in (120, 30.5, 0):
+    r = http.post(f"{set_base}/api/settings", json={**good, "schedule_timeout": val}, headers=hdr, timeout=5)
+    st = http.get(f"{set_base}/api/state", headers=hdr, timeout=5).json()
+    check(f"valid schedule_timeout {val} stored and reported",
+          r.status_code == 200 and set_sess.schedule_timeout == float(val) and st.get("schedule_timeout") == float(val))
+
+set_sess.schedule_timeout = 42.0
+r = http.post(f"{set_base}/api/settings", json=good, headers=hdr, timeout=5)
+check("request without schedule_timeout leaves stored value unchanged",
+      r.status_code == 200 and set_sess.schedule_timeout == 42.0)
+
+for label, bad_val in [
+    ("true", True),
+    ('"60"', "60"),
+    ("null", None),
+    ("-1", -1),
+    ("nan", float("nan")),
+    ("inf", float("inf")),
+    ("86401", 86401),
+    ("a list", [60]),
+]:
+    cur = set_sess.schedule_timeout
+    payload = json.dumps({**good, "schedule_timeout": bad_val})
+    r = http.post(f"{set_base}/api/settings", data=payload, headers={"Content-Type": "application/json", **hdr}, timeout=5)
+    check(f"schedule_timeout refuses {label} with 400 and leaves value unchanged",
+          r.status_code == 400 and set_sess.schedule_timeout == cur)
+
+set_sess.status = "running"
+cur = set_sess.schedule_timeout
+r = http.post(f"{set_base}/api/settings", json={**good, "schedule_timeout": 120}, headers=hdr, timeout=5)
+check("valid schedule_timeout refused with 409 while running and leaves value unchanged",
+      r.status_code == 409 and set_sess.schedule_timeout == cur)
+set_sess.status = "idle"
+
+check("web page contains scheduled-run time limit input",
+      'id="sschedtimeout"' in http.get(f"{set_base}/?t={token}", timeout=5).text)
 check("models endpoint refuses an unknown backend",
       http.get(f"{set_base}/api/models?backend=x", headers=hdr, timeout=5).status_code == 404)
 saved_list_models = web.list_models
