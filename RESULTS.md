@@ -4,7 +4,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 
 ## Summary
 
-- Long files break both working models (#87, n=3 per cell, Ollama): editing or appending to a file longer than the 4,000-character read clip passed 0 of 12 runs, mostly because the model wrote back the clipped view it had seen and said nothing was lost; reporting figures from long files passed 3 of 6. With a paged `read_file` (#86): edit and append 1 of 12, reading 3 of 6, all within noise. With `edit_file` added (#72): edit and append 10 of 12, reading 2 of 6. See "Do small models keep track of what they read and write?".
+- Long files break both working models (#87, n=3 per cell, Ollama): editing or appending to a file longer than the 4,000-character read clip passed 0 of 12 runs, mostly because the model wrote back the clipped view it had seen and said nothing was lost; reporting figures from long files passed 3 of 6. With a paged `read_file` (#86): edit and append 1 of 12, reading 3 of 6, all within noise. With `edit_file` added (#72): edit and append 10 of 12, reading 2 of 6. On five harder edit cases, same session, `edit_file` 24 of 30 runs against 0 of 30 without it. See "Do small models keep track of what they read and write?".
 - A lean harness with generic tools works with small local models, but only some of them. Gemma 4 E4B and Qwen 3.5 9B can follow a skill and discover an unseen API. Bonsai 8B (ternary) cannot do discovery. Nanbeige 3B produced garbage under LM Studio.
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
 - OpenClaw's prompt is still about 5.5 to 5.9 times larger than SmolPaw's (about 24K tokens against 4.1K to 4.4K on the first call, measured 2026-10-26; it was about 3K in early builds, before more tools were added). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against roughly 7s to 20s for SmolPaw's current prompt, which is the efficiency gap this project is aiming at.
@@ -504,3 +504,27 @@ Same command, models, context and approvals, with the paged `read_file` and the 
 - **Appending worked in new ways.** Gemma's appends passed after paging through the file and then writing it back whole (2 runs) or calling `edit_file` first and then `write_file` (1 run). Qwen run 3 appended by replacing the last line with itself plus the new section through `edit_file`, which the checker accepted as byte-exact.
 - **Remaining failures.** Qwen edit run 3 made a correct edit but kept going with shell commands and hit the 12-step cap (counted as a fail, the file was right). Qwen append run 1 still wrote back about 4,000 characters of a 6,151-character file and said everything was kept. The reading case is not an `edit_file` task: Qwen 2 of 3 (one step-capped), and Gemma again 0 of 3, each answer reporting no figure for `refuge_inventory.txt`. Gemma has now scored 1, 0 and 0 on reading across the three configurations; I have not examined why, so whether paging hurt it is open.
 - **Caveats.** 3 runs per cell. The approver now also approves `edit_file` inside the run's workspace, as the user would be shown the exact passages. The baseline is not a same-session `--without-tool edit_file` run; the earlier paged-only runs were used. Models see `edit_file` only through its schema and docstring (the agent prompt did not change). Not tested: an `old` that matches twice or not at all in a model run (the tool refuses both, covered by unit tests), and files larger than the fixtures.
+
+### Five harder edit cases, with and without `edit_file` (#72, 2026-10-29)
+
+`--tracking edit --n 3` runs the five cases added to `tests/tracking_fixture.py` (built by antigravity, reviewed here), once with the toolset as it is and once with `--without-tool edit_file`, in the same session on each model: Ollama, 32K context, native history, same scripted approvals as above (`write_file` and `edit_file` inside the run's workspace, literal `sed -i`, read-only pipelines; everything else declined). Pass means the file on disk equals the expected bytes and the run did not hit the 12-step cap. Logs: `logs/eval-20261029-*tracking-edit_*-with-edit-file.json` and `-without-edit-file.json`.
+
+| Case | Gemma 4 E4B with / without | Qwen 3.5 9B with / without |
+|---|---|---|
+| `edit_duplicate_passage`: the same sentence in Sections Beta and Epsilon, change only Epsilon's | 0/3, 0/3 | 0/3, 0/3 |
+| `edit_last_line`: change the last line, keep the final newline | 3/3, 0/3 | 3/3, 0/3 |
+| `edit_special_chars`: replacement containing `&`, `\`, `$1` and a quote | 3/3, 0/3 | 3/3, 0/3 |
+| `edit_across_clip`: the sentence straddles character 4,000 | 3/3, 0/3 | 3/3, 0/3 |
+| `edit_crlf`: a CRLF file, change one line, keep every line ending | 3/3, 0/3 | 3/3, 0/3 |
+| **Total** | **12/15, 0/15** | **12/15, 0/15** |
+
+Mean steps and input tokens, passing four cases (with `edit_file`, then without): Gemma 2.0 to 3.0 steps and 9,200 to 15,100 tokens against 7.7 to 10.7 steps and 42,300 to 59,300; Qwen 4.3 to 6.3 steps and 25,700 to 39,900 tokens against 7.0 to 13.0 steps and 49,300 to 110,000.
+
+What the runs show:
+
+- **Without `edit_file`, none of 30 runs passed.** Eleven never changed the file (seven of those hit the step cap, mostly on declined shell attempts), 4 of the 6 CRLF runs rewrote the file with LF line endings, and the rest changed the wrong text, dropped content, or lost the final newline.
+- **With it, the four single-passage cases passed all 24 runs**, in a few steps. The CRLF line endings, the quote and backslash characters, and the passage across the 4,000-character page boundary came through unchanged because the tool replaces bytes in place.
+- **The duplicate-passage case failed on both models, with and without the tool.** `edit_file` refuses an `old` that appears twice, which is correct, but the models did not recover reliably. Gemma edited the wrong copy (Section Beta) in 2 of 3 runs and answered that the change was made; in the third it stopped and said it could not be done in Epsilon. Qwen edited correctly in 2 of 3 runs but kept re-reading and running shell commands until the step cap (so these count as fails, though the files were right), and in the third changed the file in unexpected ways. I did not look at the exact `old` strings the models sent, so why Gemma picked Beta is not established.
+- **Gemma's wrong-copy edits came with a success message.** The checker, not the model, caught it. This is the same pattern as the long-file rewrites: no read-back, no doubt.
+
+Caveats: 3 runs per cell; synthetic generated files; the approval policy is scripted (it approves what a user shown the `- old` / `+ new` passages would approve); the "without" runs still had `write_file`, `sed -i` and read-only shell, so this compares the toolset with and without `edit_file`, not editing methods in general; the idea of a replace-one-passage tool was reinforced by SmallCode's docs (issue #72), whose claims were not re-checked here, so the evidence in this section is our own runs only. Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking edit --n 3 --label with-edit-file`, then again with `--without-tool edit_file --label without-edit-file`, then the same with `qwen3.5:9b`.
