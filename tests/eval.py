@@ -164,7 +164,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     g.LAST_RESULT = ""
     prompts: list[str] = []
     confirm = g.CONFIRM
-    g.CONFIRM = lambda desc: (prompts.append(desc.splitlines()[0]), confirm(desc))[1]
+    g.CONFIRM = lambda desc: (prompts.append("\n".join(desc.splitlines()[:2])[:240]), confirm(desc))[1]  # first line plus a shell command
     agent = build_agent(model, "tool", max_steps, "generic", backend, native_history)
     t0 = time.time()
     buf = io.StringIO()
