@@ -45,6 +45,16 @@ SmolPaw measures something different. On a local model the harness's own memory 
 
 We have not yet measured the prompt any of these harnesses actually sends, so this is not a claim that SmolPaw's prompt is smaller than theirs. A harness that is light on memory could still send a large prompt, or a small one. Measuring PicoClaw against the same local models and tasks is the next step for this comparison ([#18](https://github.com/aurora7795/smolpaw/issues/18)).
 
+**Other small-model agent projects**
+
+Two projects aim at small local models rather than at a lighter OpenClaw: [SmallCode](https://github.com/Doorman11991/smallcode) and [effGen](https://github.com/ctrl-gaurav/effGen), a broader small-model agent framework. SmolPaw has taken ideas from them (PLAN.md items 32 and 34), such as a replace-one-passage edit tool and two-stage tool routing. The routing idea was measured here and not built, because changing the tool block between calls makes a local server read the whole prompt again (RESULTS.md). Their benchmark figures are their own, with the method stated for neither as far as we read, so we treat them as claims and have not run them or compared our numbers with theirs.
+
+**Where SmolPaw stands**
+
+- **Ahead, in one narrow respect:** it has a repeatable eval, in the repo, of whether 4B to 9B local models keep track of what they read and write (`tests/eval.py --tracking`, RESULTS.md). On it, an `edit_file` tool took five harder edit cases from 0 of 30 runs passing to 24 of 30 on Gemma 4 E4B and Qwen 3.5 9B (3 runs per cell, generated files). We have not found a comparable published measurement for other harnesses, but we have not searched exhaustively.
+- **Behind on everything else:** OpenClaw and the other projects above are further developed in features, channels, ready-made skills, testing on real services and users. SmolPaw is experimental, a few read-only tasks pass reliably, and a real write to a service (adding a film to Radarr) still fails ([#1](https://github.com/aurora7795/smolpaw/issues/1)).
+- **Unmeasured:** the prompt size and results of the other harnesses on the same local models and tasks. Until that is done ([#18](https://github.com/aurora7795/smolpaw/issues/18)) the comparison with them is about design, not numbers.
+
 **What this does not show**
 
 - OpenClaw was **not** run on a local model, so "OpenClaw would not work here" is an estimate from prompt size and measured reading speed, not a test. The cloud run also benefited from provider-side prompt caching (about 60K cached tokens), and a local server that caches a stable prompt prefix cuts reading time a lot: measured on SmolPaw's own prompt in RESULTS.md (#29), a whole run took at least 2.4 times shorter than the time just to read its prompts cold on Qwen, on both LM Studio and Ollama.
