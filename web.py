@@ -733,7 +733,15 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                     **({"backends": sorted(BACKENDS), "backend": s.backend, "model": s.model,
                         "max_steps": s.max_steps, "timeout": approvals.timeout,
                         "run_summaries": s.run_summaries,
-                        "schedule_timeout": s.schedule_timeout} if s else {}),
+                        "schedule_timeout": s.schedule_timeout,
+                        "needs_approval": [
+                            {"id": str(e.get("id", "")),
+                             "schedule_id": str(e.get("schedule_id", "")),
+                             "t": str(e.get("t", "")),
+                             "prompt": g._redact(str(e.get("prompt", ""))),
+                             "actions": [g._redact(str(a))[:500] for a in e.get("actions", [])]}
+                            for e in reversed(s.needs_approval)
+                        ][:50]} if s else {}),
                     "status": s.status if s else info.get("status", "running"),
                     "started_at": s.started_at if s and s.status == "running" else None,
                     "prompt": s.prompt if s else "", "answer": s.answer if s else "",
@@ -820,6 +828,12 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
             if path == "/api/stop" and session:
                 session.stop()
                 return self._send(200, {"ok": True})
+            if path == "/api/dismiss_approval" and session:
+                aid = body.get("id")
+                if not isinstance(aid, str) or not aid or len(aid) > 200 or "/" in aid or "\\" in aid or ".." in aid:
+                    return self._send(400, {"error": "invalid"})
+                ok = session.dismiss_approval(aid)
+                return self._send(200 if ok else 404, {"ok": ok})
             return self._send(404, {"error": "not found"})
 
     return Handler
@@ -943,6 +957,14 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 .runitem { font-family:inherit; font-size:14px; color:var(--ink); padding:7px 10px; margin-bottom:2px; }
 .runitem.on { background:var(--bg); color:var(--accent); }
 .runtitle { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-weight:500; }
+#approvalscard { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; font-size:13px; }
+#approvalscard h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px; }
+.approvalitem { padding:6px 0; border-bottom:1px solid var(--line); }
+.approvalitem:last-child { border-bottom:0; }
+.approvalprompt { font-weight:500; margin:4px 0; overflow-wrap:anywhere; }
+.approvalactions { margin:4px 0; padding-left:18px; font-size:12px; color:var(--muted); font-family:ui-monospace, Menlo, monospace; }
+.badge { display:inline-block; font-size:11px; font-weight:600; padding:1px 5px; border-radius:4px;
+         background:var(--warn); color:var(--ink); border:1px solid var(--line); margin-left:6px; vertical-align:middle; }
 @media (min-width:900px) {
   body { display:grid; grid-template-columns:280px minmax(0,1fr); min-height:100vh; }
   aside { position:sticky; top:0; height:100vh; padding:20px 14px; border-right:1px solid var(--line);
@@ -969,6 +991,11 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   <button id="newchat">+ New chat</button>
   <button class="nav on" data-view="chat">Chat</button>
   <button class="nav" data-view="settings">Settings</button>
+  <div class="card" id="approvalscard" hidden>
+    <h2>Needs approval</h2>
+    <div id="approvalslist"></div>
+    <div class="meta" id="dismissmsg" style="margin-top:6px"></div>
+  </div>
   <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
 <main><div id="content">
@@ -1119,6 +1146,63 @@ $("sapply").onclick = async () => {
   refresh();
 };
 let lastSig = null, selectedThread = "", historyKey = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
+let approvalsData = [];
+function renderApprovals() {
+  const card = $("approvalscard");
+  const list = $("approvalslist");
+  while (list.firstChild) list.removeChild(list.firstChild);
+  if (!approvalsData.length) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  for (const a of approvalsData) {
+    const item = document.createElement("div");
+    item.className = "approvalitem";
+    const head = document.createElement("div");
+    head.className = "runmeta";
+    head.textContent = a.schedule_id + (a.t ? " · " + a.t.replace("T", " ") : "");
+    item.appendChild(head);
+    const p = document.createElement("div");
+    p.className = "approvalprompt";
+    p.textContent = (a.prompt || "").slice(0, 200);
+    item.appendChild(p);
+    if (a.actions && a.actions.length) {
+      const ul = document.createElement("ul");
+      ul.className = "approvalactions";
+      for (const act of a.actions) {
+        const li = document.createElement("li");
+        li.textContent = act;
+        ul.appendChild(li);
+      }
+      item.appendChild(ul);
+    }
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "4px";
+    const btn = document.createElement("button");
+    btn.className = "ghost";
+    btn.style.padding = "4px 10px";
+    btn.style.fontSize = "12px";
+    btn.textContent = "Dismiss";
+    btn.onclick = async () => {
+      try {
+        const r = await api("/api/dismiss_approval", {id: a.id});
+        if (!r || !r.ok) {
+          $("dismissmsg").textContent = "Could not dismiss";
+        } else {
+          $("dismissmsg").textContent = "";
+          refresh();
+        }
+      } catch (e) {
+        $("dismissmsg").textContent = "Could not dismiss";
+      }
+    };
+    row.appendChild(btn);
+    item.appendChild(row);
+    list.appendChild(item);
+  }
+}
 function renderRuns() {
   const container = $("runslist");
   while (container.firstChild) container.removeChild(container.firstChild);
@@ -1128,6 +1212,7 @@ function renderRuns() {
     container.appendChild(p);
     return;
   }
+  const approvalIds = new Set(approvalsData.map(a => a.id));
   for (const r of runsData) {
     const row = document.createElement("div");
     row.className = "runitem" + (r.id === selectedRunId ? " on" : "");
@@ -1140,6 +1225,13 @@ function renderRuns() {
     m.className = "runmeta";
     m.textContent = r.summary.split(" · ")[0].replace("T", " ").slice(0, 16);
     if (r.turns > 1) m.textContent += " · " + r.turns + " messages";
+    const ridStem = (r.id || "").replace(/\\.jsonl$/, "");
+    if (approvalIds.has(r.id) || approvalIds.has(ridStem)) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "needs approval";
+      m.appendChild(badge);
+    }
     row.appendChild(m);
     row.onclick = () => selectRun(r);
     container.appendChild(row);
@@ -1188,6 +1280,12 @@ $("newchat").onclick = async () => { await api("/api/new_thread", {}); showLive(
 $("livebtn").onclick = showLive;
 async function refresh() {
   let s; try { s = await api("/api/state"); } catch (e) { $("meta").textContent = "cannot reach SmolPaw"; return; }
+  const prevApprKey = approvalsData.map(a => a.id).join(",");
+  approvalsData = s.needs_approval || [];
+  renderApprovals();
+  if (approvalsData.map(a => a.id).join(",") !== prevApprKey) {
+    renderRuns();
+  }
   $("meta").textContent = [s.mode, s.backend, s.model, s.status, s.progress].filter(Boolean).join(" · ");
   const p = s.pending;
   $("pending").hidden = !p;
