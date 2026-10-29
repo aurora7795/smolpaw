@@ -239,7 +239,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "passed": bool(answer) and not hit_cap and check_ok and all(re.search(e, answer, re.I) for e in expects),
         "check": check_reason,
         # tool results cut at the read clip, to see how often a model worked from a partial view
-        "clipped_results": sum("[truncated," in str(s.observations or "") for s in steps),
+        "clipped_results": sum("[truncated," in str(s.observations or "") or "to continue]" in str(s.observations or "") for s in steps),
         "wall_s": round(wall, 1),
         "steps": len(steps),
         "hit_cap": hit_cap,
