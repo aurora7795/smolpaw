@@ -130,12 +130,21 @@ def ensure_model(model: str, ctx: int, backend: str = "lmstudio") -> int | None:
 TRACKING_CASES = ["edit_one_section", "append_keep_all", "read_three_report"]
 
 
+# A literal text replacement on one file: no flags beyond g, so no e or w, and no pipes, `;` or paths.
+SED_EDIT = re.compile(r"^  sed -i(?:\.bak)?(?: '')? 's/([A-Za-z0-9 .,_-]+)/([A-Za-z0-9 .,_-]*)/g?' ([A-Za-z0-9_.-]+)$")
+
+
 def workspace_write_confirm(workspace: Path) -> Callable[[str], bool]:
-    """Scripted answers for tracking runs: yes to write_file inside this run's workspace, no to the rest."""
+    """Scripted answers for tracking runs: yes to write_file inside this run's workspace and to a literal
+    `sed -i` replacement on a file in it (what a user would approve for an edit), no to everything else."""
     prefix = str(workspace.resolve())
 
     def confirm(desc: str) -> bool:
-        first = desc.splitlines()[0]
+        lines = desc.splitlines()
+        first = lines[0]
+        if first.startswith("Run shell command in workspace/") and len(lines) == 2:
+            m = SED_EDIT.match(lines[1])
+            return bool(m) and (workspace / m.group(3)).is_file()
         return bool(re.match(r"Write \d+ chars to ", first)) and "OUTSIDE workspace/" not in first \
             and first.split(" to ", 1)[1].startswith(prefix + os.sep)
 

@@ -69,6 +69,18 @@ try:
     check("a write outside the workspace is declined", not confirm(f"Write 10 chars to {tmp}/other/a.md  (OUTSIDE workspace/):\nhi"))
     check("a path that only shares the folder name prefix is declined", not confirm(f"Write 10 chars to {ws}-evil/a.md:\nhi"))
     check("a shell command is declined", not confirm("Run shell command:\n  rm -rf /"))
+    (ws / "a.md").write_text("x")
+    sh = lambda cmd: confirm(f"Run shell command in workspace/:\n  {cmd}")  # noqa: E731
+    check("a literal sed -i replacement on a workspace file is approved", sh("sed -i 's/420 kilowatt hours/980 kilowatt hours/' a.md"))
+    check("sed -i with a backup suffix or an empty one is approved",
+          sh("sed -i.bak 's/a b/c d/g' a.md") and sh("sed -i '' 's/a/b/' a.md"))
+    check("sed on a file that does not exist is declined", not sh("sed -i 's/a/b/' nope.md"))
+    check("sed on a path is declined", not sh("sed -i 's/a/b/' ../a.md") and not sh("sed -i 's/a/b/' /etc/hosts"))
+    check("sed with the e or w flag is declined", not sh("sed -i 's/a/b/e' a.md") and not sh("sed -i 's/a/b/w out' a.md"))
+    check("sed chained with another command is declined",
+          not sh("sed -i 's/a/b/' a.md; rm a.md") and not sh("sed -i 's/a/b/' a.md && cat a.md") and not sh("sed -i 's/a/b/' a.md | cat"))
+    check("other editors and interpreters are declined",
+          not sh("awk '{print}' a.md") and not sh("python3 -c 'print(1)'") and not sh("perl -pi -e 's/a/b/' a.md"))
     check("reading outside the workspace is declined", not confirm("Read file outside workspace/:\n  /etc/hosts"))
 
     # --- edit_one_section ---------------------------------------------------------------------
