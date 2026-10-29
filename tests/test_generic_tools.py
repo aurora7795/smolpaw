@@ -2028,6 +2028,8 @@ check("web page contains badge text and line that renders the badge",
       'badge.textContent = "needs approval"' in page_html and 'm.appendChild(badge)' in page_html)
 check("web page contains dismiss approval api call",
       'api("/api/dismiss_approval", {id: a.id})' in page_html)
+check("web page refreshes after a successful dismiss and says 'Could not dismiss' on failure (presence check only)",
+      'refresh();\n        }\n      } catch' in page_html and page_html.count('"Could not dismiss"') == 2)
 check("web page uses textContent for prompt and actions",
       'p.textContent = (a.prompt || "").slice(0, 200)' in page_html and 'li.textContent = act' in page_html)
 idx_appr_start = page_html.index("function renderApprovals")
