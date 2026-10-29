@@ -1851,8 +1851,12 @@ check("valid schedule_timeout refused with 409 while running and leaves value un
       r.status_code == 409 and set_sess.schedule_timeout == cur)
 set_sess.status = "idle"
 
-check("web page contains scheduled-run time limit input",
-      'id="sschedtimeout"' in http.get(f"{set_base}/?t={token}", timeout=5).text)
+page_html = http.get(f"{set_base}/?t={token}", timeout=5).text
+check("web page contains scheduled-run time limit input", 'id="sschedtimeout"' in page_html)
+# there is no browser test harness: these only catch the wiring being deleted, not it being wrong
+check("the page fills the field from /api/state", '$("sschedtimeout").value = s.schedule_timeout' in page_html)
+check("the page sends the field on Apply, and omits it when the field is empty (an empty number field is 0, which would turn the limit off)",
+      'schedule_timeout: $("sschedtimeout").value.trim() === "" ? undefined' in page_html)
 check("models endpoint refuses an unknown backend",
       http.get(f"{set_base}/api/models?backend=x", headers=hdr, timeout=5).status_code == 404)
 saved_list_models = web.list_models
