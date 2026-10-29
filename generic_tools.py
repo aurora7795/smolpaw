@@ -1028,6 +1028,52 @@ def write_file(path: str, text: str) -> str:
 
 
 @tool
+def edit_file(path: str, old: str, new: str) -> str:
+    """Replace one passage in an existing text file and keep the rest as it is. Prefer this to write_file for a change to part of a file. Always asks the user first. Only files in workspace/ and skills/.
+
+    Args:
+        path: File path, e.g. "notes.txt".
+        old: The exact text to replace, copied from the file. It must appear once; add surrounding words if it does not.
+        new: The text to put in its place.
+    """
+    p = _resolve(path)
+    if _is_secret_file(p):
+        _log("edit_file", path=path, result="blocked (secrets file)")
+        return "BLOCKED: secrets files cannot be written."
+    if not _in_scope(path):
+        _log("edit_file", path=path, result="refused (outside workspace/)")
+        return "ERROR: edit_file only works on files in workspace/ and skills/. Use write_file for other paths."
+    if not old:
+        return "ERROR: old must be the exact text to replace."
+    try:
+        before = p.read_bytes().decode()
+    except (OSError, UnicodeDecodeError) as exc:
+        _log("edit_file", path=path, result=f"error ({type(exc).__name__})")
+        return f"ERROR: {exc}"
+    hits = before.count(old)
+    if hits != 1:
+        _log("edit_file", path=path, result=f"no unique match ({hits})")
+        if hits == 0:
+            return f"ERROR: old was not found in {path}; the file is unchanged. Use read_file and copy the passage exactly."
+        return f"ERROR: old appears {hits} times in {path}; the file is unchanged. Include more surrounding text so it matches once."
+    after = before.replace(old, new)
+    if not _approved(f"Edit {p}: replace {len(old)} chars with {len(new)}\n- {old[:300]}\n+ {new[:300]}"):
+        _log("edit_file", path=path, result="declined")
+        return DECLINED
+    saved_undo, undo_reason = _save_undo(p)
+    try:
+        p.write_bytes(after.encode())
+    except OSError as exc:
+        _log("edit_file", path=path, result=f"error ({type(exc).__name__})")
+        ACTIONS.append(f"edit failed: {p}")
+        return f"ERROR: {exc}"
+    undo_note = f" (previous content saved at {saved_undo})" if saved_undo else f" ({undo_reason})" if undo_reason else ""
+    ACTIONS.append(f"edited {p} ({len(before)} -> {len(after)} chars){undo_note}")
+    _log("edit_file", path=path, chars=len(after), result="ok", **({"undo": str(saved_undo or undo_reason)} if saved_undo or undo_reason else {}))
+    return f"SUCCESS: replaced 1 passage in {p} ({len(before)} -> {len(after)} chars)."
+
+
+@tool
 def ask_user(question: str) -> str:
     """Ask the user a question and wait for the answer. Use this when you are unsure instead of guessing.
 
@@ -1220,7 +1266,7 @@ def _configure_search_provider(provider: str | None = None) -> str:
 
 
 GENERIC_TOOLS = [
-    run_shell, http_request, fetch_page, openapi_search, read_file, list_dir, write_file, ask_user,
+    run_shell, http_request, fetch_page, openapi_search, read_file, list_dir, write_file, edit_file, ask_user,
     list_skills, read_skill, write_skill, remember, recall,
 ]
 def apply_search_provider() -> str:

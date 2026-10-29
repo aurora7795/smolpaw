@@ -178,7 +178,7 @@ def read_only_pipeline(cmd: str) -> bool:
 
 
 def workspace_write_confirm(workspace: Path) -> Callable[[str], bool]:
-    """Scripted answers for tracking runs: yes to write_file inside this run's workspace, to a literal
+    """Scripted answers for tracking runs: yes to write_file and edit_file inside this run's workspace, to a literal
     `sed -i` replacement on a file in it and to read-only pipelines (what a user would approve), no to the rest."""
     prefix = str(workspace.resolve())
 
@@ -190,6 +190,8 @@ def workspace_write_confirm(workspace: Path) -> Callable[[str], bool]:
             if m:
                 return (workspace / m.group(3)).is_file()
             return read_only_pipeline(lines[1].strip())
+        if first.startswith("Edit "):
+            return first[5:].split(":", 1)[0].startswith(prefix + os.sep)
         return bool(re.match(r"Write \d+ chars to ", first)) and "OUTSIDE workspace/" not in first \
             and first.split(" to ", 1)[1].startswith(prefix + os.sep)
 

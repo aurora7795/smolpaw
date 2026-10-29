@@ -175,6 +175,47 @@ g._secrets = saved_secrets
 check("paging redacts a secret that straddles a page boundary",
       all("page-edge" not in pg and "secret-4242" not in pg for pg in sec_pages) and "[REDACTED]" in sec_pages[1])
 
+# edit_file (#72)
+ef = g.WORKSPACE / "ef.txt"
+ef.write_text("alpha 420 kWh\nbeta 420 kWh\ngamma\n")
+prompts.clear(); answer["value"] = True
+r = g.edit_file("ef.txt", "gamma", "delta")
+check("edit_file replaces one passage and keeps the rest", ef.read_text() == "alpha 420 kWh\nbeta 420 kWh\ndelta\n" and r.startswith("SUCCESS"))
+check("edit_file result reports the size change", "(" in r and "->" in r)
+shown = prompts[-1] if prompts else ""
+check("edit_file asks first and shows the old and new text", asked() and "- gamma" in shown and "+ delta" in shown)
+before = ef.read_text(); prompts.clear()
+r = g.edit_file("ef.txt", "420 kWh", "980 kWh")
+check("edit_file refuses an old text that matches twice, without asking", "2 times" in r and ef.read_text() == before and not asked())
+r = g.edit_file("ef.txt", "no such text", "x")
+check("edit_file refuses an old text that is not found, without asking", "not found" in r and ef.read_text() == before and not asked())
+check("edit_file refuses an empty old text", g.edit_file("ef.txt", "", "x").startswith("ERROR") and ef.read_text() == before)
+answer["value"] = False
+r = g.edit_file("ef.txt", "delta", "epsilon")
+check("a declined edit changes nothing", r == g.DECLINED and ef.read_text() == before)
+answer["value"] = True; prompts.clear()
+check("edit_file on a missing file is an error", g.edit_file("nope.txt", "a", "b").startswith("ERROR") and not (g.WORKSPACE / "nope.txt").exists())
+check("edit_file blocks .env without asking", g.edit_file(".env", "a", "b").startswith("BLOCKED") and not asked())
+(g.WORKSPACE.parent / "outside_ef.txt").write_text("keep me")
+r = g.edit_file("../outside_ef.txt", "keep", "lose")
+check("edit_file refuses a file outside workspace/ without reading or asking",
+      "workspace/" in r and (g.WORKSPACE.parent / "outside_ef.txt").read_text() == "keep me" and not asked())
+(g.WORKSPACE / "crlf.txt").write_bytes(b"one\r\ntwo\r\nthree\r\n")
+g.edit_file("crlf.txt", "two", "2")
+check("edit_file keeps the other lines' line endings byte for byte", (g.WORKSPACE / "crlf.txt").read_bytes() == b"one\r\n2\r\nthree\r\n")
+(g.WORKSPACE / "bin.dat").write_bytes(b"\xff\xfe\x00")
+check("edit_file on a non-text file is an error", g.edit_file("bin.dat", "a", "b").startswith("ERROR"))
+ef.write_text("price: $1 & done \\1 /x/\n")
+g.edit_file("ef.txt", "$1 & done \\1", "&\\1 $2")
+check("edit_file treats old and new literally", ef.read_text() == "price: &\\1 $2 /x/\n")
+undo_before = {q.name for q in g.UNDO_DIR.iterdir()} if g.UNDO_DIR.exists() else set()
+g.edit_file("ef.txt", "/x/", "/y/")
+undo_after = {q.name for q in g.UNDO_DIR.iterdir()}
+check("an approved edit saves the previous content to the undo folder",
+      len(undo_after - undo_before) == 1 and any(q.read_text() == "price: &\\1 $2 /x/\n" for q in g.UNDO_DIR.iterdir() if q.name in undo_after - undo_before))
+check("edit_file is in the generic toolset", g.edit_file in g.GENERIC_TOOLS)
+answer["value"] = False; prompts.clear()
+
 # list_dir
 (g.WORKSPACE / "ld").mkdir()
 (g.WORKSPACE / "ld" / "sub").mkdir()
@@ -231,6 +272,19 @@ entries = [json.loads(line) for line in fs_log.read_text().splitlines()]
 check("read_file writes one entry of kind read_file", len(entries) == 1 and entries[0]["kind"] == "read_file")
 check("read_file entry has path and result fields", entries[0]["path"] == "distinctive_read.txt" and entries[0]["result"] == "ok")
 check("read_file log entry never contains file contents", "DISTINCTIVE_READ_PAYLOAD_12345" not in fs_log.read_text())
+
+# edit_file logging (#72): one entry, never the file contents or the passages
+answer["value"] = True
+(g.WORKSPACE / "distinctive_edit.txt").write_text("keep DISTINCTIVE_EDIT_OLD_777 keep")
+fs_log.unlink()
+g.edit_file("distinctive_edit.txt", "DISTINCTIVE_EDIT_OLD_777", "DISTINCTIVE_EDIT_NEW_888")
+entries = [e for e in map(json.loads, fs_log.read_text().splitlines()) if e["kind"] == "edit_file"]  # the approval is logged separately
+check("edit_file writes one entry of kind edit_file with path and result",
+      len(entries) == 1 and entries[0]["kind"] == "edit_file" and entries[0]["path"] == "distinctive_edit.txt" and entries[0]["result"] == "ok")
+check("the edit_file log entry never contains the file contents or passages", "DISTINCTIVE_EDIT" not in json.dumps(entries))
+answer["value"] = False
+fs_log.unlink()
+g.read_file("distinctive_read.txt")
 
 # blocked secret read
 fs_log.unlink()

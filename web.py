@@ -481,7 +481,7 @@ def list_models(backend: str) -> list[str]:
 
 TOOL_KINDS = {
     "shell", "http", "fetch_page", "openapi_search",
-    "read_file", "list_dir", "write_file", "list_skills", "read_skill", "write_skill",
+    "read_file", "list_dir", "write_file", "edit_file", "list_skills", "read_skill", "write_skill",
     "remember", "recall", "ask", "web_search",
 }
 
@@ -520,6 +520,8 @@ def feed(log_path: Path | None = None) -> list[str]:
             lines.append(f"{t} list_dir {e.get('path')} -> {e.get('result')}")
         elif kind == "write_file":
             lines.append(f"{t} write_file {e.get('path')} ({e.get('chars')} chars) -> {e.get('result')}")
+        elif kind == "edit_file":
+            lines.append(f"{t} edit_file {e.get('path')} -> {e.get('result')}")
         elif kind == "list_skills":
             lines.append(f"{t} list_skills -> {e.get('result')}")
         elif kind == "read_skill":
