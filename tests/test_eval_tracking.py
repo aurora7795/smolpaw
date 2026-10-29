@@ -68,6 +68,9 @@ try:
     check("a write inside the workspace is approved", confirm(f"Write 10 chars to {ws}/a.md:\nhello"))
     check("a write outside the workspace is declined", not confirm(f"Write 10 chars to {tmp}/other/a.md  (OUTSIDE workspace/):\nhi"))
     check("a path that only shares the folder name prefix is declined", not confirm(f"Write 10 chars to {ws}-evil/a.md:\nhi"))
+    check("an edit inside the workspace is approved", confirm(f"Edit {ws}/a.md: replace 3 chars with 3\n- old\n+ new"))
+    check("an edit outside the workspace or sharing only a name prefix is declined",
+          not confirm(f"Edit {tmp}/other/a.md: replace 3 chars with 3\n- old\n+ new") and not confirm(f"Edit {ws}-evil/a.md: replace 3 chars with 3\n- a\n+ b"))
     check("a shell command is declined", not confirm("Run shell command:\n  rm -rf /"))
     (ws / "a.md").write_text("x")
     sh = lambda cmd: confirm(f"Run shell command in workspace/:\n  {cmd}")  # noqa: E731
@@ -118,6 +121,14 @@ try:
     r = run_case("edit_one_section", edit_ok)
     check("a correct edit passes", r["passed"] and r["check"].startswith("file equals"))
     check("the write was approved and logged", any(a.startswith("wrote ") for a in r["actions"]))
+    def edit_with_tool(ws, case):
+        def go():
+            g.edit_file(tf.CASE_A_FILENAME, tf.CASE_A_TARGET_OLD, tf.CASE_A_TARGET_NEW)
+            return "Done."
+        return go
+
+    r = run_case("edit_one_section", edit_with_tool)
+    check("a correct edit_file call passes and is logged as an action", r["passed"] and any(a.startswith("edited ") for a in r["actions"]))
     r = run_case("edit_one_section", edit_from_clipped_view)
     check("writing back only the clipped view fails", not r["passed"] and "truncated" in r["check"])
     r = run_case("edit_one_section", does_nothing)
