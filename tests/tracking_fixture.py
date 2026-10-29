@@ -298,7 +298,10 @@ def build(workspace: Path | str, seed: int = 0) -> list[Case]:
         missing = [f for f in CASE_C_FILES if not (target_path / f).is_file()]
         if missing:
             return False, f"missing files: {', '.join(missing)}"
-        return True, "all files present and intact (evaluated via expects)"
+        changed = [f for f in CASE_C_FILES if (target_path / f).read_text(encoding="utf-8") != texts_c[f]]
+        if changed:
+            return False, f"files were modified: {', '.join(changed)}"
+        return True, "all files present and unmodified (the answer is checked via expects)"
 
     case_c = Case(
         name="read_three_report",

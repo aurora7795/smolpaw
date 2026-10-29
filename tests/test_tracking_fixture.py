@@ -243,6 +243,15 @@ try:
     passed, reason = checker_c(ws_mut_c)
     check("case_c untouched workspace passes disk integrity check", passed)
 
+    (ws_mut_c / CASE_C_FILES[1]).write_text("overwritten")
+    passed, reason = checker_c(ws_mut_c)
+    check("case_c overwritten file fails disk check", not passed and "modified" in reason)
+
+    kept = (ws_mut_c / CASE_C_FILES[2]).read_text(encoding="utf-8")
+    (ws_mut_c / CASE_C_FILES[2]).write_text(kept[:MAX_OUT])
+    passed, reason = checker_c(ws_mut_c)
+    check("case_c file truncated to the clip fails disk check", not passed and "modified" in reason)
+
     (ws_mut_c / CASE_C_FILES[0]).unlink()
     passed, reason = checker_c(ws_mut_c)
     check("case_c missing file fails disk check", not passed and "missing" in reason)
