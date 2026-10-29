@@ -329,24 +329,32 @@ sess, approvals, agent = make()
 schedules.PATH.write_text("{not json")
 sched = Scheduler(sess, approvals, poll=0.01)
 errors: list[str] = []
-real_print = print
-import builtins  # noqa: E402
+orig_report = sched._report
 
-builtins.print = lambda *a, **k: errors.append(" ".join(str(x) for x in a))
+
+def capture_report(message: str) -> None:
+    if message != sched._last_error:
+        errors.append(f"[scheduler] {message}")
+    sched._last_error = message
+
+
+sched._report = capture_report
 try:
     thread = sched.start()
     time.sleep(0.3)
     alive_with_corrupt_file = thread.is_alive()
-    schedules.PATH.unlink()
-    due = schedules.add("recovers", "*/5 * * * *", now=datetime.now() - timedelta(minutes=10))
+    with schedules._LOCK:
+        schedules.PATH.unlink()
+        due = schedules.add("recovers", "*/5 * * * *", now=datetime.now() - timedelta(minutes=10))
     next_model(sess)
     for _ in range(100):
         if agent.inputs:
             break
         time.sleep(0.05)
     sched.stop()
+    thread.join(timeout=5)
 finally:
-    builtins.print = real_print
+    sched._report = orig_report
 check("a corrupt schedules.json does not kill the thread", alive_with_corrupt_file)
 check("it prints one line per distinct error", len([e for e in errors if e.startswith("[scheduler]")]) == 1)
 check("the thread picks the schedule up once the file is fixed", agent.inputs == ["recovers"])
