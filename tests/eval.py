@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,7 @@ import generic_tools as g  # noqa: E402
 from agent import BACKENDS, build_agent, load_env  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
+from tests import tracking_fixture  # noqa: E402
 
 LMS = Path.home() / ".lmstudio/bin/lms"
 OLLAMA = BACKENDS["ollama"]["url"].removesuffix("/v1")
@@ -125,6 +127,21 @@ def ensure_model(model: str, ctx: int, backend: str = "lmstudio") -> int | None:
     return None
 
 
+TRACKING_CASES = ["edit_one_section", "append_keep_all", "read_three_report"]
+
+
+def workspace_write_confirm(workspace: Path) -> Callable[[str], bool]:
+    """Scripted answers for tracking runs: yes to write_file inside this run's workspace, no to the rest."""
+    prefix = str(workspace.resolve())
+
+    def confirm(desc: str) -> bool:
+        first = desc.splitlines()[0]
+        return bool(re.match(r"Write \d+ chars to ", first)) and "OUTSIDE workspace/" not in first \
+            and first.split(" to ", 1)[1].startswith(prefix + os.sep)
+
+    return confirm
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -142,7 +159,7 @@ def safe_name(model: str) -> str:
 
 
 def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backend: str = "lmstudio",
-             native_history: bool = True) -> dict:
+             native_history: bool = True, check: Callable[[], tuple[bool, str]] | None = None) -> dict:
     g.ACTIONS.clear()
     g.LAST_RESULT = ""
     prompts: list[str] = []
@@ -162,9 +179,13 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     steps = [s for s in agent.memory.steps if isinstance(s, ActionStep)]
     tokens_in, tokens_out = usage(agent)
     hit_cap = any(isinstance(s.error, AgentMaxStepsError) for s in steps)
+    check_ok, check_reason = check() if check else (True, "")  # a disk check, for tasks that write files
     return {
         # A capped run did not finish, even if its forced last answer happens to match.
-        "passed": bool(answer) and not hit_cap and all(re.search(e, answer, re.I) for e in expects),
+        "passed": bool(answer) and not hit_cap and check_ok and all(re.search(e, answer, re.I) for e in expects),
+        "check": check_reason,
+        # tool results cut at the read clip, to see how often a model worked from a partial view
+        "clipped_results": sum("[truncated," in str(s.observations or "") for s in steps),
         "wall_s": round(wall, 1),
         "steps": len(steps),
         "hit_cap": hit_cap,
@@ -186,6 +207,49 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     }
 
 
+def print_run(i: int, r: dict) -> None:
+    flag = "PASS" if r["passed"] else "FAIL"
+    cap = " CAP" if r["hit_cap"] else ""
+    print(f"  run {i}: {flag}{cap} {r['wall_s']}s steps={r['steps']} parse_err={r['parse_errors']} "
+          f"tokens_in={r['input_tokens']} tools={'>'.join(r['tools'])}")
+    print(f"         {r['check'] + ' | ' if r['check'] else ''}{r['answer'][:160]!r}"
+          f"{' ERROR ' + r['error'] if r['error'] else ''}")
+
+
+def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[str], results: list[dict]) -> None:
+    n = len(results)
+    print(f"  => {sum(r['passed'] for r in results)}/{n} passed | "
+          f"mean {sum(r['wall_s'] for r in results) / n:.0f}s, "
+          f"{sum(r['steps'] for r in results) / n:.1f} steps, "
+          f"{sum(r['input_tokens'] for r in results) / n:.0f} input tokens")
+    stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
+    out = ROOT / "logs" / f"eval-{stamp}-{args.backend}-{safe_name(args.model)}-{label}.json"
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
+                               "history": "text" if args.text_history else "native",
+                               "loaded_context": ctx, "prompt": prompt, "expect": expects,
+                               "runs": results}, indent=2))
+    print(f"  saved {out.relative_to(ROOT)}")
+
+
+def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
+    """Run one tracking case n times, each in a fresh fixture workspace, and save the results (#87)."""
+    label = args.label or f"tracking-{case_name}"
+    print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
+    results, prompt, expects = [], "", []
+    for i in range(1, args.n + 1):
+        ws = tmp / f"tracking-{case_name}-{i}"
+        case = next(c for c in tracking_fixture.build(ws) if c.name == case_name)
+        g.WORKSPACE, g.UNDO_DIR = ws, tmp / f".undo-{case_name}-{i}"
+        g.CONFIRM = workspace_write_confirm(ws)
+        prompt, expects = case.prompt, case.expects
+        r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history,
+                     check=lambda case=case, ws=ws: case.check(ws))
+        results.append(r)
+        print_run(i, r)
+    save_results(args, label, ctx, prompt, expects, results)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
@@ -202,6 +266,10 @@ def main() -> None:
     ap.add_argument("--tidepool", metavar="VARIANT", help="serve the fake Tidepool API (easy|hint|detail|paged)")
     ap.add_argument("--listing", action="store_true",
                     help="folder-listing task on a generated 55-entry downloads/ in an isolated workspace (#46)")
+    ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, "all"],
+                    help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
+                         "run, passing on the file written to disk or the figures reported (#87): "
+                         + "|".join(TRACKING_CASES) + "|all")
     ap.add_argument("--without-tool", action="append", default=[],
                     help="drop a generic tool by name for this run, to compare (for example list_dir)")
     ap.add_argument("--label", default="")
@@ -240,8 +308,8 @@ def main() -> None:
             (tmp / "notes.md").write_text("# notes\n")
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
-    if not prompt:
-        ap.error("--prompt is required unless --tidepool or --listing is used")
+    if not prompt and not args.tracking:
+        ap.error("--prompt is required unless --tidepool, --listing or --tracking is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
     web_server, web_info = None, {}
@@ -253,6 +321,8 @@ def main() -> None:
         web_info = {"mode": "eval", "backend": args.backend, "model": args.model, "status": "loading model"}
         web_server = web.serve(args.web_host, args.web_port, token, approvals, info=web_info)
         print(f"answer prompts at {web.url(args.web_host, args.web_port, token)}")
+    elif args.tracking:
+        g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
     else:
         g.CONFIRM = lambda desc: False
         g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
@@ -261,6 +331,10 @@ def main() -> None:
     try:
         if not args.no_load:
             ctx = ensure_model(args.model, args.ctx, args.backend)
+        if args.tracking:
+            for case_name in (TRACKING_CASES if args.tracking == "all" else [args.tracking]):
+                run_tracking(args, tmp, case_name, ctx)
+            return
         label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
@@ -268,24 +342,8 @@ def main() -> None:
             web_info.update(status="running", progress=f"{label}: run {i} of {args.n}")
             r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history)
             results.append(r)
-            flag = "PASS" if r["passed"] else "FAIL"
-            cap = " CAP" if r["hit_cap"] else ""
-            print(f"  run {i}: {flag}{cap} {r['wall_s']}s steps={r['steps']} parse_err={r['parse_errors']} "
-                  f"tokens_in={r['input_tokens']} tools={'>'.join(r['tools'])}")
-            print(f"         {r['answer'][:160]!r}{' ERROR ' + r['error'] if r['error'] else ''}")
-        n = len(results)
-        print(f"  => {sum(r['passed'] for r in results)}/{n} passed | "
-              f"mean {sum(r['wall_s'] for r in results) / n:.0f}s, "
-              f"{sum(r['steps'] for r in results) / n:.1f} steps, "
-              f"{sum(r['input_tokens'] for r in results) / n:.0f} input tokens")
-        stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
-        out = ROOT / "logs" / f"eval-{stamp}-{args.backend}-{safe_name(args.model)}-{label}.json"
-        out.parent.mkdir(exist_ok=True)
-        out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
-                                   "history": "text" if args.text_history else "native",
-                                   "loaded_context": ctx, "prompt": prompt, "expect": expects,
-                                   "runs": results}, indent=2))
-        print(f"  saved {out.relative_to(ROOT)}")
+            print_run(i, r)
+        save_results(args, label, ctx, prompt, expects, results)
     finally:
         if server:
             server.terminate()
