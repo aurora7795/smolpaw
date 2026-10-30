@@ -2399,6 +2399,10 @@ check("web page contains Edit button with text Edit",
 check("web page pre-fills edit inputs from current schedule prompt and cron",
       'promptInput.value = s.prompt || "";' in edit_code
       and 'cronInput.value = s.cron || "";' in edit_code)
+check("web page locks the prompt field when the listed prompt is clipped or redacted",
+      'promptInput.readOnly = true;' in edit_code
+      and '.length >= 500' in edit_code
+      and '.includes("[REDACTED]")' in edit_code)
 check("web page contains Save and Cancel buttons in editor",
       'saveBtn.textContent = "Save"' in edit_code
       and 'cancelBtn.textContent = "Cancel"' in edit_code)

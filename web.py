@@ -1438,6 +1438,12 @@ function renderSchedules() {
       promptInput.rows = 2;
       promptInput.style.marginBottom = "6px";
       promptInput.value = s.prompt || "";
+      // The list holds the prompt clipped to 500 characters and redacted; saving that copy would overwrite the full one.
+      const promptLossy = (s.prompt || "").length >= 500 || (s.prompt || "").includes("[REDACTED]");
+      if (promptLossy) {
+        promptInput.readOnly = true;
+        promptInput.title = "Prompt is too long or contains a redacted value to edit here; only the cron can be changed.";
+      }
       const cronInput = document.createElement("input");
       cronInput.style.marginBottom = "6px";
       cronInput.value = s.cron || "";
