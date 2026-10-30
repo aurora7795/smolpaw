@@ -224,6 +224,8 @@ SEARCH_PROVIDERS = {
 
 SmolPaw includes a pure-Python cron parser and schedule store ([schedules.py](schedules.py)) for running saved prompts without model or network overhead.
 
+The store offers `add`, `edit`, `remove`, `set_enabled` and `load`. `edit(id, prompt=None, cron=None)` changes a schedule's prompt, its cron, or both: it validates like `add`, recomputes `next_run` only when the cron changes, keeps `enabled` and the last outcome, returns the updated schedule or `None` for an unknown id, and raises `ValueError` for invalid input or a damaged file. Nothing in the web page calls it yet.
+
 Standard 5-field cron expressions are supported:
 
 ```
