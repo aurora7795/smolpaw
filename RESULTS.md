@@ -543,3 +543,18 @@ The logs of the failed `edit_duplicate_passage` runs showed why Gemma edited the
 - **The wrong-copy edits are gone** (2 of 6 runs before, 0 of 6 after), and the final file was correct in 4 of 6 runs (2 before). That is the change the message was meant to make.
 - **The pass rate barely moved because of the step cap.** All three Qwen files ended up right, but each run kept re-reading the file and running shell commands after the edit, reached 13 steps and counts as a fail. Two Gemma runs also hit the cap without changing the file, repeating `edit_file` calls. Gemma's one pass took 11 steps.
 - 3 runs per cell. I did not read what `old` strings the Gemma runs that hit the cap sent. The Qwen over-checking after a correct edit is also what happened in `edit_one_section` run 3 earlier today; stopping a run that makes no progress is #77.
+
+### `read_three_report` at n=10, with the tool arguments logged (#89, 2026-10-30)
+
+#89 asked whether Gemma's 0/3 on `read_three_report` after paging was noise. Same case, Ollama, 32K context, native history, paged `read_file` with `edit_file` in the toolset, n=10 per model. This time the run logs hold each call's arguments (`tool_args`, added to `tests/eval.py` in this change), so the pages each model asked for can be read back. The three facts sit at characters 4,552, 4,758 and 4,716 of files of 5,875, 6,298 and 6,093 characters, so each is on page 2 (page size 4,000) and a full read takes 6 `read_file` calls. Logs: `logs/eval-20261030-104700-ollama-gemma4_e4b-tracking-read_three_report-n10.json` and `logs/eval-20261030-105708-ollama-qwen3.5_9b-tracking-read_three_report-n10.json`.
+
+| | Passed | Mean steps | Mean input tokens | Read page 2 of all three files |
+|---|---|---|---|---|
+| Gemma 4 E4B | 0/10 | 6.0 | 36,170 | 0/10 |
+| Qwen 3.5 9B | 9/10 | 7.6 | 58,221 | 9/10 |
+
+- **Gemma pages, then stops.** In all 10 runs it read page 1 of all three files. It read page 2 of the hydrology file in 10, of the geology file in 8, and of `refuge_inventory.txt` in none. The answers gave 1485 and often 832 and said `refuge_inventory.txt` had no clear key figure. The paging works; the model does not ask for the last page. The #86 and #72 results (0/3 each) were this, not a broken tool.
+- **Qwen reads every page.** 9 of 10 runs read both pages of all three files and passed. The failure (run 4) read page 2 of two files, then used `web_search`, `list_dir` and four shell commands and hit the 13-step cap without the third figure.
+- **Cost of the reading.** Qwen used about 22,000 more input tokens per run because it read all six pages.
+- **Caveats.** One session, 10 runs per model. Gemma's runs differ only slightly in order (one read geology before the second hydrology page), so the 0/10 comes from one repeated behaviour, not from ten different failures. Not measured: why Gemma stops (the number of calls so far, the footer wording or the model's judgement that it has seen enough); whether a footer that says the rest of the file is unread changes it; the `--without-tool`-style comparison without the `offset` argument that #89 mentioned, which the arguments now make unnecessary for this question.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking read_three_report --n 10 --label n10`, then the same with `qwen3.5:9b`.
