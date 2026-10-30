@@ -76,9 +76,12 @@ COUNTING_EXPECT = (r"(?s)^(?!.*\b(?:13|15)\s+(?:files|items)\b)"
                    r".*\b(?:10|12)\s+(?:(?:regular|visible|top-level)\s+)*files\b")
 
 
-def make_counting_fixture(workspace: Path) -> list[str]:
-    """Create downloads/ with 10 files, 2 hidden files and 3 folders holding 2 files each; return the answer regex (#49)."""
-    d = workspace / "downloads"
+COUNTING_HOME_PROMPT = "How many files are in my Downloads folder?"
+
+
+def make_counting_fixture(workspace: Path, name: str = "downloads") -> list[str]:
+    """Create downloads/ (or `name`) with 10 files, 2 hidden files and 3 folders holding 2 files each; return the answer regex (#49)."""
+    d = workspace / name
     d.mkdir(parents=True)
     for i in range(COUNTING_FILES):
         (d / f"report{i}.txt").write_text("x")
@@ -376,6 +379,9 @@ def main() -> None:
                     help="folder-listing task on a generated 55-entry downloads/ in an isolated workspace (#46)")
     ap.add_argument("--counting", action="store_true",
                     help="file-count task on a generated downloads/ with files, hidden files and folders (#49)")
+    ap.add_argument("--counting-home", action="store_true",
+                    help="the --counting task on a Downloads folder in a temporary home folder, outside the workspace; "
+                         "listing a folder outside workspace/ is approved, everything else is declined (#49)")
     ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, *READ_VARIANTS, *EDIT_CASES, *TRACKING_GROUPS],
                     help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
                          "run, passing on the file written to disk or the figures reported (#87): "
@@ -424,10 +430,18 @@ def main() -> None:
         g.WORKSPACE = tmp / "workspace"
         expects = expects or make_counting_fixture(g.WORKSPACE)
         prompt = prompt or COUNTING_PROMPT
+    if args.counting_home:
+        home = tmp / "home"
+        home.mkdir()
+        os.environ["HOME"] = str(home)  # Path.home() and ~ now point at the fixture; the real home folder is not touched
+        g.WORKSPACE = tmp / "workspace"
+        g.WORKSPACE.mkdir(exist_ok=True)
+        expects = expects or make_counting_fixture(home, "Downloads")
+        prompt = prompt or COUNTING_HOME_PROMPT
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
     if not prompt and not args.tracking and not args.readonly:
-        ap.error("--prompt is required unless --tidepool, --listing, --counting, --tracking or --readonly is used")
+        ap.error("--prompt is required unless --tidepool, --listing, --counting, --counting-home, --tracking or --readonly is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
     web_server, web_info = None, {}
@@ -443,6 +457,9 @@ def main() -> None:
         g.CONFIRM = lambda desc: False
         g.ASK = lambda question: NO_ANSWER
     elif args.tracking:
+        g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
+    elif args.counting_home:
+        g.CONFIRM = lambda desc: desc.startswith("List folder outside workspace/")
         g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
     else:
         g.CONFIRM = lambda desc: False
@@ -460,7 +477,7 @@ def main() -> None:
             for case_name in READONLY_CASES if args.readonly == "all" else [args.readonly]:
                 run_readonly(args, tmp, case_name, ctx)
             return
-        label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "custom")
+        label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "counting-home" if args.counting_home else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
         for i in range(1, args.n + 1):

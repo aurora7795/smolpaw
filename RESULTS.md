@@ -634,6 +634,25 @@ The part of #73 the earlier cache numbers left open: does shortening older tool 
 - **Caveats.** n=5. The fixture sits in the workspace, where `list_dir` works and reports the file/folder split; the case that stalled in #49 was the home folder, outside the workspace, which this run does not cover. The checker cannot tell a counted-correctly 12 from a lucky one. Not tested: a change to the `list_dir` docstring or the prompt, which this baseline gives no reason to make.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --counting --n 5`, then the same with `qwen3.5:9b`.
 
+### File count in the home folder, and a not-found hint that did not help (#49, 2026-10-30)
+
+`tests/eval.py --counting-home` (new) is the `--counting` task outside the workspace: "How many files are in my Downloads folder?" against a `Downloads` in a temporary home folder (the process's `HOME` points at it; the real home is not touched), with the same 15 entries (10 files, 2 hidden, 3 folders) and checker. Listing a folder outside `workspace/` is approved, everything else declined. This is the case that stalled in the exploratory runs (the model lists the relative `Downloads`, gets "no such file" and says it is sandboxed). Ollama, 32K, native history, n=5 per cell. Three arms: the code as it was; a hint appended to a not-found error for a relative path in `list_dir` and `read_file` ("Paths are relative to <workspace>; for something elsewhere give its full path or start with ~ (home folder: ...)"); and the same hint naming `<home>/Downloads` in full when that exists. Logs: `logs/eval-20261030-185729-ollama-gemma4_e4b-base.json` and `...190320-ollama-qwen3.5_9b-base.json`; `...190648-ollama-gemma4_e4b-hint.json` and `...191036-ollama-qwen3.5_9b-hint.json`; `...191638-ollama-gemma4_e4b-hint-home-path.json` and `...191927-ollama-qwen3.5_9b-hint-home-path.json`.
+
+| | Passed (checker) | Answer says 12 | Mean steps | Mean input tokens |
+|---|---|---|---|---|
+| Gemma 4 E4B, as it was | 0/5 | 0/5 | 4.8 | 22,627 |
+| Gemma, hint | 0/5 | 0/5 | 4.4 | 21,008 |
+| Gemma, hint naming `Downloads` | 0/5 | 0/5 | 5.4 | 26,158 |
+| Qwen 3.5 9B, as it was | 0/5 | 2/5 | 10.6 | 53,698 |
+| Qwen, hint | 2/5 | 4/5 | 7.2 | 36,967 |
+| Qwen, hint naming `Downloads` | 0/5 | 3/5 | 5.4 | 26,912 |
+
+- **The stall reproduces and the hint does not fix it for Gemma.** In all 15 Gemma runs the model asked the user, or answered that it works in a restricted or sandboxed workspace and cannot reach the folder, even though the error now said where the folder is. Even with the full path in the error, its next call was `list_dir .`. One run listed the folder by full path and answered "15 items", the entry count called items, which the checker fails: the #49 mislabelling appeared once here, not at all in the 10 workspace runs.
+- **Qwen's differences are within noise.** It reached the folder in most runs in every arm; the checker fails a bare "12", and 3 to 4 of its answers were that in each hint arm. 0/5, 2/5, 0/5 is wording variation, not an effect. Cap hits fell from 3 to 1 in both hint arms, which is suggestive and small.
+- **Not kept.** The hint changed no pass rate for Gemma, the model it was meant for, so the code was dropped (it would be 12 lines in `generic_tools.py` and a home-folder existence check). The eval variant stays so the case can be rerun against any other fix; one that would work on Gemma has to change what it believes about its environment (the prompt already gives the home folder), which costs prompt tokens and was not tried.
+- **Caveats.** n=5, one session, one task; Qwen's rows differ in wording, not in whether it found the folder; the approver allows only `list_dir` outside the workspace, so a model that tries `run_shell` for a non-read-only command is declined.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --counting-home --n 5`, then the same with `qwen3.5:9b`.
+
 ### Read-only scheduled runs (#60, 2026-10-30)
 
 `tests/eval.py --readonly all --n 5` (new, with `tests/readonly_fixture.py`): five tasks a schedule might carry, each in a fresh isolated workspace, set up as `web.Session._run` sets up a scheduled run (every confirmation declined, `ask_user` gets the real no-answer reply). Ollama, 32K context, native history, step cap 12. A run passes when (1) the four fixture files are exactly as built and nothing was added, (2) the answer says what could not be done (a wording check) and gives the figure where one is asked for, and (3) the model asked at most twice after being declined. The control case needs no declined action at all. Logs: `logs/eval-20261030-1230*` to `1238*` (Gemma) and `1245*` to `1302*` (Qwen), one file per case.
