@@ -8,6 +8,7 @@ import os
 import stat
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -76,6 +77,38 @@ check("path traversal asks", g.run_shell("cat ../../etc/hosts") == g.DECLINED an
 check("~ path outside workspace asks (not treated as a workspace/~ folder)", g.run_shell("ls ~/Downloads") == g.DECLINED and asked())
 check("~ is expanded for scope checks", g._resolve("~") == Path.home().resolve())
 check("~ alone is outside scope, so not free", g._read_only_argv("ls ~") is None)
+
+# date that can only read the clock runs free (#51); every form that sets or reads anything else still asks
+date_free = {
+    "date": ["date"], "date -u": ["date", "-u"], "date +%Y-%m-%d": ["date", "+%Y-%m-%d"],
+    "date -u +%H:%M": ["date", "-u", "+%H:%M"], 'date "+%Y %m"': ["date", "+%Y %m"],
+    "TZ=Europe/Madrid date": ["env", "TZ=Europe/Madrid", "date"],
+    "TZ=Asia/Tokyo date +%z": ["env", "TZ=Asia/Tokyo", "date", "+%z"],
+    "TZ=America/Argentina/Buenos_Aires date -u": ["env", "TZ=America/Argentina/Buenos_Aires", "date", "-u"],
+}
+check("date forms that only read the clock are free", all(g._read_only_argv(c) == v for c, v in date_free.items()))
+date_asks = ["date -s 'Jan 1'", "date -s", "date --set=x", "date --set x", "date -d yesterday", "date -f file", "date -r a.txt",
+             "date 010112002026", "date 1231", "date -j", "date -v+1d", "date +%Y +%m", "date -u -u", "date -u +%Y -u",
+             "date +%Y -s", "date -u 0101", "date a.txt", "date ../x", "date -I", "date -R", "date --utc",
+             "TZ=../x date", "TZ=/etc/localtime date", "TZ=:UTC date", "TZ=A/B/C/D date", "TZ=Europe/Madrid TZ=UTC date",
+             "TZ=Europe/Madrid", "TZ= date", "TZ=Europe/Madrid env date", "TZ=Europe/Madrid ls", "FOO=bar date", "TZ=UTC; date",
+             "env date", "env TZ=UTC date", "date +%Y; rm a.txt", "date $(ls)", "date `ls`", "date +%Y | cat", "date > out.txt",
+             "date +" + "Y" * 70, "date -u+%Y", "date +%Y\ndate -s x"]
+check("date forms that set the clock, read a file, chain, or carry anything else still ask",
+      [c for c in date_asks if g._read_only_argv(c) is not None] == [])
+check("_date_argv itself refuses metacharacters in a format, without relying on the earlier SHELL_META check",
+      all(g._date_argv(["date", "+%Y" + ch + "x"]) is None for ch in ";&|<>`$()\\\n'\"*?[]{}~#!"))
+saved_windows = g.WINDOWS
+g.WINDOWS = True
+check("date is not free on Windows, where it is a PowerShell alias", g._read_only_argv("date") is None and g._read_only_argv("TZ=UTC date") is None)
+g.WINDOWS = saved_windows
+check("date is not in READ_ONLY_CMDS, so the eval's pipeline approver does not gain it", "date" not in g.READ_ONLY_CMDS)
+yr = g.run_shell("date +%Y")
+check("date +%Y runs without asking and prints the year", str(datetime.now().year) in yr and not asked())
+check("TZ=Asia/Tokyo date +%z runs without asking and honours the zone", "+0900" in g.run_shell("TZ=Asia/Tokyo date +%z") and not asked())
+check("TZ=Asia/Kolkata date +%z gives a different zone's offset", "+0530" in g.run_shell("TZ=Asia/Kolkata date +%z") and not asked())
+check("date -s asks and, declined, is not run", g.run_shell("date -s '2001-01-01'") == g.DECLINED and asked())
+check("a bare numeric date argument asks", g.run_shell("date 010112002001") == g.DECLINED and asked())
 check("home folder hint is in the prompt", str(Path.home()) in g.build_instructions())
 shell_log = tmp / "shell-log.jsonl"
 saved_shell_log, g._log_file = g._log_file, shell_log
