@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -652,22 +653,24 @@ except ValueError:
 check("edit() raises ValueError on a damaged file and does not rewrite it", raised and edit_tmp.read_text(encoding="utf-8") == "{ broken")
 edit_tmp.unlink()
 
-# edit and set_enabled racing: both changes survive
+# edit and set_enabled racing: a slow load() makes a lost update certain unless both hold the lock
 race_tmp = tmp / "edit_race.json"
 schedules.PATH = race_tmp
 r1 = schedules.add("race", "0 9 * * *", now=e_now)
-def _edit_many() -> None:
-    for i in range(20):
-        schedules.edit(r1["id"], prompt=f"p{i}", now=e_now)
-def _toggle_many() -> None:
-    for i in range(20):
-        schedules.set_enabled(r1["id"], i % 2 == 0)
-th = [threading.Thread(target=_edit_many), threading.Thread(target=_toggle_many)]
+real_load = schedules.load
+def _slow_load() -> list[dict]:
+    data = real_load()
+    time.sleep(0.05)
+    return data
+schedules.load = _slow_load
+th = [threading.Thread(target=lambda: schedules.edit(r1["id"], prompt="edited", now=e_now)),
+      threading.Thread(target=lambda: schedules.set_enabled(r1["id"], False))]
 for x in th: x.start()
 for x in th: x.join()
+schedules.load = real_load
 final = schedules.load()
-check("edit() racing set_enabled() leaves one valid schedule with both changes",
-      len(final) == 1 and final[0]["prompt"] == "p19" and final[0]["enabled"] is False)
+check("edit() racing set_enabled() keeps both changes",
+      len(final) == 1 and final[0]["prompt"] == "edited" and final[0]["enabled"] is False)
 race_tmp.unlink()
 
 print(f"\n{check.failed} failed")
