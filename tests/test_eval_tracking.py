@@ -332,8 +332,11 @@ try:
           and ok("12 files, including 2 hidden ones") and ok("It holds 10 regular files."))
     check("the entry count called files or items fails", not ok("There are 13 files in downloads/.")
           and not ok("15 items") and not ok("10 files, so 13 files in total"))
-    check("a count with no files wording, or the recursive count, fails", not ok("The count is 10.") and not ok("18 files in all")
-          and not ok("There are 10 folders and 3 files."))
+    check("a bare 10 or 12 passes, since no other count in the fixture is either", ok("12") and ok("The count is 10.")
+          and ok("10 visible and 2 hidden, so 12"))
+    check("a bare entry count, the recursive count, or 10 or 12 counting folders or items fails",
+          not ok("13") and not ok("15") and not ok("18 files in all") and not ok("There are 10 folders and 3 files.")
+          and not ok("12 items") and not ok("12 entries") and not ok("It is sandboxed and cannot say."))
 
     # --- isolation ----------------------------------------------------------------------------
     check("the stub runs recorded clipped_results", "clipped_results" in r)
