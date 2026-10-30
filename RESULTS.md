@@ -736,3 +736,22 @@ The part of #73 the earlier cache numbers left open: does shortening older tool 
 - **Qwen's other failures** were two `read_and_save` answers that gave "482 cm" and said nothing about the refused save.
 - **Caveats.** n=5 per cell; one fixture, one phrasing per task; the wording check is a heuristic (I read every failure that did not hit the cap and each was a miss of the kind described above, but a different phrase for "could not" would be missed). The step cap of 12 is the eval's; the scheduler's timeout would end a real run differently. Not tested: other models, a prompt that says the run is read-only, and a harness stop after a number of declines.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --readonly all --n 5`, then the same with `qwen3.5:9b`. `tests/test_eval_tracking.py` checks the runner and checker without a model.
+
+## Granite 4.2 8B sanity check (Tidepool `easy`, 2026-10-30)
+
+`granite-4.2-8b-mlx` (LM Studio, 8B, 4.95 GB on disk), loaded at 32768 context, by `tests/eval.py` on the Tidepool `easy` variant (expected answer: Kestrel, 340 tons). The first call is `step_stats[0].input_tokens` from the saved log (`usage.prompt_tokens` of the first model call).
+
+| Cell | History | Run | Passed | Steps | Parse errors | Input / output tokens | Wall | Tools called | Final answer |
+|---|---|---|---|---|---|---|---|---|---|
+| `granite-easy` | native | 1 | yes | 3 | 0 | 15,362 / 487 | 66.4s | http_request, http_request, final_answer | Kestrel, 340 tons |
+| | | 2 | yes | 4 | 0 | 20,552 / 600 | 333.7s | http_request x3, final_answer | Kestrel, 340 tons |
+| | | 3 | no | 2 | 0 | 4,927 / 136 | 16.6s | http_request | none (HTTP 400 on the second call) |
+| `granite-easy-text` | `--text-history` | 1 | yes | 3 | 0 | 15,380 / 529 | 64.0s | http_request x2, final_answer | Kestrel, 340 tons |
+| | | 2 | yes | 4 | 0 | 20,585 / 625 | 45.1s | http_request x3, final_answer | Kestrel, 340 tons |
+| | | 3 | no | 2 | 0 | 4,927 / 152 | 39.5s | http_request | none (HTTP 400 on the second call) |
+
+- **First call: 4,927 tokens** in all six runs. Qwen 3.5 9B about 4,855 and Gemma 4 E4B about 4,524 were measured on a different request and backend (RESULTS.md, #49), so the gap (+72 and +403) is not a clean comparison. It is under the 5K budget by 73 tokens. Why it is larger than Gemma's was not investigated.
+- **Real tool calls, no parse errors.** All 12 model calls that returned produced a native tool call (`parse_errors` 0 in every run, both cells). The history format made no visible difference: both cells passed 2 of 3 with near-identical token counts.
+- **The one failure is memory, not format.** Run 3 failed identically in both cells: the second model call returned HTTP 400. LM Studio's server log has, at the matching times (22:05:37 and 22:08:38), `[METAL] Command buffer execution failed: Insufficient Memory` during generation. Granite at 32768 context on this 16GB machine ran out of GPU memory; the first cell's run 2 taking 333.7s against 45.1s in the text cell is consistent with memory pressure, but that is an inference, not measured. The failure came on the same first request (`/api`) in both cells, which may be chance.
+- **Caveats.** n=3 per cell, one variant (`easy`), LM Studio only, one session, one machine. The two cells are not independent evidence of the OOM rate. Whether a smaller `--ctx` avoids the OOM was not tried.
+- Reproduce: `.venv/bin/python tests/eval.py --backend lmstudio --model granite-4.2-8b-mlx --ctx 32768 --tidepool easy --n 3 --label granite-easy` (add `--text-history --label granite-easy-text` for the second cell).
