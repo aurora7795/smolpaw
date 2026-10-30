@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -576,6 +577,101 @@ check("old file without fields is not rewritten by load()", outcome_tmp.read_tex
 
 if outcome_tmp.exists():
     outcome_tmp.unlink()
+
+# edit
+edit_tmp = tmp / "edit.json"
+schedules.PATH = edit_tmp
+if edit_tmp.exists():
+    edit_tmp.unlink()
+e_now = datetime(2026, 10, 26, 12, 0)
+e1 = schedules.add("first prompt", "0 9 * * *", now=e_now)
+e2 = schedules.add("second prompt", "0 10 * * *", now=e_now)
+schedules.set_enabled(e1["id"], False)
+schedules.mark_ran(e1["id"], datetime(2026, 10, 26, 9, 0))
+schedules.mark_outcome(e1["id"], "ok")
+before_other = [s for s in schedules.load() if s["id"] == e2["id"]][0]
+
+later = datetime(2026, 10, 27, 8, 30)
+upd = schedules.edit(e1["id"], prompt="changed prompt", now=later)
+stored = [s for s in schedules.load() if s["id"] == e1["id"]][0]
+check("edit() with a prompt returns the updated schedule", upd == stored and stored["prompt"] == "changed prompt")
+check("edit() of the prompt alone keeps cron and next_run",
+      stored["cron"] == "0 9 * * *" and stored["next_run"] == "2026-10-27T09:00:00")
+check("edit() keeps enabled, last_run and the last outcome",
+      stored["enabled"] is False and stored["last_run"] == "2026-10-26T09:00:00" and stored["last_status"] == "ok")
+
+upd = schedules.edit(e1["id"], cron="30 18 * * *", now=later)
+stored = [s for s in schedules.load() if s["id"] == e1["id"]][0]
+check("edit() of the cron recomputes next_run from now",
+      stored["cron"] == "30 18 * * *" and stored["next_run"] == "2026-10-27T18:30:00" and upd["next_run"] == stored["next_run"])
+check("edit() of the cron keeps the prompt", stored["prompt"] == "changed prompt")
+
+schedules.edit(e1["id"], cron="30 18 * * *", now=datetime(2026, 10, 28, 1, 0))
+stored = [s for s in schedules.load() if s["id"] == e1["id"]][0]
+check("edit() with an unchanged cron leaves next_run alone", stored["next_run"] == "2026-10-27T18:30:00")
+
+upd = schedules.edit(e1["id"], prompt="both", cron="0 6 * * *", now=later)
+check("edit() can change prompt and cron together", upd["prompt"] == "both" and upd["cron"] == "0 6 * * *")
+after_other = [s for s in schedules.load() if s["id"] == e2["id"]][0]
+check("edit() leaves other schedules untouched", after_other == before_other)
+check("edit() returns None for an unknown id and writes nothing", schedules.edit("nonexistent", prompt="x") is None)
+
+bytes_before = edit_tmp.read_bytes()
+for label, kwargs in [
+    ("nothing to change", {}),
+    ("empty prompt", {"prompt": ""}),
+    ("whitespace prompt", {"prompt": "   "}),
+    ("prompt over the limit", {"prompt": "x" * (schedules.MAX_PROMPT + 1)}),
+    ("non-string prompt", {"prompt": 5}),
+    ("empty cron", {"cron": ""}),
+    ("non-string cron", {"cron": 5}),
+    ("invalid cron", {"cron": "61 * * * *"}),
+    ("not a cron", {"cron": "not a cron"}),
+]:
+    try:
+        schedules.edit(e1["id"], **kwargs)
+        raised = False
+    except ValueError:
+        raised = True
+    check(f"edit() raises ValueError for {label}", raised)
+check("edit() writes nothing when it raises", edit_tmp.read_bytes() == bytes_before)
+try:
+    schedules.edit("nonexistent", cron="61 * * * *")
+    raised = False
+except ValueError:
+    raised = True
+check("edit() validates before looking up the id", raised)
+upd = schedules.edit(e1["id"], prompt="x" * schedules.MAX_PROMPT, now=later)
+check("edit() accepts a prompt of exactly the limit", len(upd["prompt"]) == schedules.MAX_PROMPT)
+
+edit_tmp.write_text("{ broken", encoding="utf-8")
+try:
+    schedules.edit(e1["id"], prompt="x")
+    raised = False
+except ValueError:
+    raised = True
+check("edit() raises ValueError on a damaged file and does not rewrite it", raised and edit_tmp.read_text(encoding="utf-8") == "{ broken")
+edit_tmp.unlink()
+
+# edit and set_enabled racing: a slow load() makes a lost update certain unless both hold the lock
+race_tmp = tmp / "edit_race.json"
+schedules.PATH = race_tmp
+r1 = schedules.add("race", "0 9 * * *", now=e_now)
+real_load = schedules.load
+def _slow_load() -> list[dict]:
+    data = real_load()
+    time.sleep(0.05)
+    return data
+schedules.load = _slow_load
+th = [threading.Thread(target=lambda: schedules.edit(r1["id"], prompt="edited", now=e_now)),
+      threading.Thread(target=lambda: schedules.set_enabled(r1["id"], False))]
+for x in th: x.start()
+for x in th: x.join()
+schedules.load = real_load
+final = schedules.load()
+check("edit() racing set_enabled() keeps both changes",
+      len(final) == 1 and final[0]["prompt"] == "edited" and final[0]["enabled"] is False)
+race_tmp.unlink()
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

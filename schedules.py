@@ -261,6 +261,35 @@ def add(prompt: str, cron: str, now: datetime | None = None) -> dict:
         return item
 
 
+def edit(id: str, prompt: str | None = None, cron: str | None = None, now: datetime | None = None) -> dict | None:
+    """Change a schedule's prompt and/or cron, returning the updated schedule, or None if the id is unknown.
+
+    A changed cron recomputes next_run from `now`; enabled, last_run and the last outcome are kept.
+    """
+    if prompt is None and cron is None:
+        raise ValueError("Nothing to change: give a prompt or a cron expression")
+    if prompt is not None and (not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT):
+        raise ValueError(f"Prompt must be non-empty and at most {MAX_PROMPT} characters")
+    if cron is not None and (not isinstance(cron, str) or not cron.strip()):
+        raise ValueError("Cron expression must be a non-empty string")
+
+    now_dt = now if now is not None else datetime.now()
+    next_dt = next_run(cron, now_dt) if cron is not None else None
+
+    with _LOCK:
+        schedules = load()
+        for s in schedules:
+            if s.get("id") == id:
+                if prompt is not None:
+                    s["prompt"] = prompt
+                if cron is not None and cron != s.get("cron"):
+                    s["cron"] = cron
+                    s["next_run"] = next_dt.isoformat()
+                _atomic_save(schedules)
+                return s
+        return None
+
+
 def remove(id: str) -> bool:
     """Remove a schedule by id. Returns True if removed, False if not found."""
     with _LOCK:
