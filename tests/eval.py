@@ -153,6 +153,7 @@ def ensure_model(model: str, ctx: int, backend: str = "lmstudio") -> int | None:
 
 
 TRACKING_CASES = ["edit_one_section", "append_keep_all", "read_three_report"]
+READ_VARIANTS = ["read_three_every_page", "read_three_reversed", "read_two_report", "read_four_report"]  # #89
 EDIT_CASES = ["edit_duplicate_passage", "edit_last_line", "edit_special_chars", "edit_across_clip", "edit_crlf"]
 READONLY_CASES = ["write_summary", "read_and_save", "read_only_control", "append_log", "delete_old"]
 TRACKING_GROUPS = {"all": TRACKING_CASES, "edit": EDIT_CASES}  # `all` stays the original three, so earlier results stay comparable
@@ -324,7 +325,7 @@ def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
     results, prompt, expects = [], "", []
     for i in range(1, args.n + 1):
         ws = tmp / f"tracking-{case_name}-{i}"
-        case = next(c for c in tracking_fixture.build(ws) if c.name == case_name)
+        case = next(c for c in tracking_fixture.build(ws, variants=case_name in READ_VARIANTS) if c.name == case_name)
         g.WORKSPACE, g.UNDO_DIR = ws, tmp / f".undo-{case_name}-{i}"
         g.CONFIRM = workspace_write_confirm(ws)
         prompt, expects = case.prompt, case.expects
@@ -375,10 +376,10 @@ def main() -> None:
                     help="folder-listing task on a generated 55-entry downloads/ in an isolated workspace (#46)")
     ap.add_argument("--counting", action="store_true",
                     help="file-count task on a generated downloads/ with files, hidden files and folders (#49)")
-    ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, *EDIT_CASES, *TRACKING_GROUPS],
+    ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, *READ_VARIANTS, *EDIT_CASES, *TRACKING_GROUPS],
                     help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
                          "run, passing on the file written to disk or the figures reported (#87): "
-                         + "|".join([*TRACKING_CASES, *EDIT_CASES, *TRACKING_GROUPS]))
+                         + "|".join([*TRACKING_CASES, *READ_VARIANTS, *EDIT_CASES, *TRACKING_GROUPS]))
     ap.add_argument("--readonly", metavar="CASE", choices=[*READONLY_CASES, "all"],
                     help="scheduled-run read-only task from tests/readonly_fixture.py in a fresh isolated workspace per "
                          "run: every confirmation is declined, passing on the files left unchanged, an answer that says "
