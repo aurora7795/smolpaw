@@ -322,6 +322,11 @@ try:
           sum(p.is_file() and not p.name.startswith(".") for p in top) == 10
           and sum(p.is_file() and p.name.startswith(".") for p in top) == 2 and sum(p.is_dir() for p in top) == 3)
     check("each counting folder holds 2 files", all(len(list(p.iterdir())) == 2 for p in top if p.is_dir()))
+    hdir = tmp / "count-home"
+    ev.make_counting_fixture(hdir, "Downloads")
+    check("the home variant builds the same fixture under a named folder (#49)",
+          len(list((hdir / "Downloads").iterdir())) == 15
+          and "Downloads" in ev.COUNTING_HOME_PROMPT)
     ok = lambda a: bool(re.search(pat, a, re.I))  # noqa: E731
     check("a count of the top-level files passes", ok("There are 10 files in downloads/.") and ok("10 files and 3 folders")
           and ok("12 files, including 2 hidden ones") and ok("It holds 10 regular files."))
