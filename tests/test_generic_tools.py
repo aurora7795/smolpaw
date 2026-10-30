@@ -2047,6 +2047,272 @@ check("the new code path contains no innerHTML", "innerHTML" not in appr_code_pa
 da_srv.shutdown()
 g.LOG_DIR = saved_log_dir
 
+# schedules view and /api/schedules (#80, read-only half)
+import schedules
+saved_schedules_path = schedules.PATH
+real_schedules_bytes = saved_schedules_path.read_bytes() if saved_schedules_path.exists() else None
+sched_test_file = tmp / "test_schedules.json"
+schedules.PATH = sched_test_file
+
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    sched_port = s.getsockname()[1]
+sched_appr = web.Approvals(timeout=0)
+sched_sess = web.Session(build_agent("m1", "tool", 5, "generic", "lmstudio"), "m1", sched_appr, "lmstudio", 5)
+sched_srv = web.serve("127.0.0.1", sched_port, token, sched_appr, sched_sess, {"mode": "agent"})
+sched_base = f"http://127.0.0.1:{sched_port}"
+
+# 1. empty list when the file is missing
+if sched_test_file.exists():
+    sched_test_file.unlink()
+r_missing = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+check("api/schedules returns 200 with empty list when file is missing",
+      r_missing.status_code == 200 and r_missing.json() == {"schedules": [], "error": ""})
+st_missing = http.get(f"{sched_base}/api/state", headers=hdr, timeout=5).json()
+check("api/state schedules_error is empty when schedules file is missing", st_missing.get("schedules_error") == "")
+
+# 2. token missing and wrong token refused like the other GETs (403)
+r_no_tok = http.get(f"{sched_base}/api/schedules", timeout=5)
+check("api/schedules refuses missing token with 403",
+      r_no_tok.status_code == 403 and r_no_tok.json() == {"error": "missing or wrong token"})
+r_bad_tok = http.get(f"{sched_base}/api/schedules", headers={"X-Token": "wrong"}, timeout=5)
+check("api/schedules refuses wrong token with 403",
+      r_bad_tok.status_code == 403 and r_bad_tok.json() == {"error": "missing or wrong token"})
+r_query_tok = http.get(f"{sched_base}/api/schedules?t={token}", timeout=5)
+check("api/schedules accepts token via query param", r_query_tok.status_code == 200)
+
+# 3. valid list
+good_schedules = [{
+    "id": "s1",
+    "prompt": "run something daily",
+    "cron": "0 9 * * *",
+    "enabled": True,
+    "next_run": "2026-10-31T09:00:00",
+    "last_run": "2026-10-30T09:00:00",
+    "last_status": "ok",
+    "last_error": "",
+}]
+sched_test_file.write_text(json.dumps(good_schedules), encoding="utf-8")
+r_good = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+check("api/schedules returns valid list of schedules with 200",
+      r_good.status_code == 200 and r_good.json() == {"schedules": good_schedules, "error": ""})
+
+# 4. fields coerced and missing keys tolerated
+coerced_input = [{
+    "id": 12345,
+    "cron": 67890,
+    "enabled": "yes",
+    "prompt": 4242,
+}]
+sched_test_file.write_text(json.dumps(coerced_input), encoding="utf-8")
+r_coerced = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()
+entry_coerced = r_coerced["schedules"][0]
+check("api/schedules coerces fields to string and enabled to bool while tolerating missing keys",
+      isinstance(entry_coerced["id"], str) and entry_coerced["id"] == "12345"
+      and isinstance(entry_coerced["cron"], str) and entry_coerced["cron"] == "67890"
+      and isinstance(entry_coerced["enabled"], bool) and entry_coerced["enabled"] is True
+      and isinstance(entry_coerced["prompt"], str) and entry_coerced["prompt"] == "4242"
+      and entry_coerced["next_run"] is None
+      and entry_coerced["last_run"] is None
+      and entry_coerced["last_status"] == ""
+      and entry_coerced["last_error"] == "")
+
+# 5. capped at 100 entries
+many_entries = [{"id": f"id_{i}", "cron": "* * * * *", "enabled": True, "prompt": f"p_{i}"} for i in range(110)]
+sched_test_file.write_text(json.dumps(many_entries), encoding="utf-8")
+r_many = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()
+check("api/schedules caps list at 100 entries",
+      len(r_many["schedules"]) == 100
+      and r_many["schedules"][0]["id"] == "id_0"
+      and r_many["schedules"][-1]["id"] == "id_99")
+
+# 6. prompt and last_error clipped at 500
+long_prompt = "P" * 600
+long_last_error = "E" * 600
+clip_input = [{
+    "id": "clip_test",
+    "cron": "* * * * *",
+    "enabled": True,
+    "prompt": long_prompt,
+    "last_error": long_last_error,
+}]
+sched_test_file.write_text(json.dumps(clip_input), encoding="utf-8")
+r_clip = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()
+e_clip = r_clip["schedules"][0]
+check("api/schedules clips prompt and last_error to 500 characters",
+      len(e_clip["prompt"]) == 500 and e_clip["prompt"] == "P" * 500
+      and len(e_clip["last_error"]) == 500 and e_clip["last_error"] == "E" * 500)
+
+# 7. a registered secret in prompt or last_error does not appear in the response
+saved_notes = g.NOTES
+test_sec_notes = tmp / "notes_for_sched_secret.md"
+test_sec_notes.write_text("- svc: http://example.com | key_env=TEST_SCHED_SECRET\n")
+os.environ["TEST_SCHED_SECRET"] = "registered-secret-sched-77777"
+g.NOTES = test_sec_notes
+
+sec_schedule = [{
+    "id": "s_sec",
+    "cron": "* * * * *",
+    "enabled": True,
+    "prompt": "run task with registered-secret-sched-77777 in prompt",
+    "last_error": "failed with registered-secret-sched-77777 in error",
+}]
+sched_test_file.write_text(json.dumps(sec_schedule), encoding="utf-8")
+r_sec = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+g.NOTES = saved_notes
+del os.environ["TEST_SCHED_SECRET"]
+
+sec_json = r_sec.json()
+check("api/schedules redacts registered secrets in prompt and last_error",
+      "registered-secret-sched-77777" not in r_sec.text
+      and "[REDACTED]" in r_sec.text
+      and sec_json["schedules"][0]["prompt"] == "run task with [REDACTED] in prompt"
+      and sec_json["schedules"][0]["last_error"] == "failed with [REDACTED] in error")
+
+# 8. prompt containing <script> and HTML tags comes back as plain text unchanged
+html_prompt = "<script>alert('xss')</script><b>bold prompt</b>"
+html_schedule = [{
+    "id": "s_html",
+    "cron": "* * * * *",
+    "enabled": True,
+    "prompt": html_prompt,
+}]
+sched_test_file.write_text(json.dumps(html_schedule), encoding="utf-8")
+r_html = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()
+check("api/schedules returns prompt with <script> and HTML tags as plain text unchanged",
+      r_html["schedules"][0]["prompt"] == html_prompt)
+
+# 9. damaged file gives 200 with empty list and non-empty error; /api/state carries same error; empty again when fixed
+sched_test_file.write_text("{ corrupt json: [", encoding="utf-8")
+r_corrupt = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+st_corrupt = http.get(f"{sched_base}/api/state", headers=hdr, timeout=5).json()
+check("damaged file with invalid JSON gives 200 with empty list and non-empty error",
+      r_corrupt.status_code == 200
+      and r_corrupt.json()["schedules"] == []
+      and r_corrupt.json()["error"] != ""
+      and "Corrupt schedules file" in r_corrupt.json()["error"]
+      and st_corrupt.get("schedules_error") == r_corrupt.json()["error"])
+
+sched_test_file.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
+r_obj = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+st_obj = http.get(f"{sched_base}/api/state", headers=hdr, timeout=5).json()
+check("damaged file with JSON object gives 200 with empty list and non-empty error",
+      r_obj.status_code == 200
+      and r_obj.json()["schedules"] == []
+      and r_obj.json()["error"] != ""
+      and "expected JSON array/list" in r_obj.json()["error"]
+      and st_obj.get("schedules_error") == r_obj.json()["error"])
+
+sched_test_file.write_text(json.dumps(["not a dict entry"]), encoding="utf-8")
+r_nondict = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+st_nondict = http.get(f"{sched_base}/api/state", headers=hdr, timeout=5).json()
+check("damaged file with non-dict entry gives 200 with empty list and non-empty error",
+      r_nondict.status_code == 200
+      and r_nondict.json()["schedules"] == []
+      and r_nondict.json()["error"] != ""
+      and "entries must be dicts" in r_nondict.json()["error"]
+      and st_nondict.get("schedules_error") == r_nondict.json()["error"])
+
+sched_test_file.write_text(json.dumps(good_schedules), encoding="utf-8")
+r_fixed = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+st_fixed = http.get(f"{sched_base}/api/state", headers=hdr, timeout=5).json()
+check("after damaged schedules file is fixed, error fields are empty again",
+      r_fixed.status_code == 200
+      and len(r_fixed.json()["schedules"]) == 1
+      and r_fixed.json()["error"] == ""
+      and st_fixed.get("schedules_error") == "")
+
+# 10. viewing executes nothing
+bytes_before = sched_test_file.read_bytes()
+status_before = sched_sess.status
+run_id_before = sched_sess._run_id
+sched_confirm_calls: list[str] = []
+saved_confirm_hook = g.CONFIRM
+g.CONFIRM = lambda d: (sched_confirm_calls.append(d), False)[1]
+
+http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+http.get(f"{sched_base}/api/state", headers=hdr, timeout=5)
+
+g.CONFIRM = saved_confirm_hook
+check("viewing schedules executes nothing: file bytes identical, session status unchanged, no run starts, confirm empty",
+      sched_test_file.read_bytes() == bytes_before
+      and sched_sess.status == status_before
+      and sched_sess._run_id == run_id_before
+      and len(sched_confirm_calls) == 0)
+
+# 11. prompts never reach the console (stdout/stderr)
+distinctive_sched_prompt = "DISTINCTIVE_PROMPT_SECRET_XYZ_987654321"
+sched_test_file.write_text(json.dumps([{
+    "id": "s_distinct",
+    "cron": "* * * * *",
+    "enabled": True,
+    "prompt": distinctive_sched_prompt,
+}]), encoding="utf-8")
+
+import io
+import contextlib
+buf_out = io.StringIO()
+buf_err = io.StringIO()
+with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+    http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+    http.get(f"{sched_base}/api/state", headers=hdr, timeout=5)
+
+check("prompts never reach console stdout or stderr",
+      distinctive_sched_prompt not in buf_out.getvalue()
+      and distinctive_sched_prompt not in buf_err.getvalue())
+
+# 12. odd inputs from the page's point of view
+odd_input = [
+    {"id": "odd_no_prompt", "cron": "* * * * *", "enabled": True},
+    {"id": "odd_empty_prompt", "cron": "* * * * *", "enabled": True, "prompt": ""},
+    {"id": "odd_str_enabled", "cron": "* * * * *", "enabled": "non-empty-string", "prompt": "p"},
+    {"id": "odd_null_next", "cron": "* * * * *", "enabled": True, "next_run": None, "prompt": "p"},
+    {"id": "x" * 200, "cron": "* * * * *", "enabled": True, "prompt": "p"},
+]
+sched_test_file.write_text(json.dumps(odd_input), encoding="utf-8")
+r_odd = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()
+by_id = {s["id"]: s for s in r_odd["schedules"]}
+check("odd inputs: schedule with no prompt gets empty prompt string", by_id["odd_no_prompt"]["prompt"] == "")
+check("odd inputs: schedule with empty prompt gets empty prompt string", by_id["odd_empty_prompt"]["prompt"] == "")
+check("odd inputs: schedule with enabled string coerced to bool", by_id["odd_str_enabled"]["enabled"] is True)
+check("odd inputs: schedule with next_run of null preserves None/null", by_id["odd_null_next"]["next_run"] is None)
+check("odd inputs: schedule with 200-character id preserved", "x" * 200 in by_id and len(by_id["x" * 200]["id"]) == 200)
+
+# 13. page checks: presence of element id, call to /api/schedules, error line, Could not load schedules, textContent, no innerHTML
+page_html = http.get(f"{sched_base}/?t={token}", timeout=5).text
+check("web page contains schedules card element id", 'id="schedulescard"' in page_html)
+check("web page contains fetch of /api/schedules", 'await api("/api/schedules")' in page_html)
+check("web page contains Could not load schedules error text", 'loadErr.textContent = "Could not load schedules"' in page_html)
+check("web page renders error line text", 'errLine.textContent = "schedules.json problem: " + schedulesError' in page_html)
+check("web page clips schedule prompt to 200 characters using textContent", 'p.textContent = (s.prompt || "").slice(0, 200)' in page_html)
+check("web page adds schedules to refresh cycle", 'schedKey !== schedulesKey' in page_html and 'loadSchedules()' in page_html)
+
+idx_sched_func = page_html.index("function renderSchedules")
+idx_runs_func = page_html.index("function renderRuns")
+sched_fn_code = page_html[idx_sched_func:idx_runs_func]
+check("new renderSchedules function contains no innerHTML", "innerHTML" not in sched_fn_code)
+
+# 14. served page contains no add/edit/delete/enable control for schedules
+check("served page contains no POST call for /api/schedules",
+      'api("/api/schedules", ' not in page_html and 'api("/api/schedules",{method:"POST"' not in page_html)
+idx_sched_card = page_html.index('id="schedulescard"')
+idx_recents = page_html.index('class="recents"')
+sched_card_html = page_html[idx_sched_card:idx_recents]
+check("served page schedules card contains no add/edit/delete/enable controls",
+      "button" not in sched_card_html
+      and "input" not in sched_card_html
+      and "form" not in sched_card_html
+      and "textarea" not in sched_card_html)
+r_post_sched = http.post(f"{sched_base}/api/schedules", headers=hdr, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
+check("POST /api/schedules route is not found (out of scope)", r_post_sched.status_code == 404)
+
+sched_srv.shutdown()
+schedules.PATH = saved_schedules_path
+if sched_test_file.exists():
+    sched_test_file.unlink()
+check("real schedules.json is untouched by test suite",
+      not saved_schedules_path.exists() if real_schedules_bytes is None else saved_schedules_path.read_bytes() == real_schedules_bytes)
+
 # model-written one-sentence summaries for recent runs (#47)
 # 1. first line only, clipped to 100 characters
 stub_multiline = lambda text: "First line of summary.\nSecond line should be ignored.\nThird line."

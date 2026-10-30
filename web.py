@@ -697,6 +697,47 @@ def _files_payload() -> dict:
     }
 
 
+def _schedules_payload() -> tuple[list[dict], str]:
+    """Read-only view of schedules.json, redacted and clipped."""
+    try:
+        raw_list = schedules.load()
+    except ValueError as e:
+        return [], g._redact(str(e))[:500]
+    except Exception as e:
+        return [], g._redact(str(e))[:500]
+    items = []
+    for item in raw_list[:100]:
+        if not isinstance(item, dict):
+            continue
+        next_run_raw = item.get("next_run")
+        last_run_raw = item.get("last_run")
+        last_status_raw = item.get("last_status")
+        last_err_raw = item.get("last_error")
+        prompt_raw = item.get("prompt")
+        items.append({
+            "id": g._redact(str(item.get("id") if item.get("id") is not None else "")),
+            "cron": g._redact(str(item.get("cron") if item.get("cron") is not None else "")),
+            "enabled": bool(item.get("enabled")),
+            "next_run": g._redact(str(next_run_raw)) if next_run_raw is not None else None,
+            "last_run": g._redact(str(last_run_raw)) if last_run_raw is not None else None,
+            "last_status": g._redact(str(last_status_raw if last_status_raw is not None else "")),
+            "last_error": g._redact(str(last_err_raw if last_err_raw is not None else ""))[:500],
+            "prompt": g._redact(str(prompt_raw if prompt_raw is not None else ""))[:500],
+        })
+    return items, ""
+
+
+def _schedules_error() -> str:
+    """Return an error string if schedules.json cannot be loaded, else ''."""
+    try:
+        schedules.load()
+        return ""
+    except ValueError as e:
+        return g._redact(str(e))[:500]
+    except Exception as e:
+        return g._redact(str(e))[:500]
+
+
 def make_handler(token: str, approvals: Approvals, session: Session | None, info: dict):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args) -> None:
@@ -730,6 +771,7 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 curr_summary = _run_summary(g._log_file) if g._log_file else ""
                 return self._send(200, {
                     **info, "can_run": s is not None,
+                    "schedules_error": _schedules_error(),
                     **({"backends": sorted(BACKENDS), "backend": s.backend, "model": s.model,
                         "max_steps": s.max_steps, "timeout": approvals.timeout,
                         "run_summaries": s.run_summaries,
@@ -760,6 +802,9 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, _files_payload())
             if path == "/api/runs":
                 return self._send(200, _list_runs())
+            if path == "/api/schedules":
+                sched_items, sched_err = _schedules_payload()
+                return self._send(200, {"schedules": sched_items, "error": sched_err})
             if path in ("/api/run_feed", "/api/run_detail"):
                 run_id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                 if not run_id or "/" in run_id or "\\" in run_id:
@@ -961,6 +1006,10 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 #approvalscard h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px; }
 .approvalitem { padding:6px 0; border-bottom:1px solid var(--line); }
 .approvalitem:last-child { border-bottom:0; }
+#schedulescard { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; font-size:13px; }
+#schedulescard h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px; }
+.scheduleitem { padding:6px 0; border-bottom:1px solid var(--line); }
+.scheduleitem:last-child { border-bottom:0; }
 .approvalprompt { font-weight:500; margin:4px 0; overflow-wrap:anywhere; }
 .approvalactions { margin:4px 0; padding-left:18px; font-size:12px; color:var(--muted); font-family:ui-monospace, Menlo, monospace; }
 .badge { display:inline-block; font-size:11px; font-weight:600; padding:1px 5px; border-radius:4px;
@@ -995,6 +1044,12 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <h2>Needs approval</h2>
     <div id="approvalslist"></div>
     <div class="meta" id="dismissmsg" style="margin-top:6px"></div>
+  </div>
+  <div class="card" id="schedulescard" hidden>
+    <h2>Schedules</h2>
+    <div class="meta" id="scheduleserror" style="color:var(--no);margin-bottom:6px" hidden></div>
+    <div id="scheduleslist"></div>
+    <div class="meta" id="schedulesloaderr" style="color:var(--no);margin-top:6px" hidden>Could not load schedules</div>
   </div>
   <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
@@ -1147,6 +1202,7 @@ $("sapply").onclick = async () => {
 };
 let lastSig = null, selectedThread = "", historyKey = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
 let approvalsData = [];
+let schedulesData = [], schedulesError = "", schedulesLoadError = false, schedulesKey = null, schedPoll = 0;
 function renderApprovals() {
   const card = $("approvalscard");
   const list = $("approvalslist");
@@ -1202,6 +1258,69 @@ function renderApprovals() {
     item.appendChild(row);
     list.appendChild(item);
   }
+}
+function renderSchedules() {
+  const card = $("schedulescard");
+  const list = $("scheduleslist");
+  while (list.firstChild) list.removeChild(list.firstChild);
+  const errLine = $("scheduleserror");
+  const loadErr = $("schedulesloaderr");
+  if (schedulesLoadError) {
+    loadErr.textContent = "Could not load schedules";
+    loadErr.hidden = false;
+  } else {
+    loadErr.textContent = "";
+    loadErr.hidden = true;
+  }
+  if (schedulesError) {
+    errLine.textContent = "schedules.json problem: " + schedulesError;
+    errLine.hidden = false;
+  } else {
+    errLine.textContent = "";
+    errLine.hidden = true;
+  }
+  if (!schedulesData.length && !schedulesError && !schedulesLoadError) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  for (const s of schedulesData) {
+    const item = document.createElement("div");
+    item.className = "scheduleitem";
+    const meta = document.createElement("div");
+    meta.className = "runmeta";
+    const statusText = s.enabled ? "on" : "off";
+    let metaParts = [s.id, s.cron, statusText];
+    if (s.next_run) metaParts.push("next: " + String(s.next_run).replace("T", " "));
+    if (s.last_run) metaParts.push("last: " + String(s.last_run).replace("T", " "));
+    if (s.last_status) metaParts.push(s.last_status);
+    meta.textContent = metaParts.join(" · ");
+    item.appendChild(meta);
+    if (s.last_error) {
+      const errDiv = document.createElement("div");
+      errDiv.className = "runmeta";
+      errDiv.style.color = "var(--no)";
+      errDiv.textContent = "error: " + s.last_error;
+      item.appendChild(errDiv);
+    }
+    const p = document.createElement("div");
+    p.className = "approvalprompt";
+    p.textContent = (s.prompt || "").slice(0, 200);
+    item.appendChild(p);
+    list.appendChild(item);
+  }
+}
+async function loadSchedules() {
+  try {
+    const res = await api("/api/schedules");
+    if (!res || res.error === undefined) throw new Error();
+    schedulesData = res.schedules || [];
+    schedulesError = res.error || "";
+    schedulesLoadError = false;
+  } catch (e) {
+    schedulesLoadError = true;
+  }
+  renderSchedules();
 }
 function renderRuns() {
   const container = $("runslist");
@@ -1286,6 +1405,9 @@ async function refresh() {
   if (approvalsData.map(a => a.id).join(",") !== prevApprKey) {
     renderRuns();
   }
+  if (s.schedules_error !== undefined) schedulesError = s.schedules_error;
+  const schedKey = [schedulesError, s.status, s.run_id].join("|");
+  if (schedKey !== schedulesKey || ++schedPoll >= 4) { schedPoll = 0; schedulesKey = schedKey; loadSchedules(); }
   $("meta").textContent = [s.mode, s.backend, s.model, s.status, s.progress].filter(Boolean).join(" · ");
   const p = s.pending;
   $("pending").hidden = !p;
