@@ -2354,6 +2354,17 @@ check("web page contains calls to all three write routes",
 check("web page delete button requires second click with Delete? confirmation",
       'delBtn.textContent = "Delete?";' in page_html
       and 'if (!delArmed)' in page_html)
+# review additions: presence checks only (no browser harness), one per behaviour that survived deleting its line
+check("web page shows the card and the add form whenever the page can run, so the first schedule can be added",
+      '$("schedform").hidden = !canRun;' in page_html
+      and 'if (!canRun && !schedulesData.length' in page_html
+      and 'if (canRun !== prevCanRun) renderSchedules();' in page_html)
+check("web page labels the toggle Disable or Enable from the current state",
+      's.enabled ? "Disable" : "Enable"' in page_html)
+check("web page has a fallback and a network-failure message for each write operation",
+      all(page_html.count(f'"{m}"') == 2 for m in ("Could not add schedule", "Could not update schedule", "Could not delete schedule")))
+check("web page clears the message after each successful write",
+      page_html.count('$("schedmsg").hidden = true;') == 3)
 check("web page contains each failure message for write operations",
       'textContent = (res && res.error) || "Could not add schedule"' in page_html
       and 'textContent = (res && res.error) || "Could not update schedule"' in page_html
