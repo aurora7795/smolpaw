@@ -316,6 +316,31 @@ def _save_undo(p: Path) -> tuple[Path | None, str | None]:
 
 # --- shell ------------------------------------------------------------------------
 
+DATE_TZ = re.compile(r"^TZ=([A-Za-z]+(?:/[A-Za-z0-9_+\-]+){0,2})$")  # a zone name only: no path, no ':' prefix, no '..'
+DATE_FORMAT = re.compile(r"^\+[A-Za-z0-9%:.,/ +\-]{0,60}$")
+
+
+def _date_argv(argv: list[str]) -> list[str] | None:
+    """Return argv for a `date` that can only read the clock (#51), else None so it asks like any other command.
+
+    Allowed: an optional leading TZ=<zone>, then at most one each of -u and +<format>, nothing else. That excludes
+    every way date changes or reads anything but the clock: -s/--set and a bare numeric argument (which set the
+    time), -d, -f, -r, -v and -j. Not on Windows, where `date` is a PowerShell alias for something else.
+    """
+    if WINDOWS:
+        return None
+    tz = DATE_TZ.match(argv[0]) if argv and argv[0].startswith("TZ=") else None
+    rest = argv[1:] if tz else argv[:]
+    if not rest or rest[0] != "date":
+        return None
+    args = rest[1:]
+    if len(args) > 2 or args.count("-u") > 1 or sum(a.startswith("+") for a in args) > 1:
+        return None
+    if not all(a == "-u" or DATE_FORMAT.match(a) for a in args):
+        return None
+    return (["env", f"TZ={tz.group(1)}"] if tz else []) + ["date", *args]
+
+
 def _read_only_argv(cmd: str) -> list[str] | None:
     """Return argv if cmd is a single read-only command touching only in-scope paths."""
     if SHELL_META.search(cmd):
@@ -324,6 +349,8 @@ def _read_only_argv(cmd: str) -> list[str] | None:
         argv = shlex.split(cmd)
     except ValueError:
         return None
+    if argv and (argv[0] == "date" or argv[0].startswith("TZ=")):
+        return _date_argv(argv)
     if not argv or argv[0] not in READ_ONLY_CMDS:
         return None
     if argv[0] == "find" and FIND_UNSAFE & set(argv):

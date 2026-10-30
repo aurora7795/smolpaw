@@ -170,6 +170,7 @@ The Recent runs list can optionally show a model-written one-sentence summary (a
 | Other HTTP methods | Ask `[y/N]` first (after pre-flight validation). |
 | HTTP pre-flight validation | Empty required query parameters (`term=`, `query=`, `q=`) and empty `POST`/`PUT`/`PATCH` bodies (except action triggers) return `ERROR:` before any confirmation prompt or network call. |
 | Read-only shell commands on `workspace/` or `skills/` (`ls`, `cat`, `head`, `grep`, `find`, `wc`, `stat`, `file`) | Run freely. |
+| `date` that only reads the clock: `date`, optionally `-u` and one `+format`, optionally after a `TZ=Area/City` prefix (for example `TZ=Europe/Madrid date +%H:%M`) | Runs freely, except on Windows. Anything else with `date` (`-s`, `--set`, a bare number, `-d`, `-f`, `-r`, `-v`, `-j`, a second format, chaining) asks `[y/N]` like any other command. |
 | Any other shell command, pipes, redirects, `find -exec/-delete` | Ask first. |
 | Reading outside `workspace/` and `skills/` | Ask first. |
 | Writing any file or skill | Ask first, showing the text. |

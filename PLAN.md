@@ -126,7 +126,7 @@ Record per run: success, steps, time, parse errors, number of confirm prompts, w
 | Area | Decision |
 |---|---|
 | Shell scope | `run_shell` runs in `workspace/`; paths outside it need `[y/N]`. |
-| Auto-allowed | Read-only file commands (`ls`, `cat`, `head`, `grep`, `find`, `wc`, `stat`, `file`) and HTTP GET. Everything else asks `[y/N]`. |
+| Auto-allowed | Read-only file commands (`ls`, `cat`, `head`, `grep`, `find`, `wc`, `stat`, `file`), a clock-reading `date` (`-u`, one `+format`, optional `TZ=zone` prefix; added 2026-10-30 with the owner's OK, #51) and HTTP GET. Everything else asks `[y/N]`. |
 | Read scope | Reads limited to `workspace/` and `skills/`; anything else asks. |
 | Secrets | Harness injects keys from `.env`, only for hosts listed in `notes.md`. The model never sees keys; logs redact them. |
 | Skill writes | Allowed; show the text and ask `[y/N]` each time. |
