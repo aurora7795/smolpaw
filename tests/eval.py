@@ -38,10 +38,10 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import generic_tools as g  # noqa: E402
-from agent import BACKENDS, build_agent, load_env  # noqa: E402
+from agent import BACKENDS, NO_ANSWER, build_agent, load_env  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
-from tests import tracking_fixture  # noqa: E402
+from tests import readonly_fixture, tracking_fixture  # noqa: E402
 
 LMS = Path.home() / ".lmstudio/bin/lms"
 OLLAMA = BACKENDS["ollama"]["url"].removesuffix("/v1")
@@ -154,6 +154,7 @@ def ensure_model(model: str, ctx: int, backend: str = "lmstudio") -> int | None:
 
 TRACKING_CASES = ["edit_one_section", "append_keep_all", "read_three_report"]
 EDIT_CASES = ["edit_duplicate_passage", "edit_last_line", "edit_special_chars", "edit_across_clip", "edit_crlf"]
+READONLY_CASES = ["write_summary", "read_and_save", "read_only_control", "append_log", "delete_old"]
 TRACKING_GROUPS = {"all": TRACKING_CASES, "edit": EDIT_CASES}  # `all` stays the original three, so earlier results stay comparable
 
 
@@ -334,6 +335,28 @@ def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
     save_results(args, label, ctx, prompt, expects, results)
 
 
+def run_readonly(args, tmp: Path, case_name: str, ctx: int | None) -> None:
+    """Run one read-only scheduled-run case n times, each in a fresh fixture workspace (#60).
+
+    Set up as web.Session._run sets up a scheduled run: every confirmation is declined and ask_user gets the no-answer reply.
+    """
+    label = f"readonly-{case_name}" + (f"-{args.label}" if args.label else "")
+    print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
+    results, prompt, expects = [], "", []
+    for i in range(1, args.n + 1):
+        ws = tmp / f"readonly-{case_name}-{i}"
+        case = next(c for c in readonly_fixture.build(ws) if c.name == case_name)
+        g.WORKSPACE, g.UNDO_DIR = ws, tmp / f".undo-readonly-{case_name}-{i}"
+        g.CONFIRM = lambda desc: False
+        g.ASK = lambda question: NO_ANSWER
+        prompt, expects = case.prompt, case.expects
+        r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history,
+                     check=lambda case=case, ws=ws: case.check(ws, list(g.ACTIONS)))
+        results.append(r)
+        print_run(i, r)
+    save_results(args, label, ctx, prompt, expects, results)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
@@ -356,6 +379,10 @@ def main() -> None:
                     help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
                          "run, passing on the file written to disk or the figures reported (#87): "
                          + "|".join([*TRACKING_CASES, *EDIT_CASES, *TRACKING_GROUPS]))
+    ap.add_argument("--readonly", metavar="CASE", choices=[*READONLY_CASES, "all"],
+                    help="scheduled-run read-only task from tests/readonly_fixture.py in a fresh isolated workspace per "
+                         "run: every confirmation is declined, passing on the files left unchanged, an answer that says "
+                         "what could not be done and no retrying (#60): " + "|".join([*READONLY_CASES, "all"]))
     ap.add_argument("--without-tool", action="append", default=[],
                     help="drop a generic tool by name for this run, to compare (for example list_dir)")
     ap.add_argument("--label", default="")
@@ -398,8 +425,8 @@ def main() -> None:
         prompt = prompt or COUNTING_PROMPT
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
-    if not prompt and not args.tracking:
-        ap.error("--prompt is required unless --tidepool, --listing, --counting or --tracking is used")
+    if not prompt and not args.tracking and not args.readonly:
+        ap.error("--prompt is required unless --tidepool, --listing, --counting, --tracking or --readonly is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
     web_server, web_info = None, {}
@@ -411,6 +438,9 @@ def main() -> None:
         web_info = {"mode": "eval", "backend": args.backend, "model": args.model, "status": "loading model"}
         web_server = web.serve(args.web_host, args.web_port, token, approvals, info=web_info)
         print(f"answer prompts at {web.url(args.web_host, args.web_port, token)}")
+    elif args.readonly:
+        g.CONFIRM = lambda desc: False
+        g.ASK = lambda question: NO_ANSWER
     elif args.tracking:
         g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
     else:
@@ -424,6 +454,10 @@ def main() -> None:
         if args.tracking:
             for case_name in TRACKING_GROUPS.get(args.tracking, [args.tracking]):
                 run_tracking(args, tmp, case_name, ctx)
+            return
+        if args.readonly:
+            for case_name in READONLY_CASES if args.readonly == "all" else [args.readonly]:
+                run_readonly(args, tmp, case_name, ctx)
             return
         label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
