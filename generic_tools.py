@@ -149,6 +149,7 @@ def redact_pasted_secrets(text: str) -> str:
 
 
 LOG_OUT = 500  # chars of shell output kept in the run log, so a run can be audited afterwards
+LOG_FETCHED = 300  # chars of a fetch_page / web_search result kept in the run log (#62)
 
 
 def _page(text: str, offset: int = 0) -> str:
@@ -735,9 +736,10 @@ def fetch_page(url: str, query: str = "") -> str:
         )
     text = html_to_text(r.text) if _looks_like_html(r) else r.text
     result, hits = _trim_to_query(text, query)
+    shown = _redact(result)
     _log("fetch_page", url=url, query=query, status=r.status_code, hits=hits,
-         result=f"{hits} hits" if query.strip() else f"{len(result)} chars")
-    return _clip(_redact(result))
+         result=f"{hits} hits" if query.strip() else f"{len(result)} chars", text=shown[:LOG_FETCHED])
+    return _clip(shown)
 
 
 def _search_ddgs(query: str, limit: int) -> list[dict]:
@@ -863,9 +865,10 @@ def web_search(query: str) -> str:
         formatted.append(f"{i}. {title}\n   {url}\n   {snippet}")
 
     out = "\n\n".join(formatted)
+    shown = _redact(out)
     _log("web_search", provider=provider_name, query=query, status="ok", hits=len(results),
-         result=f"{len(results)} hits")
-    return _clip(_redact(out))
+         result=f"{len(results)} hits", text=shown[:LOG_FETCHED])
+    return _clip(shown)
 
 
 _SPECS: dict[str, dict] = {}

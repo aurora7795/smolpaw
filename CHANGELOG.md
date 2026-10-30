@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+- Run logs now keep the first 300 characters of each successful `fetch_page` and `web_search` result as `text` (#62), so a final answer can be checked against what the model was shown. The result is redacted before it is clipped, so a secret cut by the clip leaves no fragment; an HTTP error or failed fetch logs no page text. The earlier rule that these logs never hold result contents is gone. Tests in `tests/test_generic_tools.py`.
+
 ### Added
 - RESULTS.md: a `read_file` footer that says how much is unread did not change Gemma's 0/10 on `read_three_report` (#89); `--counting` baselines, n=5 (#49): no entry-count-as-files mislabelling on the fixture. PLAN.md items 22 and 36 updated.
 - `--counting` in `tests/eval.py` (#49): asks "How many files are in the folder downloads/?" against a generated `downloads/` holding 10 files, 2 hidden files and 3 folders of 2 files each, in an isolated workspace. The answer passes when it states 10 (or 12 with the hidden files) as a number of files, and fails when it calls the entry count (13 or 15) files or items. The checker reads wording only; its tests in `tests/test_eval_tracking.py` cover right answers, entry counts, the recursive count and a number not followed by "files".

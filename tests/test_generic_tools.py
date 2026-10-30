@@ -753,6 +753,28 @@ log_entries = [g.json.loads(line) for line in g._log_file.read_text().splitlines
 check("fetch_page calls are logged", len(log_entries) == 2 and log_entries[0]["kind"] == "fetch_page")
 check("fetch_page log records query and hit count", log_entries[0]["query"] == "Redis" and log_entries[0]["hits"] > 0)
 check("fetch_page log records zero hits on no match", log_entries[1]["hits"] == 0)
+check("fetch_page log keeps the start of the matched text, clipped (#62)",
+      "Redis" in log_entries[0].get("text", "") and 0 < len(log_entries[0]["text"]) <= g.LOG_FETCHED)
+saved_get = g.requests.get
+g.requests.get = lambda *a, **k: _FakeGetResp("<p>Page body that must stay out of the log</p>", status=500)
+g.fetch_page("https://example.com/broken", query="")
+failed = [g.json.loads(line) for line in g._log_file.read_text().splitlines()][-1]
+check("fetch_page log has no text for an HTTP error (only the status)", failed.get("status") == 500 and "text" not in failed)
+g.requests.get = saved_get
+
+# a registered secret must not reach the log, including when it straddles the clip (redact first, then clip)
+os.environ["SMOLPAW_LOGTEXT_SECRET"] = "logtext-secret-value-12345"
+g.NOTES = tmp / "logtext-notes.md"
+g.NOTES.write_text("- logtext_svc: https://logtext.example | key_env=SMOLPAW_LOGTEXT_SECRET\n")
+pad = "a" * (g.LOG_FETCHED - 21)  # the clip then cuts 20 characters into the secret
+g.requests.get = lambda *a, **k: _FakeGetResp(f"<p>{pad} logtext-secret-value-12345 tail {'z' * 400}</p>")
+g.fetch_page("https://unregistered-page.example/log", query="")
+straddle = [g.json.loads(line) for line in g._log_file.read_text().splitlines()][-1]
+raw_log = g._log_file.read_text()
+check("a secret in a fetched page is redacted in the log", "logtext-secret-value-12345" not in raw_log)
+check("a secret straddling the log clip leaves no fragment in the log", "logtext-secret" not in raw_log and "value-12345" not in raw_log)
+check("the clipped log text still ends at the clip", len(straddle["text"]) <= g.LOG_FETCHED)
+g.NOTES = saved_notes
 
 saved_feed_log, web.g._log_file = web.g._log_file, g._log_file
 feed_line = web.feed()[0]
@@ -800,6 +822,20 @@ g.reset_search_count()
 res_redacted = g.web_search("secret")
 check("web_search redacts secrets from results",
       "secret-search-token-999" not in res_redacted and "[REDACTED]" in res_redacted)
+
+def _straddle_search(query: str, limit: int) -> list[dict]:
+    url = "https://example.com/secret"
+    title = "t" * (g.LOG_FETCHED - 20 - 11 - len(url))  # the clip then cuts 20 characters into the secret
+    return [{"title": title, "url": url, "snippet": "secret-search-token-999 " + "z" * 400}]
+
+g.SEARCH_PROVIDERS["straddle_fake"] = _straddle_search
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "straddle_fake"
+g._log_file = tmp / "web-search-straddle-log.jsonl"
+g.reset_search_count()
+g.web_search("straddle")
+straddle_log = g._log_file.read_text()
+check("a secret straddling the web_search log clip leaves no fragment in the log",
+      "secret-search-token-999" not in straddle_log and "secret-search-tok" not in straddle_log and '"text"' in straddle_log)
 g.NOTES = saved_notes
 
 # Logging fields with no result contents
@@ -812,8 +848,9 @@ ws_log = [g.json.loads(line) for line in g._log_file.read_text().splitlines()][-
 check("web_search logs kind web_search", ws_log.get("kind") == "web_search")
 check("web_search logs provider and query", ws_log.get("provider") == "fake" and ws_log.get("query") == "test_query")
 check("web_search logs status and hit count", ws_log.get("status") == "ok" and ws_log.get("hits") == 5 and ws_log.get("result") == "5 hits")
-check("web_search log entry never contains result contents",
-      "Title 1" not in str(ws_log) and "Snippet 1" not in str(ws_log) and "https://example.com" not in str(ws_log))
+check("web_search log keeps the start of the redacted result as text (#62)",
+      ws_log.get("text", "").startswith("1. Title 1") and "Snippet 1" in ws_log.get("text", ""))
+check("web_search log text is at most LOG_FETCHED characters", 0 < len(ws_log.get("text", "")) <= g.LOG_FETCHED)
 
 # Error handling
 g.reset_search_count()
