@@ -253,6 +253,8 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "input_tokens": tokens_in,
         "output_tokens": tokens_out,
         "tools": [tc.name for s in steps for tc in (s.tool_calls or [])],
+        # the arguments of each call, clipped, to see which page of a file or which command a model chose (#89)
+        "tool_args": [str(tc.arguments)[:200] for s in steps for tc in (s.tool_calls or [])],
         # per model call: seconds, prompt tokens read and tokens written, to see where time goes (#29)
         "step_stats": [{"seconds": round(s.timing.duration or 0, 1),
                         "input_tokens": getattr(s.token_usage, "input_tokens", 0),

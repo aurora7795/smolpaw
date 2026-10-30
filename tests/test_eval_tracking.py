@@ -10,6 +10,9 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+from smolagents.memory import ActionStep, ToolCall
+from smolagents.monitoring import Timing
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -43,6 +46,14 @@ class StubAgent:
 
     def run(self, prompt: str) -> str:
         return self.script()
+
+
+def _stub_with_steps(script_for) -> StubAgent:
+    """A stub whose memory holds the scripted ActionSteps, so run_once can read their tool calls."""
+    script = script_for(None, None)
+    agent = StubAgent(script)
+    agent.memory.steps = script.steps
+    return agent
 
 
 saved = (g.WORKSPACE, g.UNDO_DIR, g.CONFIRM, ev.build_agent)
@@ -156,6 +167,29 @@ try:
     check("a report missing a figure fails", not r["passed"])
     r = run_case("read_three_report", report_and_overwrite)
     check("a right answer that overwrote a source file fails", not r["passed"] and "modified" in r["check"])
+
+    # --- tool arguments are logged, clipped (#89) -------------------------------------------
+    def with_steps(ws, case):
+        agent_steps = [
+            ActionStep(step_number=1, timing=Timing(start_time=0.0),
+                       tool_calls=[ToolCall(name="read_file", arguments={"path": "a.txt", "offset": 4000}, id="1")]),
+            ActionStep(step_number=2, timing=Timing(start_time=0.0),
+                       tool_calls=[ToolCall(name="run_shell", arguments={"command": "x" * 500}, id="2")]),
+        ]
+
+        def go():
+            return "hydrology 1485, geology 832, refuge 674"
+        go.steps = agent_steps
+        return go
+
+    saved_build = ev.build_agent
+    ev.build_agent = lambda *a, **k: _stub_with_steps(with_steps)
+    case_c = next(c for c in tf.build(tmp / "ws-args") if c.name == "read_three_report")
+    r = ev.run_once("stub", case_c.prompt, case_c.expects, 12, check=lambda: case_c.check(tmp / "ws-args"))
+    ev.build_agent = saved_build
+    check("the run records each call's name and its arguments", r["tools"] == ["read_file", "run_shell"] and len(r["tool_args"]) == 2)
+    check("a call's offset argument is kept so a page choice can be audited", "'offset': 4000" in r["tool_args"][0])
+    check("a long argument is clipped to 200 characters", len(r["tool_args"][1]) == 200)
 
     # --- append_keep_all ----------------------------------------------------------------------
     def append_ok(ws, case):
