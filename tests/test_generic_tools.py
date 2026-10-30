@@ -2370,10 +2370,12 @@ schedadd_success_code = schedadd_code[schedadd_code.index('if (res && res.ok)'):
 check("web page clears add form only on success",
       '$("schedprompt").value = "";' in schedadd_success_code
       and '$("schedcron").value = "";' in schedadd_success_code)
+tog_code = page_html[page_html.index('togBtn.onclick'):page_html.index('delBtn.onclick')]
+del_code = page_html[page_html.index('delBtn.onclick'):page_html.index('function loadSchedules')]
 check("web page refreshes after successful write operations",
-      'refresh();' in page_html[page_html.index('$("schedadd").onclick'):]
-      and 'refresh();' in page_html[page_html.index('togBtn.onclick'):page_html.index('delBtn.onclick')]
-      and 'refresh();' in page_html[page_html.index('delBtn.onclick'):page_html.index('function loadSchedules')])
+      'refresh();' in schedadd_success_code
+      and 'refresh();' in tog_code
+      and 'refresh();' in del_code)
 
 # 17. POST /api/schedule_add: basic add, listed in GET /api/schedules, enabled=True, returned schedule shape
 import re
