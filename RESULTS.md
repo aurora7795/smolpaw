@@ -193,6 +193,22 @@ Ollama 0.40.7, default MLX `nvfp4` tags, the app's 32K context, `tests/eval.py` 
 
 So with native history, the original failure mode is gone in this sample; what is left is a smaller, different, generic issue (small models occasionally skip the tool call) that happens well under once in ten runs and self-corrects within the step budget. Not chasing further for now: the fix (a sturdier system prompt sentence, or re-prompting on a bare parse error) has a prompt or step cost, and the rate is low enough that it has not cost a run since native history landed.
 
+### Parse errors across all saved eval logs (#14, 2026-10-30)
+
+The recheck above had 14 runs. `tests/parse_error_rate.py` (new) now reads every native-history eval log in `logs/` (57 Gemma and 39 Qwen log files from 2026-10-24 to 2026-10-30, many cases, contexts and code states) and counts parse errors:
+
+| Model (Ollama build) | Runs | Steps | Parse errors | Per 100 steps | Per run | Passed with / without a parse error |
+|---|---|---|---|---|---|---|
+| Gemma 4 E4B (`gemma4:e4b`) | 208 | 1,067 | 48 | 4.5 | 0.23 | 25/44, 71/164 |
+| Qwen 3.5 9B (`qwen3.5:9b`) | 139 | 1,188 | 41 | 3.5 | 0.29 | 19/31, 49/108 |
+
+- **The recheck's "well under once in ten runs" was too low.** On the pooled logs it is about one error in four runs on both models (0.23 and 0.29 per run). Gemma's 14-run sample had 1 error; the larger pool has 48.
+- **The text is the same one every time.** 43 of Gemma's 48 and 33 of Qwen's 41 are "The model output does not contain any JSON blob" (prose instead of a tool call); the rest are "The JSON blob you used is invalid". The history-copying failure of the original issue does not show up.
+- **No sign that it costs passes.** Runs with a parse error passed more often than those without (Gemma 57% against 43%, Qwen 61% against 45%), but the pools mix easy and hard cases, so this says only that parse errors are not what decides a run.
+- **Other builds.** `qwen3.5-9b-mlx` (LM Studio, 8K context, the #73 runs): 12 errors in 64 steps, from a full context. `google/gemma-4-e4b` (LM Studio): 0 in 97 steps. These are small and context-dependent.
+- **Caveats.** Logs were written by different code over a week; the cases include many that fail for other reasons; one parse error costs one step, not a run. The script reports counts, not causes. A fix would be re-prompting or recovering the skipped call, which is #78.
+- Reproduce: `.venv/bin/python tests/parse_error_rate.py` (reads `logs/`, so it covers whatever runs you have).
+
 ## Tidepool `detail` rechecked at 32K with native history (#15, 6 runs per cell)
 
 The 16K runs above gave Ollama 2 clean passes of 6 on `detail` against 6 of 6 on LM Studio. Rerun with native history (now the default), both runtimes at 32K (the Ollama app's setting; LM Studio loaded at 32768 by `tests/eval.py`), default builds (MLX on both). Each cell: passes, mean time, mean steps.

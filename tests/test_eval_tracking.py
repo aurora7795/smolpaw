@@ -342,5 +342,22 @@ if real_logs.exists():
     check("the test suite wrote no run logs to the real logs/ directory",
           {(p.name, p.stat().st_size) for p in real_logs.iterdir()} == logs_snapshot)
 
+# --- parse error counting (#14) ------------------------------------------------------------
+import json  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "tests"))
+import parse_error_rate as per  # noqa: E402
+
+pdir = Path(tempfile.mkdtemp())
+(pdir / "eval-1-a.json").write_text(json.dumps({"model": "m", "history": "native", "runs": [
+    {"passed": True, "steps": 4, "parse_errors": 1, "parse_error_detail": ["boom"]},
+    {"passed": False, "steps": 6, "parse_errors": 0}]}))
+(pdir / "eval-2-b.json").write_text(json.dumps({"model": "m", "history": "text", "runs": [{"passed": True, "steps": 9, "parse_errors": 5}]}))
+(pdir / "eval-3-c.json").write_text("not json")
+res = per.summarise(pdir)
+check("parse errors are counted for native-history logs only, bad files skipped",
+      list(res) == ["m"] and res["m"]["runs"] == 2 and res["m"]["steps"] == 10 and res["m"]["errors"] == 1
+      and res["m"]["with"] == [1, 1] and res["m"]["without"] == [1, 0] and res["m"]["texts"]["boom"] == 1)
+
 print(f"\n{check_failed} failed")
 sys.exit(1 if check_failed else 0)
