@@ -226,7 +226,23 @@ check("a repeated old text names where each match is, by character and heading",
       "2 times" in r and "at character 14 under '## Beta'" in r and "under '## Epsilon'" in r and (g.WORKSPACE / "dup.md").read_text().count("same line.") == 2)
 (g.WORKSPACE / "dup2.txt").write_text("a a a a a a a a")
 check("a repeated old text without headings gives offsets only and caps the list",
-      "at character 0;" in g.edit_file("dup2.txt", "a", "b") and "more after that" in g.edit_file("dup2.txt", "a", "b"))
+      "at character 0" in g.edit_file("dup2.txt", "a", "b") and "more after that" in g.edit_file("dup2.txt", "a", "b"))
+(g.WORKSPACE / "dup3.md").write_text("# D\n## Beta\nIntro one.\nSame sentence.\n" + "y" * 50 + "\n## Epsilon\nIntro one.\nSame sentence.\n")
+r = g.edit_file("dup3.md", "Same sentence.", "Changed.")
+check("each match gets an old text that matches only there, longer than the repeated passage (#88)",
+      "<<<\nBeta\nIntro one.\nSame sentence.\n>>>" in r and "<<<\nEpsilon\nIntro one.\nSame sentence.\n>>>" in r)
+check("the offered new text carries the same extra words, so the rest of the text is kept (#88)",
+      "<<<\nEpsilon\nIntro one.\nChanged.\n>>>" in r and "<<<\nBeta\nIntro one.\nChanged.\n>>>" in r)
+r = g.edit_file("dup3.md", "Epsilon\nIntro one.\nSame sentence.", "Epsilon\nIntro one.\nChanged.")
+check("using the offered old text edits only that copy (#88)", r.startswith("SUCCESS")
+      and (g.WORKSPACE / "dup3.md").read_text().count("Same sentence.") == 1 and (g.WORKSPACE / "dup3.md").read_text().endswith("Changed.\n"))
+asked()  # the edit above was approved; clear the flag for the checks that follow
+(g.WORKSPACE / "dup3.md").write_text("# D\n## Beta\nIntro one.\nSame sentence.\n" + "y" * 50 + "\n## Epsilon\nIntro one.\nSame sentence.\n")
+g.UNIQUE_REACH = 3
+r = g.edit_file("dup3.md", "Same sentence.", "Changed.")
+g.UNIQUE_REACH = 400
+check("when no unique old text is within reach, the error still names the places (#88)",
+      "2 times" in r and "at character" in r and "only here" not in r)
 r = g.edit_file("ef.txt", "no such text", "x")
 check("edit_file refuses an old text that is not found, without asking", "not found" in r and ef.read_text() == before and not asked())
 check("edit_file refuses an empty old text", g.edit_file("ef.txt", "", "x").startswith("ERROR") and ef.read_text() == before)

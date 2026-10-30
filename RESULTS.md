@@ -560,6 +560,21 @@ The logs of the failed `edit_duplicate_passage` runs showed why Gemma edited the
 - **The pass rate barely moved because of the step cap.** All three Qwen files ended up right, but each run kept re-reading the file and running shell commands after the edit, reached 13 steps and counts as a fail. Two Gemma runs also hit the cap without changing the file, repeating `edit_file` calls. Gemma's one pass took 11 steps.
 - 3 runs per cell. I did not read what `old` strings the Gemma runs that hit the cap sent. The Qwen over-checking after a correct edit is also what happened in `edit_one_section` run 3 earlier today; stopping a run that makes no progress is #77.
 
+### Repeated passage, with a ready old and new text per match (#88, 2026-10-30)
+
+With the arguments now logged, the failed Gemma runs of the match-places version (`logs/eval-20261030-182128-ollama-gemma4_e4b-tracking-edit_duplicate_passage-base-args.json`, 1/3) show the next step: the model sent the same repeated `old` again, or put the sentence before it in front ("Granite cache ... sedge. The maximum ..."), which is also repeated in both sections, so it still matched twice. The error now also gives, for each match, an `old` that matches only there (the passage plus the fewest words before it, else after it, that occur once, searched within 400 characters) and the `new` with the same words added, each between `<<<` and `>>>` marks. Nothing is added unless the error fires, so the prompt is unchanged. Two first versions of this had faults the logs showed: printing the text with `repr` made Gemma copy a literal backslash-n (1/3, `unique-old`), and offering only `old` made it send a `new` without the extra words, deleting them (1/3, `unique-old-lines`, 6.7 steps). The third version (`old-and-new`) is the one in the table. Ollama, 32K, native history, `--tracking edit_duplicate_passage --n 5`; logs `logs/eval-20261030-184003-ollama-gemma4_e4b-...-old-and-new.json` and `logs/eval-20261030-185148-ollama-qwen3.5_9b-...-old-and-new.json`.
+
+| | Before (match places only) | After (old and new offered) |
+|---|---|---|
+| Gemma 4 E4B: passed | 1/3 (and 1/3 in today's repeat) | **5/5**, 3.4 steps, 16,394 input tokens, 19s |
+| Qwen 3.5 9B: passed | 0/3 | **2/5**, 10.2 steps, 84,583 input tokens, 139s |
+| Qwen: file correct at the end | 3/3 | 4/5 |
+
+- **Gemma now recovers every time** in 3 to 4 steps, against 10 to 13 before. The input tokens fell from about 65,000 to 16,000 per run.
+- **Qwen improved but still hits the step cap.** Two runs passed in 6 steps. Of the three failures, two ended with the right file but reached 13 steps re-reading (the over-checking noted before, #77), and one never changed the file. Its files were correct in 4 of 5 runs.
+- **Caveats.** n=5 (n=3 before); one fixture where the repeated sentence's neighbours are also repeated, so the unique text came from the words before the sentence; other layouts (the copies differ only after the passage, or are further apart than 400 characters) were tested only by unit tests; the Qwen baseline is the earlier 3-run batch. The reach limit means very long repeated blocks still get only the places.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking edit_duplicate_passage --n 5`, then the same with `qwen3.5:9b`. `tests/test_generic_tools.py` checks the offered pair without a model.
+
 ### `read_three_report` at n=10, with the tool arguments logged (#89, 2026-10-30)
 
 #89 asked whether Gemma's 0/3 on `read_three_report` after paging was noise. Same case, Ollama, 32K context, native history, paged `read_file` with `edit_file` in the toolset, n=10 per model. This time the run logs hold each call's arguments (`tool_args`, added to `tests/eval.py` in this change), so the pages each model asked for can be read back. The three facts sit at characters 4,552, 4,758 and 4,716 of files of 5,875, 6,298 and 6,093 characters, so each is on page 2 (page size 4,000) and a full read takes 6 `read_file` calls. Logs: `logs/eval-20261030-104700-ollama-gemma4_e4b-tracking-read_three_report-n10.json` and `logs/eval-20261030-105708-ollama-qwen3.5_9b-tracking-read_three_report-n10.json`.
