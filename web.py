@@ -705,12 +705,12 @@ def _format_schedule(item: dict) -> dict:
     last_err_raw = item.get("last_error")
     prompt_raw = item.get("prompt")
     return {
-        "id": g._redact(str(item.get("id") if item.get("id") is not None else "")),
-        "cron": g._redact(str(item.get("cron") if item.get("cron") is not None else "")),
+        "id": g._redact(str(item.get("id") if item.get("id") is not None else ""))[:200],
+        "cron": g._redact(str(item.get("cron") if item.get("cron") is not None else ""))[:200],
         "enabled": bool(item.get("enabled")),
         "next_run": g._redact(str(next_run_raw)) if next_run_raw is not None else None,
         "last_run": g._redact(str(last_run_raw)) if last_run_raw is not None else None,
-        "last_status": g._redact(str(last_status_raw if last_status_raw is not None else "")),
+        "last_status": g._redact(str(last_status_raw if last_status_raw is not None else ""))[:200],
         "last_error": g._redact(str(last_err_raw if last_err_raw is not None else ""))[:500],
         "prompt": g._redact(str(prompt_raw if prompt_raw is not None else ""))[:500],
     }
@@ -898,12 +898,6 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 cron = body.get("cron")
                 if not isinstance(prompt, str) or not isinstance(cron, str):
                     return self._send(400, {"error": "invalid prompt or cron"})
-                try:
-                    current_items = schedules.load()
-                except Exception:
-                    return self._send(409, {"error": "schedules.json is damaged"})
-                if len(current_items) >= 100:
-                    return self._send(400, {"error": "schedule limit reached"})
                 try:
                     new_item = schedules.add(prompt, cron)
                 except ValueError as e:
@@ -1338,6 +1332,7 @@ function renderApprovals() {
         const r = await api("/api/dismiss_approval", {id: a.id});
         if (!r || !r.ok) {
           $("dismissmsg").textContent = "Could not dismiss";
+          refresh();  // a 404 means it is already gone: drop the stale row
         } else {
           $("dismissmsg").textContent = "";
           refresh();
