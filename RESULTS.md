@@ -597,6 +597,25 @@ Following the n=10 result above, one change to `read_file`'s footer: a page that
 - **No effect.** 0/10 passed (mean 6.2 steps, 38,198 input tokens), against 0/10 with the old footer. In all 10 runs Gemma read page 1 of `refuge_inventory.txt` and never read page 2, as before. It read page 2 of the hydrology file in 10 runs and of the geology file in 9.
 - **What this rules out.** The footer wording is not what stops Gemma: it was told in so many words that part of the file was unread. Not examined: whether a different number of files, a different file order or a "read every page of every file before answering" instruction changes it; and why page 2 is skipped only for the last file.
 
+### A larger `read_file` page (#89, 2026-10-30)
+
+Does a bigger page fix Gemma's 0/10? The page size was made a knob (`SMOLPAW_MAX_OUT`, 4,000 by default; the knob is not in the code) and tried on two fixtures, Ollama, 32K context, n=10 per cell. `read_three_report` has its facts at characters 4,552 to 4,758. `read_three_long` (new, `--tracking read_three_long`) pads the same three files to about 11K characters, with the facts at characters 9,507 to 9,732, so a 6,000 page still needs a second read and an 8,000 page puts them on page 2 as well.
+
+| Case | Page | Gemma 4 E4B | Qwen 3.5 9B |
+|---|---|---|---|
+| read_three_report | 4,000 | 0/10 | 9/10 |
+| read_three_report | 6,000 | 10/10 | 10/10 |
+| read_three_report | 8,000 | 10/10 | 10/10 |
+| read_three_long | 4,000 | 0/10 (7.5 steps, 50,788 input tokens) | 7/10 (11.1 steps, 99,159, 3 cap hits) |
+| read_three_long | 6,000 | 0/10 (5.6, 38,735) | 10/10 (7.2, 65,281) |
+| read_three_long | 8,000 | 0/10 (5.7, 40,881) | 8/10 (8.1, 82,605, 1 cap hit) |
+
+- **Gemma's gain is the fixture.** On `read_three_report` the facts fit on page 1 once the page is 6,000, so nothing needs a second read. On `read_three_long` Gemma fails at every size. Its logs show the same behaviour as before: it reads page 1 and the second page of the first file (offset 6,000 or 8,000), reads only page 1 of the next files and answers that they have no key figure.
+- **Qwen's numbers do not follow the page size.** 7/10, 10/10, 8/10 across 4,000, 6,000 and 8,000 is within what ten runs of a model that sometimes hits the step cap can give; no trend is claimed.
+- **Decision.** No larger page is adopted. A larger page would also cost more input tokens per read in the read-heavy cases, which were not measured.
+- **Caveats.** One session, 10 runs per cell, two fixtures, Ollama only. Logs: `logs/eval-20261030-*-read_three_long-long{4000,6000,8000}.json` and the matching `read_three_report` runs (`--label page6000`/`page8000`).
+- Reproduce (with the knob patched in): `SMOLPAW_MAX_OUT=6000 .venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking read_three_long --n 10 --label long6000`.
+
 ### Which pages Gemma skips: instruction, order, number of files (#89, 2026-10-30)
 
 One change per cell, Gemma 4 E4B, Ollama, 32K context, native history, paged `read_file` with `edit_file` in the toolset, n=10 per cell, all in one session from a separate worktree. Four new cases in `tests/tracking_fixture.py` (run with `--tracking <case>`): `read_three_every_page` (the base prompt plus " Read every page of every file before answering."), `read_three_reversed` (the same three files named in the opposite order), `read_two_report` (hydrology and refuge only) and `read_four_report` (a fourth file, `canopy_survey.txt`, 6,003 characters with its figure at character 4,683). Two control runs of the base case: `131719` ran with the fourth file in the workspace, `135616` (run after the fixture was changed to build the fourth file only for the four-file variant) without it: 0/10 both, 6.2 steps, 37,828 and 37,865 input tokens. Pass means every named file's figure appears in the answer. Pages come from the logged `tool_args`. Logs: `logs/eval-20261030-13*-ollama-gemma4_e4b-tracking-<case>-n10-variants.json`: `131719` (control), `132426` (every page), `133114` (reversed), `133649` (two files), `134624` (four files).

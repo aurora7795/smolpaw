@@ -187,6 +187,11 @@ try:
           len(built["read_two_report"].expects) == 2 and len(built["read_four_report"].expects) == 4)
     check("without variants=True the cases and the workspace are as before (no fourth file)",
           len(tf.build(tmp / "ws-plain")) == 8 and not (tmp / "ws-plain" / tf.CASE_C4_FILE).exists())
+    long_built = {c.name: c for c in tf.build(tmp / "ws-long", variants=True, long_files=True)}
+    check("the long variant keeps the report prompt and pushes every figure past 9,000 characters",
+          long_built["read_three_long"].prompt == long_built["read_three_report"].prompt
+          and all((tmp / "ws-long" / f).read_text(encoding="utf-8").find(e.strip("\\b")) > 9000
+                  for f, e in zip(tf.CASE_C_FILES, tf.CASE_C_EXPECTS)))
     check("the fourth file's figure sits past the first 4,000-character page",
           (tmp / "ws-variants" / tf.CASE_C4_FILE).read_text(encoding="utf-8").find("391") > 4000)
 

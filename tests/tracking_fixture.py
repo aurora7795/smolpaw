@@ -107,6 +107,7 @@ CASE_C_FACTS = [
 CASE_C_EXPECTS = [rf"\b{fact[1]}\b" for fact in CASE_C_FACTS]
 
 # A fourth file for the four-file variant (#89); the other cases never use it.
+LONG_EXTRA = 5000  # filler added ahead of each fact in the long variant of case C (#89)
 CASE_C4_FILE = "canopy_survey.txt"
 CASE_C4_FACT = "The northern ridge canopy survey counted 391 mature spruce trees."
 
@@ -197,11 +198,12 @@ def _generate_case_b_text(seed: int) -> str:
     return "".join(parts).strip() + "\n"
 
 
-def _generate_case_c_texts(seed: int) -> dict[str, str]:
+def _generate_case_c_texts(seed: int, extra: int = 0) -> dict[str, str]:
+    """The case C files; `extra` characters of filler ahead of each fact (0 keeps the earlier files byte for byte)."""
     rng = random.Random(seed + 303)
 
     # File 1: Markdown hierarchy with gorge weir flow rate
-    f1_pre = "# Hydrology Network Field Log\n\n" + _make_filler_paragraphs(rng, 4200, 6)
+    f1_pre = "# Hydrology Network Field Log\n\n" + _make_filler_paragraphs(rng, 4200 + extra, 6)
     f1_fact = f"\n\n{CASE_C_FACTS[0][2]}\n\n"
     f1_post = _make_filler_paragraphs(rng, 1200, 2)
     f1 = (f1_pre + f1_fact + f1_post).strip() + "\n"
@@ -209,9 +211,9 @@ def _generate_case_c_texts(seed: int) -> dict[str, str]:
     # File 2: Part-based structure with bedrock drill depth
     f2_pre = (
         "PART ONE: Core Sample Extraction\n\n"
-        + _make_filler_paragraphs(rng, 2100, 3)
+        + _make_filler_paragraphs(rng, 2100 + extra // 2, 3)
         + "\n\nPART TWO: Lithology and Structural Analysis\n\n"
-        + _make_filler_paragraphs(rng, 2200, 3)
+        + _make_filler_paragraphs(rng, 2200 + extra - extra // 2, 3)
     )
     f2_fact = f"\n\n{CASE_C_FACTS[1][2]}\n\n"
     f2_post = _make_filler_paragraphs(rng, 1400, 2)
@@ -220,9 +222,9 @@ def _generate_case_c_texts(seed: int) -> dict[str, str]:
     # File 3: Station manifest layout with kerosene store volume
     f3_pre = (
         "[REFUGE MANIFEST: HIGH PASS STATION]\n\n== Bulk Supply Storage ==\n\n"
-        + _make_filler_paragraphs(rng, 2000, 3)
+        + _make_filler_paragraphs(rng, 2000 + extra // 2, 3)
         + "\n\n== Thermal Heating Reserves ==\n\n"
-        + _make_filler_paragraphs(rng, 2100, 3)
+        + _make_filler_paragraphs(rng, 2100 + extra - extra // 2, 3)
     )
     f3_fact = f"\n\n{CASE_C_FACTS[2][2]}\n\n"
     f3_post = "== Emergency Utility Depot ==\n\n" + _make_filler_paragraphs(rng, 1200, 2)
@@ -309,7 +311,7 @@ def _generate_case_crlf_bytes(seed: int) -> bytes:
 
 # --- Public API ------------------------------------------------------------------
 
-def build(workspace: Path | str, seed: int = 0, variants: bool = False) -> list[Case]:
+def build(workspace: Path | str, seed: int = 0, variants: bool = False, long_files: bool = False) -> list[Case]:
     """Materialise tracking eval test fixtures into workspace and return Case descriptors."""
     ws = Path(workspace).resolve()
 
@@ -405,7 +407,7 @@ def build(workspace: Path | str, seed: int = 0, variants: bool = False) -> list[
     )
 
     # 3. Case C: read_three_report
-    texts_c = _generate_case_c_texts(seed)
+    texts_c = _generate_case_c_texts(seed, LONG_EXTRA if long_files else 0)
     for fname, fcontent in texts_c.items():
         if fname == CASE_C4_FILE and not variants:
             continue  # only the four-file variant (#89) uses it, so the other cases keep their earlier workspace
@@ -452,6 +454,8 @@ def build(workspace: Path | str, seed: int = 0, variants: bool = False) -> list[
         variant_c("read_three_reversed", reversed_files, [c_expect[f] for f in reversed_files]),
         variant_c("read_two_report", [CASE_C_FILES[0], CASE_C_FILES[2]], [c_expect[CASE_C_FILES[0]], c_expect[CASE_C_FILES[2]]]),
         variant_c("read_four_report", four_files, [c_expect[f] for f in four_files]),
+        # the same three files with LONG_EXTRA more characters ahead of each fact (written only when long_files is set)
+        variant_c("read_three_long", CASE_C_FILES, CASE_C_EXPECTS),
     ]
 
     # 4. Case D: edit_duplicate_passage
