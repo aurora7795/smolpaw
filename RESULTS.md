@@ -586,6 +586,20 @@ One change per cell, Gemma 4 E4B, Ollama, 32K context, native history, paged `re
 - **Caveats.** n=10 per cell, one session, synthetic files with one figure per file. The two-file result (2/10) is small enough that I would not call it better than 0/10 without a rerun. The variant cells ran with the fourth file present in the workspace; only the four-file case names it. Qwen was not run on these variants.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --ctx 32768 --tracking read_three_every_page --n 10` (and `read_three_reversed`, `read_two_report`, `read_four_report`, `read_three_report`).
 
+### A list of other unread files in each read result (#89, 2026-10-30)
+
+The harness nudge chosen after the variants above. Change, tried in a separate worktree and not in the code: each `read_file` result also ended with `[Also still unread from earlier reads: geology_strata.txt from character 4000; ...]`, naming every other file read only in part this run with the offset of its next page (kept in a module-level dict cleared at the start of each run). It touches only the text of a result, not the confirmation layer or the prompt. `read_three_report`, Ollama, 32K context, native history, n=10 per model, same session. Logs: `logs/eval-20261030-141838-ollama-gemma4_e4b-tracking-read_three_report-n10-unread-list.json` and `logs/eval-20261030-142853-ollama-qwen3.5_9b-tracking-read_three_report-n10-unread-list.json`.
+
+| | Passed | `read_file` calls per run | Mean steps | Mean input tokens |
+|---|---|---|---|---|
+| Gemma 4 E4B | 0/10 | 4 to 6 | 6.2 | 37,895 |
+| Qwen 3.5 9B | 9/10 | 6 (once 8) | 6.1 | 46,748 |
+
+- **No effect on Gemma.** Page 2 was read for the hydrology file in 10 runs, the geology file in 8 and `refuge_inventory.txt` in 0, the same as the control (10, 9, 0). It was told in the result of its last read that the refuge file was unread from character 4000 and did not ask for it.
+- **Qwen unchanged.** 9/10 as before; all 10 runs read both pages of every file.
+- **Decision.** Not kept. Three ways of telling Gemma the text is unread (the footer, an every-page instruction, this list) have all left it at 0/10, so the cause is not missing information. A larger page size remains the untested route.
+- **Caveats.** n=10, one session. Qwen's mean input tokens (46,748) are lower than the 58,221 in the first n=10 run, which shows how much one session's runs can differ in tokens; its pass count is the same.
+
 ### File count with files, hidden files and folders (#49, 2026-10-30)
 
 `tests/eval.py --counting` (new): "How many files are in the folder downloads/?" against a generated `downloads/` holding 10 files, 2 hidden files and 3 folders of 2 files each (13 visible entries, 15 with hidden ones, 18 files recursively). Ollama, 32K context, native history, n=5 per model, isolated workspace. The checker passes an answer that gives 10 (or 12 with the hidden files) as a number of files and fails one that calls 13 or 15 files or items. It reads wording, so a bare number does not pass. Logs: `logs/eval-20261030-120025-ollama-qwen3.5_9b-counting.json` and `logs/eval-20261030-120116-ollama-gemma4_e4b-counting.json`.
