@@ -60,4 +60,5 @@ Build, run and workflow rules for this repository. Several rules are adapted fro
 
 * The confirmation layer in `generic_tools.py` is a safety boundary. Do not weaken it (auto-allowed actions, path scoping, `.env` blocking, secret redaction) without the user's explicit say-so, and add a test for any change to it.
 * Keep the agent's prompt small. Efficiency against OpenClaw is the point of the project; measure before adding to it.
+* **Merge gate for prompt and tool changes.** State the pass criterion before the run. Merge when neither Qwen nor Gemma gets worse beyond noise and at least one clearly improves; a model that was already failing does not have to pass. Report the sample size and whether the rule was applied before or after seeing the result.
 * Match the surrounding code's style: type hints, short docstrings, comments only where the reason is not obvious.
