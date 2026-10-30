@@ -697,6 +697,36 @@ def _files_payload() -> dict:
     }
 
 
+def _format_schedule(item: dict) -> dict:
+    """Return a schedule entry in the redacted, clipped shape used by the API and UI."""
+    next_run_raw = item.get("next_run")
+    last_run_raw = item.get("last_run")
+    last_status_raw = item.get("last_status")
+    last_err_raw = item.get("last_error")
+    prompt_raw = item.get("prompt")
+    return {
+        "id": g._redact(str(item.get("id") if item.get("id") is not None else "")),
+        "cron": g._redact(str(item.get("cron") if item.get("cron") is not None else "")),
+        "enabled": bool(item.get("enabled")),
+        "next_run": g._redact(str(next_run_raw)) if next_run_raw is not None else None,
+        "last_run": g._redact(str(last_run_raw)) if last_run_raw is not None else None,
+        "last_status": g._redact(str(last_status_raw if last_status_raw is not None else "")),
+        "last_error": g._redact(str(last_err_raw if last_err_raw is not None else ""))[:500],
+        "prompt": g._redact(str(prompt_raw if prompt_raw is not None else ""))[:500],
+    }
+
+
+def _is_valid_schedule_id(sid: Any) -> bool:
+    """Validate a schedule ID: non-empty string <= 64 chars matching [\\w.-]+ without '..'."""
+    return (
+        isinstance(sid, str)
+        and bool(sid)
+        and len(sid) <= 64
+        and bool(re.fullmatch(r"[\w.-]+", sid))
+        and ".." not in sid
+    )
+
+
 def _schedules_payload() -> tuple[list[dict], str]:
     """Read-only view of schedules.json, redacted and clipped."""
     try:
@@ -707,21 +737,7 @@ def _schedules_payload() -> tuple[list[dict], str]:
     for item in raw_list[:100]:
         if not isinstance(item, dict):
             continue
-        next_run_raw = item.get("next_run")
-        last_run_raw = item.get("last_run")
-        last_status_raw = item.get("last_status")
-        last_err_raw = item.get("last_error")
-        prompt_raw = item.get("prompt")
-        items.append({
-            "id": g._redact(str(item.get("id") if item.get("id") is not None else "")),
-            "cron": g._redact(str(item.get("cron") if item.get("cron") is not None else "")),
-            "enabled": bool(item.get("enabled")),
-            "next_run": g._redact(str(next_run_raw)) if next_run_raw is not None else None,
-            "last_run": g._redact(str(last_run_raw)) if last_run_raw is not None else None,
-            "last_status": g._redact(str(last_status_raw if last_status_raw is not None else "")),
-            "last_error": g._redact(str(last_err_raw if last_err_raw is not None else ""))[:500],
-            "prompt": g._redact(str(prompt_raw if prompt_raw is not None else ""))[:500],
-        })
+        items.append(_format_schedule(item))
     return items, ""
 
 
@@ -874,6 +890,52 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 if not isinstance(aid, str) or not aid or len(aid) > 200 or "/" in aid or "\\" in aid or ".." in aid:
                     return self._send(400, {"error": "invalid"})
                 ok = session.dismiss_approval(aid)
+                return self._send(200 if ok else 404, {"ok": ok})
+            if path == "/api/schedule_add":
+                if _schedules_error():
+                    return self._send(409, {"error": "schedules.json is damaged"})
+                prompt = body.get("prompt")
+                cron = body.get("cron")
+                if not isinstance(prompt, str) or not isinstance(cron, str):
+                    return self._send(400, {"error": "invalid prompt or cron"})
+                try:
+                    current_items = schedules.load()
+                except Exception:
+                    return self._send(409, {"error": "schedules.json is damaged"})
+                if len(current_items) >= 100:
+                    return self._send(400, {"error": "schedule limit reached"})
+                try:
+                    new_item = schedules.add(prompt, cron)
+                except ValueError as e:
+                    err_msg = str(e)
+                    if prompt and prompt in err_msg:
+                        err_msg = err_msg.replace(prompt, "[REDACTED]")
+                    return self._send(400, {"error": g._redact(err_msg)[:200]})
+                return self._send(200, {"ok": True, "schedule": _format_schedule(new_item)})
+            if path == "/api/schedule_enable":
+                if _schedules_error():
+                    return self._send(409, {"error": "schedules.json is damaged"})
+                sid = body.get("id")
+                if not _is_valid_schedule_id(sid):
+                    return self._send(400, {"error": "invalid id"})
+                enabled = body.get("enabled")
+                if type(enabled) is not bool:
+                    return self._send(400, {"error": "enabled must be a boolean"})
+                try:
+                    ok = schedules.set_enabled(sid, enabled)
+                except ValueError:
+                    return self._send(409, {"error": "schedules.json is damaged"})
+                return self._send(200 if ok else 404, {"ok": ok})
+            if path == "/api/schedule_delete":
+                if _schedules_error():
+                    return self._send(409, {"error": "schedules.json is damaged"})
+                sid = body.get("id")
+                if not _is_valid_schedule_id(sid):
+                    return self._send(400, {"error": "invalid id"})
+                try:
+                    ok = schedules.remove(sid)
+                except ValueError:
+                    return self._send(409, {"error": "schedules.json is damaged"})
                 return self._send(200 if ok else 404, {"ok": ok})
             return self._send(404, {"error": "not found"})
 
@@ -1044,6 +1106,12 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   <div class="card" id="schedulescard" hidden>
     <h2>Schedules</h2>
     <div class="meta" id="scheduleserror" style="color:var(--no);margin-bottom:6px" hidden></div>
+    <div class="meta" id="schedmsg" style="color:var(--no);margin-bottom:6px" hidden></div>
+    <div id="schedform" style="margin-bottom:10px" hidden>
+      <textarea id="schedprompt" placeholder="Prompt" rows="2" style="margin-bottom:6px"></textarea>
+      <input id="schedcron" placeholder="Cron expression (e.g. 0 9 * * 1-5)" style="margin-bottom:6px">
+      <div class="row" style="margin-top:0"><button id="schedadd">Add</button></div>
+    </div>
     <div id="scheduleslist"></div>
     <div class="meta" id="schedulesloaderr" style="color:var(--no);margin-top:6px" hidden>Could not load schedules</div>
   </div>
@@ -1198,7 +1266,7 @@ $("sapply").onclick = async () => {
 };
 let lastSig = null, selectedThread = "", historyKey = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
 let approvalsData = [];
-let schedulesData = [], schedulesError = "", schedulesLoadError = false, schedulesKey = null, schedPoll = 0;
+let schedulesData = [], schedulesError = "", schedulesLoadError = false, schedulesKey = null, schedPoll = 0, canRun = false;
 function renderApprovals() {
   const card = $("approvalscard");
   const list = $("approvalslist");
@@ -1275,7 +1343,7 @@ function renderSchedules() {
     errLine.textContent = "";
     errLine.hidden = true;
   }
-  if (!schedulesData.length && !schedulesError && !schedulesLoadError) {
+  if (!canRun && !schedulesData.length && !schedulesError && !schedulesLoadError) {
     card.hidden = true;
     return;
   }
@@ -1303,6 +1371,62 @@ function renderSchedules() {
     p.className = "approvalprompt";
     p.textContent = (s.prompt || "").slice(0, 200);
     item.appendChild(p);
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "4px";
+    const togBtn = document.createElement("button");
+    togBtn.className = "ghost";
+    togBtn.style.padding = "4px 10px";
+    togBtn.style.fontSize = "12px";
+    togBtn.textContent = s.enabled ? "Disable" : "Enable";
+    togBtn.onclick = async () => {
+      try {
+        const res = await api("/api/schedule_enable", {id: s.id, enabled: !s.enabled});
+        if (res && res.ok) {
+          $("schedmsg").textContent = "";
+          $("schedmsg").hidden = true;
+          schedulesKey = null;
+          refresh();
+        } else {
+          $("schedmsg").textContent = (res && res.error) || "Could not update schedule";
+          $("schedmsg").hidden = false;
+        }
+      } catch (e) {
+        $("schedmsg").textContent = "Could not update schedule";
+        $("schedmsg").hidden = false;
+      }
+    };
+    row.appendChild(togBtn);
+    const delBtn = document.createElement("button");
+    delBtn.className = "ghost";
+    delBtn.style.padding = "4px 10px";
+    delBtn.style.fontSize = "12px";
+    delBtn.textContent = "Delete";
+    let delArmed = false;
+    delBtn.onclick = async () => {
+      if (!delArmed) {
+        delArmed = true;
+        delBtn.textContent = "Delete?";
+        return;
+      }
+      try {
+        const res = await api("/api/schedule_delete", {id: s.id});
+        if (res && res.ok) {
+          $("schedmsg").textContent = "";
+          $("schedmsg").hidden = true;
+          schedulesKey = null;
+          refresh();
+        } else {
+          $("schedmsg").textContent = (res && res.error) || "Could not delete schedule";
+          $("schedmsg").hidden = false;
+        }
+      } catch (e) {
+        $("schedmsg").textContent = "Could not delete schedule";
+        $("schedmsg").hidden = false;
+      }
+    };
+    row.appendChild(delBtn);
+    item.appendChild(row);
     list.appendChild(item);
   }
 }
@@ -1318,6 +1442,30 @@ async function loadSchedules() {
   }
   renderSchedules();
 }
+$("schedadd").onclick = async () => {
+  const p = $("schedprompt").value;
+  const c = $("schedcron").value;
+  $("schedadd").disabled = true;
+  try {
+    const res = await api("/api/schedule_add", {prompt: p, cron: c});
+    if (res && res.ok) {
+      $("schedprompt").value = "";
+      $("schedcron").value = "";
+      $("schedmsg").textContent = "";
+      $("schedmsg").hidden = true;
+      schedulesKey = null;
+      refresh();
+    } else {
+      $("schedmsg").textContent = (res && res.error) || "Could not add schedule";
+      $("schedmsg").hidden = false;
+    }
+  } catch (e) {
+    $("schedmsg").textContent = "Could not add schedule";
+    $("schedmsg").hidden = false;
+  } finally {
+    $("schedadd").disabled = false;
+  }
+};
 function renderRuns() {
   const container = $("runslist");
   while (container.firstChild) container.removeChild(container.firstChild);
@@ -1415,6 +1563,10 @@ async function refresh() {
   }
   if (!p) pendingId = null;
   const viewing = selectedRunId !== null;
+  const prevCanRun = canRun;
+  canRun = !!s.can_run;
+  $("schedform").hidden = !canRun;
+  if (canRun !== prevCanRun) renderSchedules();
   $("runcard").hidden = !s.can_run;
   $("setform").hidden = !s.can_run;
   if (s.can_run) fillSettings(s);
