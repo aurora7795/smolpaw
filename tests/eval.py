@@ -67,6 +67,30 @@ def make_listing_fixture(workspace: Path) -> list[str]:
     return [r"\b55\b", *LISTING_FOLDERS]
 
 
+COUNTING_PROMPT = "How many files are in the folder downloads/?"
+COUNTING_FILES, COUNTING_HIDDEN, COUNTING_FOLDERS, COUNTING_NESTED = 10, 2, 3, 2
+# A right answer states the top-level file count (10 visible, or 12 with the hidden ones) as a number of files. An answer
+# that calls the entry count (13 visible entries, 15 with hidden ones) "files" or "items" fails (#49). The check reads
+# the wording only: "10 files and 3 folders" passes, "13 files" fails, and an answer giving only a bare number does not.
+COUNTING_EXPECT = (r"(?s)^(?!.*\b(?:13|15)\s+(?:files|items)\b)"
+                   r".*\b(?:10|12)\s+(?:(?:regular|visible|top-level)\s+)*files\b")
+
+
+def make_counting_fixture(workspace: Path) -> list[str]:
+    """Create downloads/ with 10 files, 2 hidden files and 3 folders holding 2 files each; return the answer regex (#49)."""
+    d = workspace / "downloads"
+    d.mkdir(parents=True)
+    for i in range(COUNTING_FILES):
+        (d / f"report{i}.txt").write_text("x")
+    for i in range(COUNTING_HIDDEN):
+        (d / f".hidden{i}").write_text("x")
+    for i in range(COUNTING_FOLDERS):
+        (d / f"folder{i}").mkdir()
+        for j in range(COUNTING_NESTED):
+            (d / f"folder{i}" / f"inner{j}.txt").write_text("x")
+    return [COUNTING_EXPECT]
+
+
 def lms(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([str(LMS), *args], capture_output=True, text=True)
 
@@ -326,6 +350,8 @@ def main() -> None:
     ap.add_argument("--tidepool", metavar="VARIANT", help="serve the fake Tidepool API (easy|hint|detail|paged)")
     ap.add_argument("--listing", action="store_true",
                     help="folder-listing task on a generated 55-entry downloads/ in an isolated workspace (#46)")
+    ap.add_argument("--counting", action="store_true",
+                    help="file-count task on a generated downloads/ with files, hidden files and folders (#49)")
     ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, *EDIT_CASES, *TRACKING_GROUPS],
                     help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
                          "run, passing on the file written to disk or the figures reported (#87): "
@@ -366,10 +392,14 @@ def main() -> None:
         prompt = prompt or LISTING_PROMPT
         if not args.tidepool and not args.notes_file:
             (tmp / "notes.md").write_text("# notes\n")
+    if args.counting:
+        g.WORKSPACE = tmp / "workspace"
+        expects = expects or make_counting_fixture(g.WORKSPACE)
+        prompt = prompt or COUNTING_PROMPT
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
     if not prompt and not args.tracking:
-        ap.error("--prompt is required unless --tidepool, --listing or --tracking is used")
+        ap.error("--prompt is required unless --tidepool, --listing, --counting or --tracking is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
     web_server, web_info = None, {}
@@ -395,7 +425,7 @@ def main() -> None:
             for case_name in TRACKING_GROUPS.get(args.tracking, [args.tracking]):
                 run_tracking(args, tmp, case_name, ctx)
             return
-        label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "custom")
+        label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
         for i in range(1, args.n + 1):

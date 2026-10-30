@@ -5,6 +5,7 @@ Run with: .venv/bin/python tests/test_eval_tracking.py
 Tests must not write to the real workspace/, notes.md, logs/ or .undo/.
 """
 
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -201,6 +202,22 @@ try:
 
     r = run_case("append_keep_all", append_ok)
     check("a correct append passes", r["passed"])
+
+    # --- counting fixture and checker (#49) ---------------------------------------------------
+    cdir = tmp / "count-ws"
+    (pat,) = ev.make_counting_fixture(cdir)
+    top = list((cdir / "downloads").iterdir())
+    check("the counting fixture has 10 files, 2 hidden files and 3 folders at the top level",
+          sum(p.is_file() and not p.name.startswith(".") for p in top) == 10
+          and sum(p.is_file() and p.name.startswith(".") for p in top) == 2 and sum(p.is_dir() for p in top) == 3)
+    check("each counting folder holds 2 files", all(len(list(p.iterdir())) == 2 for p in top if p.is_dir()))
+    ok = lambda a: bool(re.search(pat, a, re.I))  # noqa: E731
+    check("a count of the top-level files passes", ok("There are 10 files in downloads/.") and ok("10 files and 3 folders")
+          and ok("12 files, including 2 hidden ones") and ok("It holds 10 regular files."))
+    check("the entry count called files or items fails", not ok("There are 13 files in downloads/.")
+          and not ok("15 items") and not ok("10 files, so 13 files in total"))
+    check("a count with no files wording, or the recursive count, fails", not ok("The count is 10.") and not ok("18 files in all")
+          and not ok("There are 10 folders and 3 files."))
 
     # --- isolation ----------------------------------------------------------------------------
     check("the stub runs recorded clipped_results", "clipped_results" in r)
