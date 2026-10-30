@@ -3520,6 +3520,91 @@ check("14. a path written with .. components saves one copy inside UNDO_DIR",
       and ".." not in c14[0].name and "/" not in c14[0].name)
 g.UNDO_DIR = saved_undo_dir
 
+# --- the write prompt shows what an existing file holds now (#71) -------------------------
+saved_undo_dir, g.UNDO_DIR = g.UNDO_DIR, tmp / "undo_preview"
+prompts.clear()
+answer["value"] = False
+(g.WORKSPACE / "pv_new.txt").unlink(missing_ok=True)
+g.write_file("pv_new.txt", "brand new")
+check("a write to a new file shows no preview and keeps the old prompt shape",
+      len(prompts) == 1 and prompts[0] == f"Write 9 chars to {g.WORKSPACE.resolve() / 'pv_new.txt'}:\nbrand new")
+prompts.clear()
+pv = g.WORKSPACE / "pv_old.txt"
+pv.write_text("first line\nsecond line\nthird line\nfourth line\n")
+g.write_file("pv_old.txt", "replacement")
+pv_prompt = prompts[-1]
+pv_first, _, pv_rest = pv_prompt.partition("\n")
+check("the first line of a replace prompt is unchanged, so scripted approvers still parse it",
+      pv_first == f"Write 11 chars to {pv.resolve()}:")
+check("the prompt says it replaces an existing file and gives its size",
+      "Replaces an existing file (" in pv_rest and f"({pv.stat().st_size:,} bytes)" in pv_rest)
+check("the prompt shows the first three lines of the old file and not the fourth",
+      "| first line\n| second line\n| third line" in pv_rest and "fourth line" not in pv_rest)
+check("the new text follows the preview", pv_rest.endswith("--- new text ---\nreplacement"))
+check("a declined write leaves the old file alone", pv.read_text().startswith("first line") and pv_prompt == prompts[-1])
+
+prompts.clear()
+pv.write_text("x" * 500 + "\nshort\n")
+g.write_file("pv_old.txt", "r")
+check("a long old line is cut to PREVIEW_COLS characters", "| " + "x" * g.PREVIEW_COLS + "\n" in prompts[-1] and "x" * (g.PREVIEW_COLS + 1) not in prompts[-1])
+
+prompts.clear()
+pv.write_text("\n".join(f"line{i}" for i in range(5000)))
+g.write_file("pv_old.txt", "r")
+check("a big old file shows only its first lines and its size",
+      "line3" not in prompts[-1] and "(" in prompts[-1] and f"{pv.stat().st_size:,} bytes" in prompts[-1] and len(prompts[-1]) < 1000)
+
+prompts.clear()
+pv.write_bytes(b"\x00\x01\x02binary")
+g.write_file("pv_old.txt", "r")
+check("a binary old file is described, not shown", "(binary content)" in prompts[-1] and "binary" not in prompts[-1].replace("(binary content)", ""))
+pv.write_bytes(b"x\n" * 1500 + b"\x00 late nul")
+prompts.clear()
+g.write_file("pv_old.txt", "r")
+check("only the first PREVIEW_READ bytes are read: a NUL byte past them does not make a text file binary",
+      "| x" in prompts[-1] and "(binary content)" not in prompts[-1])
+pv.write_text("")
+prompts.clear()
+g.write_file("pv_old.txt", "r")
+check("an empty old file is described as empty", "(0 bytes)" in prompts[-1] and "(empty)" in prompts[-1])
+pv.write_text("\n\n")
+prompts.clear()
+g.write_file("pv_old.txt", "r")
+check("an old file of blank lines still shows its size and rows", "(2 bytes)" in prompts[-1] and "| \n| \n" in prompts[-1])
+
+os.environ["SMOLPAW_PREVIEW_SECRET"] = "preview-secret-value-77"
+saved_notes_pv = g.NOTES
+g.NOTES = tmp / "preview-notes.md"
+g.NOTES.write_text("- preview_svc: https://preview.example | key_env=SMOLPAW_PREVIEW_SECRET\n")
+pv.write_text("token = preview-secret-value-77\nok\n")
+prompts.clear()
+pv_log = tmp / "preview-log.jsonl"
+saved_pv_log, g._log_file = g._log_file, pv_log
+g.write_file("pv_old.txt", "r")
+check("a registered secret in the old content is redacted in the prompt and the run log",
+      "preview-secret-value-77" not in prompts[-1] and "[REDACTED]" in prompts[-1] and "preview-secret-value-77" not in pv_log.read_text())
+g._log_file = saved_pv_log
+g.NOTES = saved_notes_pv
+
+prompts.clear()
+(g.WORKSPACE / "pv_dir").mkdir(exist_ok=True)
+g.write_file("pv_dir", "r")
+check("a directory target shows no preview", "Replaces an existing file" not in prompts[-1])
+prompts.clear()
+g.write_file(".env", "x")
+check("a secrets file is still blocked without a prompt, preview or read", not prompts)
+outside_pv = tmp / "outside_pv.txt"
+outside_pv.write_text("outside old\n")
+prompts.clear()
+g.write_file(str(outside_pv), "r")
+check("an existing file outside workspace/ shows the preview and the OUTSIDE warning",
+      "(OUTSIDE workspace/)" in prompts[0].splitlines()[0] and "| outside old" in prompts[0])
+answer["value"] = True
+prompts.clear()
+res_pv = g.write_file("pv_old.txt", "approved text")
+check("an approved replace still writes and reports as before", res_pv.startswith("SUCCESS") and pv.read_text() == "approved text")
+g.UNDO_DIR = saved_undo_dir
+
 current_undo = {(p.name, p.stat().st_size) for p in real_undo.iterdir()} if real_undo.exists() else set()
 check("real .undo folder is untouched", not real_undo.exists() if not undo_snapshot else current_undo == undo_snapshot)
 

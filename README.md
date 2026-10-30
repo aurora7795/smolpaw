@@ -189,6 +189,8 @@ Before an approved overwrite of an existing file (via `write_file`, `edit_file` 
 
 To restore a file by hand, copy the saved file from `.undo/` back to its original location (for example `cp .undo/<filename> <target>`).
 
+When `write_file` would replace an existing file, the `[y/N]` prompt also shows what is being replaced: the old file's size and its first three lines (each cut to 120 characters, redacted), under the usual first line and above the new text. A new file's prompt is unchanged. A binary or empty old file is described instead of shown.
+
 This safety net is not a replacement for the `[y/N]` prompt: always review proposed writes before approving them.
 
 ## Tools
