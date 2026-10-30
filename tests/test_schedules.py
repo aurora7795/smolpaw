@@ -673,5 +673,31 @@ check("edit() racing set_enabled() keeps both changes",
       len(final) == 1 and final[0]["prompt"] == "edited" and final[0]["enabled"] is False)
 race_tmp.unlink()
 
+# the limit is checked under the lock, so two simultaneous adds at the limit - 1 cannot both succeed
+limit_tmp = Path(tempfile.mkdtemp()) / "limit.json"
+real_file = schedules.PATH
+schedules.PATH = limit_tmp
+limit_tmp.write_text(json.dumps([{"id": f"id{i}", "prompt": "p", "cron": "* * * * *", "enabled": True}
+                                 for i in range(schedules.MAX_SCHEDULES - 1)]), encoding="utf-8")
+real_load_l = schedules.load
+def _slow_load_l():
+    data = real_load_l()
+    time.sleep(0.05)
+    return data
+schedules.load = _slow_load_l
+added: list[bool] = []
+def _try_add():
+    try:
+        schedules.add("p", "* * * * *")
+        added.append(True)
+    except ValueError as e:
+        added.append(False if "limit" in str(e) else True)
+th = [threading.Thread(target=_try_add) for _ in range(2)]
+for x in th: x.start()
+for x in th: x.join()
+schedules.load = real_load_l
+check("two simultaneous adds at 99 schedules leave exactly 100", len(real_load_l()) == schedules.MAX_SCHEDULES and sorted(added) == [False, True])
+schedules.PATH = real_file
+
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

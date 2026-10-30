@@ -102,3 +102,7 @@ Update after each row.
 - Delegated issues logged: 17
 - Clean: 0, scoped fix: 16, rework: 0, rejected: 1
 - Verdict yes: 16, no: 1, unclear: 0
+
+### Minor items left from the #80 and #81 reviews (checked 2026-10-30)
+
+Done: the 404-on-dismiss stale row, the unclipped `id`, `cron` and `last_status`, and the add-limit race (now checked under the lock). Not changed: a string `enabled` such as `"false"` shows as on, which is what the scheduler does (it tests truthiness), so the page is accurate; the three routes not requiring a session (the token still gates the API); the prompt scrub in the add error path, which is dead but harmless; the editor freezing the list when its schedule is deleted elsewhere (Cancel releases it).

@@ -16,6 +16,7 @@ import threading
 
 PATH: Path = Path(__file__).resolve().parent / "schedules.json"
 MAX_PROMPT: int = 4_000
+MAX_SCHEDULES: int = 100
 _LOCK: threading.RLock = threading.RLock()
 STATUSES: tuple[str, ...] = ("running", "ok", "error", "stopped", "needs_approval", "timeout")
 
@@ -243,6 +244,8 @@ def add(prompt: str, cron: str, now: datetime | None = None) -> dict:
 
     with _LOCK:
         schedules = load()
+        if len(schedules) >= MAX_SCHEDULES:
+            raise ValueError("schedule limit reached")
         existing_ids = {s.get("id") for s in schedules}
         sid = secrets.token_hex(4)
         while sid in existing_ids:

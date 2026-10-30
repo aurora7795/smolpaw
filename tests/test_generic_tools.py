@@ -2107,6 +2107,8 @@ check("web page contains dismiss approval api call",
       'api("/api/dismiss_approval", {id: a.id})' in page_html)
 check("web page refreshes after a successful dismiss and says 'Could not dismiss' on failure (presence check only)",
       'refresh();\n        }\n      } catch' in page_html and page_html.count('"Could not dismiss"') == 2)
+check("web page also refreshes after a failed dismiss, so an already-gone row disappears (presence check only)",
+      'Could not dismiss";\n          refresh();' in page_html)
 check("web page uses textContent for prompt and actions",
       'p.textContent = (a.prompt || "").slice(0, 200)' in page_html and 'li.textContent = act' in page_html)
 idx_appr_start = page_html.index("function renderApprovals")
@@ -2589,6 +2591,13 @@ r_101 = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt":
 check("api/schedule_add refuses 101st schedule with 400 and leaves file identical",
       r_101.status_code == 400 and r_101.json().get("error") == "schedule limit reached"
       and sched_test_file.read_bytes() == bytes_100)
+
+# the id, cron and status of a hand-edited entry are clipped to 100 characters in the list
+sched_test_file.write_text(json.dumps([{"id": "i" * 300, "prompt": "p", "cron": "* " * 200, "enabled": True,
+                                        "last_status": "s" * 300}]), encoding="utf-8")
+r_long = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()["schedules"][0]
+check("api/schedules clips id, cron and last_status to 200 characters",
+      len(r_long["id"]) == 200 and len(r_long["cron"]) == 200 and len(r_long["last_status"]) == 200)
 
 # Damaged file gives 409 and writes nothing
 sched_test_file.write_text("damaged json content", encoding="utf-8")
