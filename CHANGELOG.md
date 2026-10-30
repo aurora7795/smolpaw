@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+- The `--counting` and `--counting-home` check accepts a correct bare "12" or "10" (#49): in that fixture no other count is either number, and a 13 or 15 called files or items, or a 10 or 12 counting folders, still fails. Qwen's saved answers re-score from 1/5 to 5/5 on `--counting` and, on the home-folder arms, 0/5, 2/5, 0/5, 1/5 to 2/5, 4/5, 3/5, 5/5; Gemma's 1 of its 5 prompt-sentence answers now passes. New `tests/rescore_counting.py` re-applies the check to saved logs; RESULTS.md notes both figures.
+
 ### Changed
 - Merge gate for prompt and tool changes (CLAUDE.md section 6): no regression on either model beyond noise and a clear gain on at least one, replacing "must pass on both Qwen and Gemma". A model that already failed need not pass. Applied to #49: the home-folder sentence in `generic_tools.py` (33 tokens) is merged; Qwen 2/5 to 5/5 answers with the figure, Gemma unchanged at 0/5.
 - The web page's Output card now also shows the latest successful `fetch_page` or `web_search` result (#62), the text the model was shown, redacted and clipped like the other outputs, so a final answer that drops or overstates fetched results can be checked against it. A failed fetch or search leaves the card alone. No prompt or tool schema change. Not measured against a model: it changes what the user sees, not what the model does, and the answer-versus-fetched-data problem itself is untouched. Tests in `tests/test_generic_tools.py`, checked by removing the change.

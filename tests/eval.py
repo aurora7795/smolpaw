@@ -69,12 +69,13 @@ def make_listing_fixture(workspace: Path) -> list[str]:
 
 COUNTING_PROMPT = "How many files are in the folder downloads/?"
 COUNTING_FILES, COUNTING_HIDDEN, COUNTING_FOLDERS, COUNTING_NESTED = 10, 2, 3, 2
-# A right answer states the top-level file count (10 visible, or 12 with the hidden ones) as a number of files. An answer
-# that calls the entry count (13 visible entries, 15 with hidden ones) "files" or "items" fails (#49). The check reads
-# the wording only: "10 files and 3 folders" passes, "13 files" fails, and an answer giving only a bare number does not.
+# A right answer gives the top-level file count, 10 visible or 12 with the hidden ones, with or without the word "files".
+# The entry count (13 visible entries, 15 with hidden ones) and the nested-inclusive counts (16, 18) are different
+# numbers in this fixture, so a bare 10 or 12 can only be the file count. An answer that calls 13 or 15 "files" or
+# "items" fails (#49), and so does a 10 or 12 that counts folders, directories, entries or items. Before 2026-10-30
+# the check needed "files" after the number, which failed a correct bare "12".
 COUNTING_EXPECT = (r"(?s)^(?!.*\b(?:13|15)\s+(?:files|items)\b)"
-                   r".*\b(?:10|12)\s+(?:(?:regular|visible|top-level)\s+)*files\b")
-
+                   r".*\b(?:10|12)\b(?!\s*(?:folders?|directories|dirs?|entries|items)\b)")
 
 COUNTING_HOME_PROMPT = "How many files are in my Downloads folder?"
 
