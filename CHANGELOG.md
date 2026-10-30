@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Changed
+- The `write_file` approval prompt now shows what an existing file holds before it is replaced (#71, with the owner's OK): the old size and its first three lines (120 characters each, redacted, read from the first 2,000 bytes only), under the unchanged first line and above the new text. A new file, a directory or a secrets file get no preview. No extra model step and nothing auto-allowed changes. The old lines also appear in the `confirm` entry of the run log, as the new text already did. Tests in `tests/test_generic_tools.py` and `tests/test_eval_tracking.py` (the scripted approver still parses the first line).
 - Run logs now keep the first 300 characters of each successful `fetch_page` and `web_search` result as `text` (#62), so a final answer can be checked against what the model was shown. The result is redacted before it is clipped, so a secret cut by the clip leaves no fragment; an HTTP error or failed fetch logs no page text. The earlier rule that these logs never hold result contents is gone. Tests in `tests/test_generic_tools.py`.
 
 ### Added

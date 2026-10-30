@@ -993,6 +993,32 @@ def list_dir(path: str = ".") -> str:
     return result
 
 
+PREVIEW_LINES, PREVIEW_COLS, PREVIEW_READ = 3, 120, 2000  # what the write prompt shows of the file being replaced (#71)
+
+
+def _replace_preview(p: Path) -> str:
+    """For the write prompt: size and first lines of an existing file, so the user sees what a write replaces (#71).
+
+    Empty for a path that is not an existing regular file. Reads at most PREVIEW_READ bytes; redacted like any other output.
+    """
+    try:
+        if not p.is_file():
+            return ""
+        size = p.stat().st_size
+        with p.open("rb") as fh:
+            head = fh.read(PREVIEW_READ)
+    except OSError:
+        return ""
+    if not size:
+        body = "(empty)"
+    elif b"\0" in head:
+        body = "(binary content)"
+    else:
+        lines = [ln[:PREVIEW_COLS] for ln in head.decode("utf-8", "replace").splitlines()[:PREVIEW_LINES]]
+        body = "\n".join(f"| {ln}" for ln in lines)
+    return _redact(f"Replaces an existing file ({size:,} bytes). It now starts:\n{body}\n--- new text ---\n")
+
+
 @tool
 def write_file(path: str, text: str) -> str:
     """Write a text file, replacing any existing one. Always asks the user first. Paths are relative to workspace/.
@@ -1006,7 +1032,7 @@ def write_file(path: str, text: str) -> str:
         _log("write_file", path=path, chars=len(text), result="blocked (secrets file)")
         return "BLOCKED: secrets files cannot be written."
     where = "" if _in_scope(path) else "  (OUTSIDE workspace/)"
-    if not _approved(f"Write {len(text)} chars to {p}{where}:\n{text[:500]}"):
+    if not _approved(f"Write {len(text)} chars to {p}{where}:\n{_replace_preview(p)}{text[:500]}"):
         _log("write_file", path=path, chars=len(text), result="declined")
         return DECLINED
     saved_undo, undo_reason = _save_undo(p)

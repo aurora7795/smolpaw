@@ -78,6 +78,10 @@ try:
     ws = ws.resolve()  # write_file describes resolved paths
     confirm = ev.workspace_write_confirm(ws)
     check("a write inside the workspace is approved", confirm(f"Write 10 chars to {ws}/a.md:\nhello"))
+    check("a write that replaces an existing file, with the old-content preview under the first line, is approved (#71)",
+          confirm(f"Write 10 chars to {ws}/a.md:\nReplaces an existing file (1,234 bytes). It now starts:\n| old\n--- new text ---\nhello"))
+    check("a replace of a file outside the workspace is still declined with the preview present",
+          not confirm(f"Write 10 chars to {tmp}/other/a.md  (OUTSIDE workspace/):\nReplaces an existing file (3 bytes). It now starts:\n| old\n--- new text ---\nhi"))
     check("a write outside the workspace is declined", not confirm(f"Write 10 chars to {tmp}/other/a.md  (OUTSIDE workspace/):\nhi"))
     check("a path that only shares the folder name prefix is declined", not confirm(f"Write 10 chars to {ws}-evil/a.md:\nhi"))
     check("an edit inside the workspace is approved", confirm(f"Edit {ws}/a.md: replace 3 chars with 3\n- old\n+ new"))
