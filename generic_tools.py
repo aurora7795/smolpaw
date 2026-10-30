@@ -1390,7 +1390,7 @@ def build_instructions() -> str:
     for f in sorted(SKILLS.glob("*.md")) if SKILLS.exists() else []:
         text = f.read_text()
         (inline if len(text) <= INLINE_SKILL_MAX else listed).append((f.stem, text))
-    parts = [GUIDANCE, f"Home folder: {Path.home()}. Shell commands start in workspace/.", f"--- notes.md ---\n{notes}"]
+    parts = [GUIDANCE, f"Home folder: {Path.home()}. Shell commands start in workspace/. File tools take paths relative to workspace/; you can reach the home folder, e.g. Downloads, by full path or ~ (the user is asked first).", f"--- notes.md ---\n{notes}"]
     parts += [f"--- skill: {name} ---\n{text}" for name, text in inline]
     if listed:
         parts.append("Longer skills (read with read_skill): " + ", ".join(name for name, _ in listed))
