@@ -600,6 +600,26 @@ The harness nudge chosen after the variants above. Change, tried in a separate w
 - **Decision.** Not kept. Three ways of telling Gemma the text is unread (the footer, an every-page instruction, this list) have all left it at 0/10, so the cause is not missing information. A larger page size remains the untested route.
 - **Caveats.** n=10, one session. Qwen's mean input tokens (46,748) are lower than the 58,221 in the first n=10 run, which shows how much one session's runs can differ in tokens; its pass count is the same.
 
+### Snipping old tool results at 8K context (#73, 2026-10-30)
+
+The part of #73 the earlier cache numbers left open: does shortening older tool results help when the context is small? Prototype in `NativeHistoryModel` (`agent.py`), **off by default**, switched on with `SMOLPAW_SNIP=step|batch` (a measurement knob, not a feature): every tool result except the last two and longer than 1,500 characters is cut to its first half plus last quarter with a note in between (a paged read's footer sits in the last quarter and survives). `step` cuts on every call; `batch` waits until the history passes `SMOLPAW_SNIP_AT` estimated tokens (6,000 here, chars/3.5, counting the system prompt) and then cuts all older results at once and keeps the same ones cut. LM Studio, MLX builds (`google/gemma-4-e4b`, `qwen3.5-9b-mlx`), loaded context 8,192, one slot, native history, `--tracking read_three_report`, n=5 per cell, run from a separate worktree. Not Ollama: its context is a server setting, and changing it means changing the app's setting. `read_three_report` is the heavy task (about 6 page reads of about 1,100 tokens each after a 4.4K prompt) and also the harm check: the figures sit in earlier pages. Logs: `logs/eval-20261030-14*` to `16*-lmstudio-*-tracking-read_three_report-8k-snip-{off,step,batch}.json`.
+
+| Model | Mode | Passed | Hit step cap | Parse errors (5 runs) | Mean steps | Mean input tokens | Mean wall (s) | Peak step input |
+|---|---|---|---|---|---|---|---|---|
+| Gemma 4 E4B | off | 0/5 | 0 | 4 | 6.4 | 39,852 | 154 | 7,879 |
+| Gemma 4 E4B | step | 0/5 | 0 | 1 | 5.4 | 31,712 | 136 | 7,439 |
+| Gemma 4 E4B | batch | 0/5 | 0 | 1 | 5.2 | 30,269 | 146 | 7,198 |
+| Qwen 3.5 9B | off | 1/5 | 4 | 31 | 12.6 | 77,661 | 132 | 7,961 |
+| Qwen 3.5 9B | step | 0/5 | 5 | 31 | 13.0 | 76,754 | 257 | 8,160 |
+| Qwen 3.5 9B | batch | 0/5 | 5 | 28 | 13.0 | 79,782 | 544 | 8,186 |
+
+- **The baseline fails at 8K, so the test cannot show a pass-rate gain.** Without snipping Gemma passes 0/5 (it passes 0/10 at 32K too, see #89) and Qwen 1/5, against 9/10 for Qwen at 32K. Qwen's runs fill the context (peak step input 7,961 to 8,186 of 8,192), produce 28 to 31 parse errors across the five runs and hit the step cap in 4 to 5 of 5, in every mode.
+- **Gemma: input tokens fell, the result did not change.** Mean input tokens fell 20% (step) and 24% (batch), steps by about one, with the same 0/5. The token saving is real; there is no pass rate to hold or lose.
+- **Qwen: no help.** 0/5 in both snipping modes against 1/5 off; with n=5 that difference is one run. Input tokens did not fall (76.8K and 79.8K against 77.7K), because its steps are spent on retries and parse errors, not on re-sending old pages. Its wall time was higher with snipping (257s and 544s against 132s), but LM Studio's reload and the cap runs make single-session wall times unreliable; I did not rerun.
+- **Against the decision rule in #73.** (a) pass rate must not drop in any cell: Qwen went 1/5 to 0/5; (b) 20% fewer input tokens on the heavy task: met for Gemma only; (c) warm wall time not worse: not met for Qwen; (d) at most 0.5 extra steps: met for Gemma, 0.4 extra for Qwen. Not kept as a default.
+- **Caveats.** n=5, one session, one task, one runtime. The 8K setting makes the baseline fail, so this says snipping does not rescue a model that is already out of context, not that it is harmless when the baseline works. Prefix-cache effects were not measured here (LM Studio does not report cached tokens); the earlier section covers re-read cost. The two-task design in the issue (a result three steps back, a fetch-page task) was not run.
+- Reproduce: `SMOLPAW_SNIP=step SMOLPAW_SNIP_AT=6000 .venv/bin/python tests/eval.py --backend lmstudio --model google/gemma-4-e4b --ctx 8192 --tracking read_three_report --n 5 --label 8k-snip-step` (and `batch`, no variable for off, and `qwen3.5-9b-mlx`). `tests/test_generic_tools.py` checks the cutting rules without a model.
+
 ### File count with files, hidden files and folders (#49, 2026-10-30)
 
 `tests/eval.py --counting` (new): "How many files are in the folder downloads/?" against a generated `downloads/` holding 10 files, 2 hidden files and 3 folders of 2 files each (13 visible entries, 15 with hidden ones, 18 files recursively). Ollama, 32K context, native history, n=5 per model, isolated workspace. The checker passes an answer that gives 10 (or 12 with the hidden files) as a number of files and fails one that calls 13 or 15 files or items. It reads wording, so a bare number does not pass. Logs: `logs/eval-20261030-120025-ollama-qwen3.5_9b-counting.json` and `logs/eval-20261030-120116-ollama-gemma4_e4b-counting.json`.
