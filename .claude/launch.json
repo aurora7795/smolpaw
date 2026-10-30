@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "smolpaw-web",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-u", "web.py", "--backend", "ollama", "--model", "gemma4:e4b", "--port", "8771"],
+      "port": 8771
+    }
+  ]
+}
