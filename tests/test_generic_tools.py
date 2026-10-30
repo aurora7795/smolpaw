@@ -2318,19 +2318,386 @@ check("web page shows the on/off state and the last error of a schedule (presenc
       'const statusText = s.enabled ? "on" : "off"' in page_html and 'errDiv.textContent = "error: " + s.last_error' in page_html)
 check("new renderSchedules function contains no innerHTML", "innerHTML" not in sched_fn_code)
 
-# 14. served page contains no add/edit/delete/enable control for schedules
-check("served page contains no POST call for /api/schedules",
-      'api("/api/schedules", ' not in page_html and 'api("/api/schedules",{method:"POST"' not in page_html)
+# 14. served page schedules card contains write controls and no edit control (#80)
 idx_sched_card = page_html.index('id="schedulescard"')
 idx_recents = page_html.index('class="recents"')
 sched_card_html = page_html[idx_sched_card:idx_recents]
-check("served page schedules card contains no add/edit/delete/enable controls",
-      "button" not in sched_card_html
-      and "input" not in sched_card_html
-      and "form" not in sched_card_html
-      and "textarea" not in sched_card_html)
+check("served page schedules card contains add/enable/delete controls and no edit control",
+      "button" in sched_card_html
+      and "input" in sched_card_html
+      and "textarea" in sched_card_html
+      and "edit" not in sched_card_html.lower()
+      and "edit" not in sched_fn_code.lower()
+      and "schedule_edit" not in page_html
+      and "edit_schedule" not in page_html)
+
+# 15. POST /api/schedules is 404 and three new routes exist (#80)
 r_post_sched = http.post(f"{sched_base}/api/schedules", headers=hdr, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
-check("POST /api/schedules route is not found (out of scope)", r_post_sched.status_code == 404)
+r_check_add = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
+r_check_enable = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": "bad..id", "enabled": True}, timeout=5)
+r_check_delete = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": "bad..id"}, timeout=5)
+check("POST /api/schedules is 404 and three new write routes exist",
+      r_post_sched.status_code == 404
+      and r_check_add.status_code != 404
+      and r_check_enable.status_code != 404
+      and r_check_delete.status_code != 404)
+
+# 16. page checks: presence of write controls, handlers, error messages, and in-flight disable
+check("web page contains schedule add form fields",
+      'id="schedprompt"' in page_html
+      and 'id="schedcron"' in page_html
+      and 'id="schedadd"' in page_html)
+check("web page contains calls to all three write routes",
+      'api("/api/schedule_add", {prompt: p, cron: c})' in page_html
+      and 'api("/api/schedule_enable", {id: s.id, enabled: !s.enabled})' in page_html
+      and 'api("/api/schedule_delete", {id: s.id})' in page_html)
+check("web page delete button requires second click with Delete? confirmation",
+      'delBtn.textContent = "Delete?";' in page_html
+      and 'if (!delArmed)' in page_html)
+# review additions: presence checks only (no browser harness), one per behaviour that survived deleting its line
+check("web page shows the card and the add form whenever the page can run, so the first schedule can be added",
+      '$("schedform").hidden = !canRun;' in page_html
+      and 'if (!canRun && !schedulesData.length' in page_html
+      and 'if (canRun !== prevCanRun) renderSchedules();' in page_html)
+check("web page labels the toggle Disable or Enable from the current state",
+      's.enabled ? "Disable" : "Enable"' in page_html)
+check("web page has a fallback and a network-failure message for each write operation",
+      all(page_html.count(f'"{m}"') == 2 for m in ("Could not add schedule", "Could not update schedule", "Could not delete schedule")))
+check("web page clears the message after each successful write",
+      page_html.count('$("schedmsg").hidden = true;') == 3)
+check("web page contains each failure message for write operations",
+      'textContent = (res && res.error) || "Could not add schedule"' in page_html
+      and 'textContent = (res && res.error) || "Could not update schedule"' in page_html
+      and 'textContent = (res && res.error) || "Could not delete schedule"' in page_html)
+check("web page disables Add button while request is in flight",
+      '$("schedadd").disabled = true;' in page_html
+      and '$("schedadd").disabled = false;' in page_html)
+check("web page uses textContent for server strings and messages in write controls",
+      '$("schedmsg").textContent' in page_html
+      and 'innerHTML' not in sched_fn_code)
+schedadd_idx = page_html.index('$("schedadd").onclick')
+schedadd_code = page_html[schedadd_idx:schedadd_idx + 800]
+schedadd_success_code = schedadd_code[schedadd_code.index('if (res && res.ok)'):schedadd_code.index('} else {')]
+check("web page clears add form only on success",
+      '$("schedprompt").value = "";' in schedadd_success_code
+      and '$("schedcron").value = "";' in schedadd_success_code)
+tog_code = page_html[page_html.index('togBtn.onclick'):page_html.index('delBtn.onclick')]
+del_code = page_html[page_html.index('delBtn.onclick'):page_html.index('function loadSchedules')]
+check("web page refreshes after successful write operations",
+      'refresh();' in schedadd_success_code
+      and 'refresh();' in tog_code
+      and 'refresh();' in del_code)
+
+# 17. POST /api/schedule_add: basic add, listed in GET /api/schedules, enabled=True, returned schedule shape
+import re
+sched_test_file.write_text("[]", encoding="utf-8")
+r_add1 = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "task 1", "cron": "0 9 * * *"}, timeout=5)
+check("api/schedule_add returns 200 with ok=true and schedule object",
+      r_add1.status_code == 200 and r_add1.json().get("ok") is True)
+s1 = r_add1.json().get("schedule", {})
+check("api/schedule_add returned schedule has expected shape and enabled=True",
+      s1.get("prompt") == "task 1"
+      and s1.get("cron") == "0 9 * * *"
+      and s1.get("enabled") is True
+      and bool(re.fullmatch(r"[\w.-]+", s1.get("id", "")))
+      and s1.get("next_run") is not None
+      and s1.get("last_run") is None
+      and s1.get("last_status") == ""
+      and s1.get("last_error") == "")
+r_list1 = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()
+check("schedule added appears in GET /api/schedules matching returned schedule exactly",
+      len(r_list1["schedules"]) == 1 and r_list1["schedules"][0] == s1)
+
+# Add a second schedule: unique ids
+r_add2 = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "task 2", "cron": "*/10 * * * *"}, timeout=5)
+s2 = r_add2.json().get("schedule", {})
+check("api/schedule_add generates unique ids across adds",
+      r_add2.status_code == 200 and s2.get("id") != s1.get("id"))
+
+# HTML tags / <script> stored and returned as plain text unchanged
+r_add_script = http.post(f"{sched_base}/api/schedule_add", headers=hdr,
+                         json={"prompt": "<script>alert('xss')</script><b>ok</b>", "cron": "0 12 * * *"}, timeout=5)
+s_script = r_add_script.json().get("schedule", {})
+check("api/schedule_add stores and returns prompt containing <script> as plain text unchanged",
+      r_add_script.status_code == 200 and s_script.get("prompt") == "<script>alert('xss')</script><b>ok</b>")
+
+# 18. POST /api/schedule_add refusals (400, 403, 409) and file byte-identical afterwards
+bytes_refusal_test = sched_test_file.read_bytes()
+
+# Auth refusals
+r_add_notok = http.post(f"{sched_base}/api/schedule_add", json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
+check("api/schedule_add missing token gives 403 and leaves file identical",
+      r_add_notok.status_code == 403 and sched_test_file.read_bytes() == bytes_refusal_test)
+r_add_badtok = http.post(f"{sched_base}/api/schedule_add", headers={"X-Token": "bad"}, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
+check("api/schedule_add wrong token gives 403 and leaves file identical",
+      r_add_badtok.status_code == 403 and sched_test_file.read_bytes() == bytes_refusal_test)
+
+# Body refusals: non-object body, empty body, non-string prompt/cron, empty prompt, whitespace prompt, 4001 char prompt, bad cron
+for bad_payload, label in [
+    (None, "empty body"),
+    ({"prompt": 123, "cron": "* * * * *"}, "non-string prompt"),
+    ({"prompt": "p", "cron": 123}, "non-string cron"),
+    ({"prompt": "", "cron": "* * * * *"}, "empty prompt"),
+    ({"prompt": "   \n\t  ", "cron": "* * * * *"}, "whitespace-only prompt"),
+    ({"prompt": "x" * 4001, "cron": "* * * * *"}, "4001-character prompt"),
+    ({"prompt": "p", "cron": "not a cron"}, "invalid cron string"),
+    ({"prompt": "p", "cron": "61 * * * *"}, "out-of-range cron field"),
+]:
+    if bad_payload is None:
+        r = http.post(f"{sched_base}/api/schedule_add", headers=hdr, data=b"", timeout=5)
+    else:
+        r = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json=bad_payload, timeout=5)
+    check(f"api/schedule_add refuses {label} with 400 and leaves file identical",
+          r.status_code == 400 and "error" in r.json() and sched_test_file.read_bytes() == bytes_refusal_test)
+
+# JSON list body gives 400
+r_list_body = http.post(f"{sched_base}/api/schedule_add", headers=hdr, data=b"[1, 2, 3]", timeout=5)
+check("api/schedule_add refuses JSON list body with 400 and leaves file identical",
+      r_list_body.status_code == 400 and sched_test_file.read_bytes() == bytes_refusal_test)
+
+# 101st schedule refusal
+sched_test_file.write_text(json.dumps([{"id": f"id_{i}", "prompt": f"p_{i}", "cron": "* * * * *", "enabled": True} for i in range(100)]), encoding="utf-8")
+bytes_100 = sched_test_file.read_bytes()
+r_101 = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "p101", "cron": "* * * * *"}, timeout=5)
+check("api/schedule_add refuses 101st schedule with 400 and leaves file identical",
+      r_101.status_code == 400 and r_101.json().get("error") == "schedule limit reached"
+      and sched_test_file.read_bytes() == bytes_100)
+
+# Damaged file gives 409 and writes nothing
+sched_test_file.write_text("damaged json content", encoding="utf-8")
+r_add_dam = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
+check("api/schedule_add damaged file returns 409 and leaves file identical",
+      r_add_dam.status_code == 409 and r_add_dam.json() == {"error": "schedules.json is damaged"}
+      and sched_test_file.read_bytes() == b"damaged json content")
+
+# 19. Redaction in POST /api/schedule_add
+sched_test_file.write_text("[]", encoding="utf-8")
+saved_notes = g.NOTES
+test_sec_notes = tmp / "notes_for_sched_add_secret.md"
+test_sec_notes.write_text("- svc: http://example.com | key_env=TEST_SCHED_WRITE_SECRET\n")
+os.environ["TEST_SCHED_WRITE_SECRET"] = "registered-secret-add-88888"
+g.NOTES = test_sec_notes
+r_add_sec = http.post(f"{sched_base}/api/schedule_add", headers=hdr,
+                      json={"prompt": "run task with registered-secret-add-88888 in prompt", "cron": "* * * * *"}, timeout=5)
+g.NOTES = saved_notes
+del os.environ["TEST_SCHED_WRITE_SECRET"]
+check("api/schedule_add redacts secret from prompt in 200 response",
+      r_add_sec.status_code == 200
+      and "registered-secret-add-88888" not in r_add_sec.text
+      and r_add_sec.json().get("schedule", {}).get("prompt") == "run task with [REDACTED] in prompt")
+
+# Secret in ValueError message from schedules.add
+saved_add = schedules.add
+def _raising_add(p, c):
+    raise ValueError("custom failure with registered-secret-add-88888 and extra padding " + "x" * 250)
+schedules.add = _raising_add
+saved_notes = g.NOTES
+g.NOTES = test_sec_notes
+os.environ["TEST_SCHED_WRITE_SECRET"] = "registered-secret-add-88888"
+r_err_sec = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
+g.NOTES = saved_notes
+del os.environ["TEST_SCHED_WRITE_SECRET"]
+schedules.add = saved_add
+check("api/schedule_add redacts secret in ValueError message and clips error body to 200 characters",
+      r_err_sec.status_code == 400
+      and "registered-secret-add-88888" not in r_err_sec.text
+      and len(r_err_sec.json().get("error", "")) <= 200
+      and "[REDACTED]" in r_err_sec.json().get("error", ""))
+
+# 20. POST /api/schedule_enable: toggle, persist, idempotent, strict-boolean, unknown id (404), damaged (409)
+sched_test_file.write_text("[]", encoding="utf-8")
+r_setup = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "tog task", "cron": "0 0 * * *"}, timeout=5)
+tog_id = r_setup.json()["schedule"]["id"]
+
+# Missing / bad token
+r_en_notok = http.post(f"{sched_base}/api/schedule_enable", json={"id": tog_id, "enabled": False}, timeout=5)
+check("api/schedule_enable missing token gives 403", r_en_notok.status_code == 403)
+r_en_badtok = http.post(f"{sched_base}/api/schedule_enable", headers={"X-Token": "bad"}, json={"id": tog_id, "enabled": False}, timeout=5)
+check("api/schedule_enable wrong token gives 403", r_en_badtok.status_code == 403)
+
+# Toggle to False
+r_dis = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": tog_id, "enabled": False}, timeout=5)
+check("api/schedule_enable toggling to False returns 200 ok=true",
+      r_dis.status_code == 200 and r_dis.json() == {"ok": True})
+check("api/schedule_enable persists False on disk",
+      [s for s in schedules.load() if s["id"] == tog_id][0]["enabled"] is False)
+
+# Idempotent (setting False again)
+r_dis_again = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": tog_id, "enabled": False}, timeout=5)
+check("api/schedule_enable toggling to False again is idempotent",
+      r_dis_again.status_code == 200 and r_dis_again.json() == {"ok": True}
+      and [s for s in schedules.load() if s["id"] == tog_id][0]["enabled"] is False)
+
+# Toggle back to True
+r_en = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": tog_id, "enabled": True}, timeout=5)
+check("api/schedule_enable toggling back to True returns 200 ok=true",
+      r_en.status_code == 200 and r_en.json() == {"ok": True}
+      and [s for s in schedules.load() if s["id"] == tog_id][0]["enabled"] is True)
+
+# Strict boolean check: "true", 1, null, missing
+bytes_before_en = sched_test_file.read_bytes()
+for bad_val, lbl in [("true", "string 'true'"), ("false", "string 'false'"), (1, "integer 1"), (0, "integer 0"), (None, "null/None")]:
+    r = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": tog_id, "enabled": bad_val}, timeout=5)
+    check(f"api/schedule_enable refuses {lbl} with 400 and leaves file unchanged",
+          r.status_code == 400 and sched_test_file.read_bytes() == bytes_before_en)
+r_no_en = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": tog_id}, timeout=5)
+check("api/schedule_enable refuses missing enabled with 400 and leaves file unchanged",
+      r_no_en.status_code == 400 and sched_test_file.read_bytes() == bytes_before_en)
+
+# Unknown ID returns 404 {"ok": false}
+r_un_en = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": "nonexistent_id", "enabled": True}, timeout=5)
+check("api/schedule_enable returns 404 ok=false for unknown id and leaves file unchanged",
+      r_un_en.status_code == 404 and r_un_en.json() == {"ok": False}
+      and sched_test_file.read_bytes() == bytes_before_en)
+
+# Damaged file gives 409
+sched_test_file.write_text("corrupted file", encoding="utf-8")
+r_en_dam = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": tog_id, "enabled": True}, timeout=5)
+check("api/schedule_enable returns 409 for damaged file and leaves file untouched",
+      r_en_dam.status_code == 409 and sched_test_file.read_bytes() == b"corrupted file")
+
+# 21. POST /api/schedule_delete: removes schedule, leaves others untouched, second delete 404, damaged 409
+sched_test_file.write_text("[]", encoding="utf-8")
+r_da = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "del a", "cron": "0 1 * * *"}, timeout=5)
+r_db = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "del b", "cron": "0 2 * * *"}, timeout=5)
+id_a = r_da.json()["schedule"]["id"]
+id_b = r_db.json()["schedule"]["id"]
+
+# Missing / bad token
+r_del_notok = http.post(f"{sched_base}/api/schedule_delete", json={"id": id_a}, timeout=5)
+check("api/schedule_delete missing token gives 403", r_del_notok.status_code == 403)
+r_del_badtok = http.post(f"{sched_base}/api/schedule_delete", headers={"X-Token": "bad"}, json={"id": id_a}, timeout=5)
+check("api/schedule_delete wrong token gives 403", r_del_badtok.status_code == 403)
+
+# Delete id_a
+r_del = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": id_a}, timeout=5)
+check("api/schedule_delete returns 200 ok=true",
+      r_del.status_code == 200 and r_del.json() == {"ok": True})
+loaded_after_del = schedules.load()
+check("api/schedule_delete removed target and left other schedule untouched",
+      len(loaded_after_del) == 1 and loaded_after_del[0]["id"] == id_b)
+
+# Second delete of id_a returns 404
+r_del2 = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": id_a}, timeout=5)
+check("api/schedule_delete second delete of same id returns 404 ok=false",
+      r_del2.status_code == 404 and r_del2.json() == {"ok": False})
+
+# Unknown ID returns 404
+r_del_un = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": "nonexistent_id"}, timeout=5)
+check("api/schedule_delete unknown id returns 404 ok=false",
+      r_del_un.status_code == 404 and r_del_un.json() == {"ok": False})
+
+# Damaged file gives 409
+sched_test_file.write_text("damaged delete file", encoding="utf-8")
+r_del_dam = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": id_b}, timeout=5)
+check("api/schedule_delete returns 409 for damaged file and leaves file untouched",
+      r_del_dam.status_code == 409 and sched_test_file.read_bytes() == b"damaged delete file")
+
+# 22. Id validation for enable and delete: missing, non-string, empty, 65 chars, a/b, a\b, .., ../x
+sched_test_file.write_text(json.dumps([{"id": "valid_id", "prompt": "p", "cron": "* * * * *", "enabled": True}]), encoding="utf-8")
+bytes_id_val = sched_test_file.read_bytes()
+bad_ids = [
+    (None, "missing id"),
+    (12345, "non-string id"),
+    ("", "empty string id"),
+    ("x" * 65, "65-character id"),
+    ("a/b", "id with forward slash"),
+    ("a\\b", "id with backslash"),
+    ("..", "id with double dot"),
+    ("../x", "id with path traversal ../"),
+]
+for bid, lbl in bad_ids:
+    payload_en = {"id": bid, "enabled": True} if bid is not None else {"enabled": True}
+    payload_del = {"id": bid} if bid is not None else {}
+    r_e = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json=payload_en, timeout=5)
+    r_d = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json=payload_del, timeout=5)
+    check(f"api/schedule_enable refuses {lbl} with 400 and leaves file untouched",
+          r_e.status_code == 400 and sched_test_file.read_bytes() == bytes_id_val)
+    check(f"api/schedule_delete refuses {lbl} with 400 and leaves file untouched",
+          r_d.status_code == 400 and sched_test_file.read_bytes() == bytes_id_val)
+
+# 23. Odd inputs from page's point of view
+# Exact 4,000 char prompt accepted
+r_odd_4k = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "x" * 4000, "cron": "0 0 * * *"}, timeout=5)
+check("odd inputs: exact 4000 character prompt accepted with 200", r_odd_4k.status_code == 200)
+
+# Cron with extra spaces accepted
+r_odd_cron = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "cron spacing", "cron": "   0    9   *   *   1-5   "}, timeout=5)
+check("odd inputs: cron with extra spaces accepted with 200", r_odd_cron.status_code == 200)
+
+# Id of 64 characters accepted as valid id format (returns 404 for unknown, not 400)
+r_odd_64_en = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": "y" * 64, "enabled": True}, timeout=5)
+r_odd_64_del = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": "y" * 64}, timeout=5)
+check("odd inputs: 64 character id accepted as valid id format (returns 404 for unknown)",
+      r_odd_64_en.status_code == 404 and r_odd_64_del.status_code == 404)
+
+# Empty body and JSON list body for enable/delete
+for route in ["/api/schedule_enable", "/api/schedule_delete"]:
+    r_empty = http.post(f"{sched_base}{route}", headers=hdr, data=b"", timeout=5)
+    r_arr = http.post(f"{sched_base}{route}", headers=hdr, data=b"[]", timeout=5)
+    check(f"odd inputs: {route} refuses empty body with 400", r_empty.status_code == 400)
+    check(f"odd inputs: {route} refuses JSON array body with 400", r_arr.status_code == 400)
+
+# 24. Nothing runs: session.status unchanged, no run started, fake CONFIRM empty, no other file changed
+sched_test_file.write_text("[]", encoding="utf-8")
+real_sched_bytes_before = saved_schedules_path.read_bytes() if saved_schedules_path.exists() else None
+sess_status_before = sched_sess.status
+sess_run_id_before = sched_sess._run_id
+confirm_calls: list[str] = []
+saved_confirm = g.CONFIRM
+g.CONFIRM = lambda d: (confirm_calls.append(d), False)[1]
+
+http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "idle check", "cron": "0 0 * * *"}, timeout=5)
+sid_run_check = schedules.load()[0]["id"]
+http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": sid_run_check, "enabled": False}, timeout=5)
+http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": sid_run_check}, timeout=5)
+
+g.CONFIRM = saved_confirm
+check("routes execute nothing: session.status unchanged, run_id unchanged, confirm empty",
+      sched_sess.status == sess_status_before
+      and sched_sess._run_id == sess_run_id_before
+      and len(confirm_calls) == 0)
+check("routes execute nothing: real schedules.json untouched",
+      (not saved_schedules_path.exists()) if real_sched_bytes_before is None else saved_schedules_path.read_bytes() == real_sched_bytes_before)
+
+# 25. Prompts never reach the console (stdout/stderr)
+distinct_prompt_write = "DISTINCT_SECRET_WRITE_PROMPT_999888777"
+buf_out_w = io.StringIO()
+buf_err_w = io.StringIO()
+with contextlib.redirect_stdout(buf_out_w), contextlib.redirect_stderr(buf_err_w):
+    r_add_p = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": distinct_prompt_write, "cron": "* * * * *"}, timeout=5)
+    pid = r_add_p.json()["schedule"]["id"]
+    http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": pid, "enabled": False}, timeout=5)
+    http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": pid}, timeout=5)
+check("prompts never reach console stdout or stderr on write routes",
+      distinct_prompt_write not in buf_out_w.getvalue()
+      and distinct_prompt_write not in buf_err_w.getvalue())
+
+# 26. Allowed during a run: session.status == 'running'
+sched_sess.status = "running"
+r_run_add = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "during run", "cron": "0 10 * * *"}, timeout=5)
+run_sid = r_run_add.json()["schedule"]["id"]
+r_run_en = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": run_sid, "enabled": False}, timeout=5)
+r_run_del = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": run_sid}, timeout=5)
+sched_sess.status = "idle"
+check("all three routes succeed while a run is in progress (session.status=='running')",
+      r_run_add.status_code == 200
+      and r_run_en.status_code == 200
+      and r_run_del.status_code == 200)
+
+# 27. Concurrency: two threads each adding 20 schedules at once
+sched_test_file.write_text("[]", encoding="utf-8")
+def _concurrent_adder(prefix: str):
+    for i in range(20):
+        http.post(f"{sched_base}/api/schedule_add", headers=hdr,
+                  json={"prompt": f"concur {prefix} {i}", "cron": f"*/{(i % 50) + 1} * * * *"}, timeout=10)
+th1 = threading.Thread(target=_concurrent_adder, args=("A",))
+th2 = threading.Thread(target=_concurrent_adder, args=("B",))
+th1.start(); th2.start()
+th1.join(); th2.join()
+concur_loaded = schedules.load()
+check("concurrency: two threads adding 20 schedules produce 40 entries", len(concur_loaded) == 40)
+check("concurrency: all 40 entries have unique ids", len({s["id"] for s in concur_loaded}) == 40)
 
 sched_srv.shutdown()
 schedules.PATH = saved_schedules_path
