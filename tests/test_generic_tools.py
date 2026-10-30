@@ -1670,6 +1670,45 @@ _plain = OpenAIServerModel(model_id="x", api_base="http://127.0.0.1:9/v1", api_k
 check("text history is still available for comparison",
       not any(m.get("tool_calls") for m in _plain._prepare_completion_kwargs(_msgs)["messages"]))
 
+# snipping old tool results (#73): off by default, and an opt-in mode shortens only older, long results
+from agent import SNIP_KEEP, SNIP_MIN, SNIP_NOTE, snip  # noqa: E402
+
+_long = "A" * 1000 + "B" * 1000 + "C" * 1000 + "\n[characters 0-4000 of 9000; call read_file again with offset=4000 to continue]"
+_snip_steps = [ActionStep(step_number=i + 1, timing=_t, model_output="",
+                          tool_calls=[ToolCall("read_file", {"path": f"f{i}"}, f"s{i}")], observations=_long if i != 1 else "short")
+               for i in range(4)]
+_snip_msgs = [ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": "task"}])]
+for _s in _snip_steps:
+    _snip_msgs += _s.to_messages()
+
+
+def _tool_texts(mode, model=None):
+    m = model or NativeHistoryModel(model_id="x", api_base="http://127.0.0.1:9/v1", api_key="k")
+    m.snip_mode = mode
+    return [x["content"] for x in m._prepare_completion_kwargs(_snip_msgs, tools_to_call_from=g.GENERIC_TOOLS)["messages"]
+            if x["role"] == "tool"], m
+
+
+off, _ = _tool_texts("off")
+check("snipping is off unless asked for: every result is sent whole", off == [_long, "short", _long, _long])
+stepped, _ = _tool_texts("step")
+check("step mode shortens older long results to first half plus last quarter",
+      stepped[0] == snip(_long) and len(stepped[0]) < len(_long) and SNIP_NOTE in stepped[0])
+check("step mode keeps the last results whole and short results untouched",
+      stepped[1] == "short" and stepped[-SNIP_KEEP:] == [_long, _long])
+check("a snipped result keeps the paging footer at its end", stepped[0].endswith("to continue]"))
+check("a result under the minimum length is never snipped", snip("x" * SNIP_MIN) == "x" * SNIP_MIN)
+batched, bm = _tool_texts("batch")
+bm.snip_at = 10 ** 9
+check("batch mode does nothing below its threshold", _tool_texts("batch", bm)[0] == [_long, "short", _long, _long])
+bm2 = NativeHistoryModel(model_id="x", api_base="http://127.0.0.1:9/v1", api_key="k")
+bm2.snip_at = 100
+first = _tool_texts("batch", bm2)[0]
+check("batch mode shortens every older result at once when the history passes the threshold",
+      first[0] == snip(_long) and first[1] == "short" and first[2:] == [_long, _long])
+check("batch mode keeps the same results shortened on the next call",
+      _tool_texts("batch", bm2)[0] == first)
+
 # stall detection (#19): the harness stops a run that repeats the same failing call
 from agent import STALL_WINDOW, check_stall  # noqa: E402
 

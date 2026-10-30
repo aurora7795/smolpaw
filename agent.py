@@ -115,12 +115,49 @@ def native_tool_history(messages: list[dict]) -> list[dict]:
     return out
 
 
+SNIP_MIN = 1500  # characters; shorter tool results are never snipped
+SNIP_KEEP = 2  # the most recent tool results are always sent whole
+SNIP_NOTE = "\n[... middle of an older result shortened ...]\n"
+
+
+def snip(text: str) -> str:
+    """First half plus last quarter of a long tool result (#73); the footer a paged read ends with survives."""
+    if len(text) <= SNIP_MIN:
+        return text
+    return text[: len(text) // 2] + SNIP_NOTE + text[-(len(text) // 4):]
+
+
 class NativeHistoryModel(OpenAIServerModel):
-    """OpenAIServerModel that sends earlier tool calls and results in the native tool-call format."""
+    """OpenAIServerModel that sends earlier tool calls and results in the native tool-call format.
+
+    `snip_mode` (#73, experiment): "off", "step" (every older result is shortened on every call) or "batch"
+    (nothing until the history passes `snip_at` estimated tokens, then every older result at once, and the
+    same ones stay shortened afterwards so the prefix stays stable).
+    """
+
+    snip_mode = os.environ.get("SMOLPAW_SNIP", "off")
+    snip_at = int(os.environ.get("SMOLPAW_SNIP_AT", "5000"))
+
+    def _snip_history(self, messages: list[dict]) -> list[dict]:
+        tools = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        old = tools[:-SNIP_KEEP] if len(tools) > SNIP_KEEP else []
+        done = self.__dict__.setdefault("_snipped", set())
+        if self.snip_mode == "batch" and not done.issuperset(messages[i].get("tool_call_id") for i in old):
+            size = sum(len(snip(_text(m.get("content"))) if m.get("tool_call_id") in done else _text(m.get("content")))
+                       for m in messages)
+            if size / 3.5 > self.snip_at:
+                done.update(messages[i].get("tool_call_id") for i in old)
+        out = list(messages)
+        for i in old:
+            if self.snip_mode == "step" or messages[i].get("tool_call_id") in done:
+                out[i] = {**messages[i], "content": snip(_text(messages[i].get("content")))}
+        return out
 
     def _prepare_completion_kwargs(self, messages, *args, **kwargs):
         prepared = super()._prepare_completion_kwargs([_mark(m) for m in messages], *args, **kwargs)
         prepared["messages"] = native_tool_history(prepared["messages"])
+        if self.snip_mode in ("step", "batch"):
+            prepared["messages"] = self._snip_history(prepared["messages"])
         return prepared
 
 
