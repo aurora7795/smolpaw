@@ -106,6 +106,10 @@ CASE_C_FACTS = [
 ]
 CASE_C_EXPECTS = [rf"\b{fact[1]}\b" for fact in CASE_C_FACTS]
 
+# A fourth file for the four-file variant (#89); the other cases never use it.
+CASE_C4_FILE = "canopy_survey.txt"
+CASE_C4_FACT = "The northern ridge canopy survey counted 391 mature spruce trees."
+
 CASE_DUP_FILENAME = "operating_procedures.md"
 CASE_DUP_TITLE = "# Operational Specifications and Unit Capacity Guide"
 CASE_DUP_SECTIONS = [
@@ -224,10 +228,16 @@ def _generate_case_c_texts(seed: int) -> dict[str, str]:
     f3_post = "== Emergency Utility Depot ==\n\n" + _make_filler_paragraphs(rng, 1200, 2)
     f3 = (f3_pre + f3_fact + f3_post).strip() + "\n"
 
+    # File 4 (four-file variant only): its own rng so files 1 to 3 stay byte-identical to earlier runs
+    rng4 = random.Random(seed + 404)
+    f4_pre = "# Canopy Survey Transect Notes\n\n" + _make_filler_paragraphs(rng4, 4300, 6)
+    f4 = (f4_pre + f"\n\n{CASE_C4_FACT}\n\n" + _make_filler_paragraphs(rng4, 1200, 2)).strip() + "\n"
+
     return {
         CASE_C_FILES[0]: f1,
         CASE_C_FILES[1]: f2,
         CASE_C_FILES[2]: f3,
+        CASE_C4_FILE: f4,
     }
 
 
@@ -419,6 +429,28 @@ def build(workspace: Path | str, seed: int = 0) -> list[Case]:
         expects=list(CASE_C_EXPECTS),
         check=check_c,
     )
+
+    # Variants of case C for #89: one change each, same files and checker
+    def variant_c(name: str, files: list[str], expects: list[str], suffix: str = "") -> Case:
+        return Case(
+            name=name,
+            prompt=f"Read {', '.join(files)}. Report the key figure (number) recorded in each file.{suffix}",
+            files=list(files),
+            expects=expects,
+            check=check_c,
+        )
+
+    c_expect = dict(zip(CASE_C_FILES, CASE_C_EXPECTS))
+    c_expect[CASE_C4_FILE] = r"\b391\b"
+    reversed_files = list(reversed(CASE_C_FILES))
+    four_files = [*CASE_C_FILES, CASE_C4_FILE]
+    variants_c = [
+        variant_c("read_three_every_page", CASE_C_FILES, CASE_C_EXPECTS,
+                  " Read every page of every file before answering."),
+        variant_c("read_three_reversed", reversed_files, [c_expect[f] for f in reversed_files]),
+        variant_c("read_two_report", [CASE_C_FILES[0], CASE_C_FILES[2]], [c_expect[CASE_C_FILES[0]], c_expect[CASE_C_FILES[2]]]),
+        variant_c("read_four_report", four_files, [c_expect[f] for f in four_files]),
+    ]
 
     # 4. Case D: edit_duplicate_passage
     text_dup = _generate_case_dup_text(seed)
@@ -636,6 +668,7 @@ def build(workspace: Path | str, seed: int = 0) -> list[Case]:
         case_a,
         case_b,
         case_c,
+        *variants_c,
         case_dup,
         case_last,
         case_spec,
