@@ -2733,7 +2733,7 @@ check("api/schedule_edit both prompt and cron edit returns 200 ok=true",
 # 4. Nothing to change: body has neither prompt nor cron
 r_ed_nochange = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1"}, timeout=5)
 check("api/schedule_edit refuses request with neither prompt nor cron with 400",
-      r_ed_nochange.status_code == 400 and "error" in r_ed_nochange.json())
+      r_ed_nochange.status_code == 400 and r_ed_nochange.json().get("error") == "at least one of prompt or cron is required")
 
 # 5. Empty prompt and whitespace prompt
 r_ed_emptyp = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": ""}, timeout=5)
@@ -2762,8 +2762,10 @@ for bad_prop, prop_name in [
 ]:
     r_bp = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": bad_prop}, timeout=5)
     r_bc = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "cron": bad_prop}, timeout=5)
-    check(f"api/schedule_edit refuses {prop_name} prompt with 400", r_bp.status_code == 400)
-    check(f"api/schedule_edit refuses {prop_name} cron with 400", r_bc.status_code == 400)
+    check(f"api/schedule_edit refuses {prop_name} prompt with 400",
+          r_bp.status_code == 400 and r_bp.json().get("error") == "prompt must be a string")
+    check(f"api/schedule_edit refuses {prop_name} cron with 400",
+          r_bc.status_code == 400 and r_bc.json().get("error") == "cron must be a string")
 
 # 9. Unknown id: 404 {"ok": false}
 bytes_before_un_edit = sched_test_file.read_bytes()
@@ -2784,7 +2786,8 @@ for bid, lbl in [
 ]:
     payload_bid = {"id": bid, "prompt": "p"} if bid is not None else {"prompt": "p"}
     r_bid = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json=payload_bid, timeout=5)
-    check(f"api/schedule_edit refuses bad id ({lbl}) with 400", r_bid.status_code == 400)
+    check(f"api/schedule_edit refuses bad id ({lbl}) with 400",
+          r_bid.status_code == 400 and r_bid.json().get("error") == "invalid id")
 
 # 11. Damaged schedules.json: 409, file unchanged byte for byte
 sched_test_file.write_text("damaged schedules content for edit test", encoding="utf-8")
