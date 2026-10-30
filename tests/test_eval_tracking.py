@@ -174,6 +174,22 @@ try:
     r = run_case("read_three_report", report_and_overwrite)
     check("a right answer that overwrote a source file fails", not r["passed"] and "modified" in r["check"])
 
+    # --- the read_three_report variants (#89) share the files and the checker ------------------
+    built = {c.name: c for c in tf.build(tmp / "ws-variants", variants=True)}
+    check("every read variant is selectable from the command line", all(v in built for v in ev.READ_VARIANTS))
+    check("the every-page variant differs from the base prompt only by its instruction",
+          built["read_three_every_page"].prompt.startswith(built["read_three_report"].prompt)
+          and "every page" in built["read_three_every_page"].prompt)
+    check("the reversed variant names the files in the opposite order and expects the figures in that order",
+          built["read_three_reversed"].files == list(reversed(tf.CASE_C_FILES))
+          and built["read_three_reversed"].expects == list(reversed(tf.CASE_C_EXPECTS)))
+    check("the two-file and four-file variants expect one figure per named file",
+          len(built["read_two_report"].expects) == 2 and len(built["read_four_report"].expects) == 4)
+    check("without variants=True the cases and the workspace are as before (no fourth file)",
+          len(tf.build(tmp / "ws-plain")) == 8 and not (tmp / "ws-plain" / tf.CASE_C4_FILE).exists())
+    check("the fourth file's figure sits past the first 4,000-character page",
+          (tmp / "ws-variants" / tf.CASE_C4_FILE).read_text(encoding="utf-8").find("391") > 4000)
+
     # --- tool arguments are logged, clipped (#89) -------------------------------------------
     def with_steps(ws, case):
         agent_steps = [

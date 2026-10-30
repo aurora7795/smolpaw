@@ -325,7 +325,7 @@ def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
     results, prompt, expects = [], "", []
     for i in range(1, args.n + 1):
         ws = tmp / f"tracking-{case_name}-{i}"
-        case = next(c for c in tracking_fixture.build(ws) if c.name == case_name)
+        case = next(c for c in tracking_fixture.build(ws, variants=case_name in READ_VARIANTS) if c.name == case_name)
         g.WORKSPACE, g.UNDO_DIR = ws, tmp / f".undo-{case_name}-{i}"
         g.CONFIRM = workspace_write_confirm(ws)
         prompt, expects = case.prompt, case.expects

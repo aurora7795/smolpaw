@@ -309,7 +309,7 @@ def _generate_case_crlf_bytes(seed: int) -> bytes:
 
 # --- Public API ------------------------------------------------------------------
 
-def build(workspace: Path | str, seed: int = 0) -> list[Case]:
+def build(workspace: Path | str, seed: int = 0, variants: bool = False) -> list[Case]:
     """Materialise tracking eval test fixtures into workspace and return Case descriptors."""
     ws = Path(workspace).resolve()
 
@@ -407,6 +407,8 @@ def build(workspace: Path | str, seed: int = 0) -> list[Case]:
     # 3. Case C: read_three_report
     texts_c = _generate_case_c_texts(seed)
     for fname, fcontent in texts_c.items():
+        if fname == CASE_C4_FILE and not variants:
+            continue  # only the four-file variant (#89) uses it, so the other cases keep their earlier workspace
         (ws / fname).write_text(fcontent, encoding="utf-8")
 
     def check_c(target_ws: Path | str) -> tuple[bool, str]:
@@ -668,12 +670,12 @@ def build(workspace: Path | str, seed: int = 0) -> list[Case]:
         case_a,
         case_b,
         case_c,
-        *variants_c,
         case_dup,
         case_last,
         case_spec,
         case_clip,
         case_crlf,
+        *(variants_c if variants else []),
     ]
 
 
