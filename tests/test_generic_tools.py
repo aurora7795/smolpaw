@@ -786,6 +786,14 @@ log_entries = [g.json.loads(line) for line in g._log_file.read_text().splitlines
 check("fetch_page calls are logged", len(log_entries) == 2 and log_entries[0]["kind"] == "fetch_page")
 check("fetch_page log records query and hit count", log_entries[0]["query"] == "Redis" and log_entries[0]["hits"] > 0)
 check("fetch_page log records zero hits on no match", log_entries[1]["hits"] == 0)
+check("fetch_page result is kept for the page's Output card (#62)",
+      g.SHOWN_OUTPUT is not None and g.SHOWN_OUTPUT[0] == "fetch_page https://example.com/docs"
+      and g.SHOWN_OUTPUT[1] == g.fetch_page("https://example.com/docs", query="nonexistent"))
+g.SHOWN_OUTPUT = None
+g.requests.get = lambda *a, **k: _FakeGetResp("<p>Body</p>", status=500)
+g.fetch_page("https://example.com/broken")
+check("a failed fetch_page leaves the Output card alone", g.SHOWN_OUTPUT is None)
+g.requests.get = lambda *a, **k: _FakeGetResp(sample_html)
 check("fetch_page log keeps the start of the matched text, clipped (#62)",
       "Redis" in log_entries[0].get("text", "") and 0 < len(log_entries[0]["text"]) <= g.LOG_FETCHED)
 saved_get = g.requests.get
@@ -839,6 +847,16 @@ check("web_search caps results at 5", "5. Title 5" in res_cap and "6. Title 6" n
 # Formatting
 check("web_search formats title, url and one-line snippet",
       "1. Title 1\n   https://example.com/1\n   Snippet 1 line1 line2" in res_cap)
+check("web_search result is kept for the page's Output card (#62)",
+      g.SHOWN_OUTPUT == ("web_search test", res_cap))
+g.SHOWN_OUTPUT = None
+g.reset_search_count()
+try:
+    g.web_search("error")
+except Exception:
+    pass
+check("a failed web_search leaves the Output card alone", g.SHOWN_OUTPUT is None)
+g.reset_search_count()
 
 # Redaction
 saved_notes = g.NOTES

@@ -199,7 +199,7 @@ def log_final(answer: object, input_tokens: int | None = None, output_tokens: in
     _log("final", answer=str(answer), actions=list(ACTIONS), **extra)
 
 
-SHOWN_OUTPUT: tuple[str, str] | None = None  # (label, text) of the latest shell or list_dir result, for the web page
+SHOWN_OUTPUT: tuple[str, str] | None = None  # (label, text) of the latest shell, list_dir, fetch_page or web_search result, for the web page
 LAST_RESULT = ""  # most recent tool output, shown by the harness if the agent hits the step cap
 
 
@@ -766,6 +766,7 @@ def fetch_page(url: str, query: str = "") -> str:
     shown = _redact(result)
     _log("fetch_page", url=url, query=query, status=r.status_code, hits=hits,
          result=f"{hits} hits" if query.strip() else f"{len(result)} chars", text=shown[:LOG_FETCHED])
+    _show(f"fetch_page {url}", _clip(shown))
     return _clip(shown)
 
 
@@ -895,6 +896,7 @@ def web_search(query: str) -> str:
     shown = _redact(out)
     _log("web_search", provider=provider_name, query=query, status="ok", hits=len(results),
          result=f"{len(results)} hits", text=shown[:LOG_FETCHED])
+    _show(f"web_search {query}", _clip(shown))
     return _clip(shown)
 
 
