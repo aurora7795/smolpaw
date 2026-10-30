@@ -2318,39 +2318,40 @@ check("web page shows the on/off state and the last error of a schedule (presenc
       'const statusText = s.enabled ? "on" : "off"' in page_html and 'errDiv.textContent = "error: " + s.last_error' in page_html)
 check("new renderSchedules function contains no innerHTML", "innerHTML" not in sched_fn_code)
 
-# 14. served page schedules card contains write controls and no edit control (#80)
+# 14. served page schedules card contains write controls and edit control (#80)
 idx_sched_card = page_html.index('id="schedulescard"')
 idx_recents = page_html.index('class="recents"')
 sched_card_html = page_html[idx_sched_card:idx_recents]
-check("served page schedules card contains add/enable/delete controls and no edit control",
+check("served page schedules card contains add/enable/delete controls and edit control",
       "button" in sched_card_html
       and "input" in sched_card_html
       and "textarea" in sched_card_html
-      and "edit" not in sched_card_html.lower()
-      and "edit" not in sched_fn_code.lower()
-      and "schedule_edit" not in page_html
-      and "edit_schedule" not in page_html)
+      and "edit" in sched_fn_code.lower()
+      and "schedule_edit" in page_html)
 
-# 15. POST /api/schedules is 404 and three new routes exist (#80)
+# 15. POST /api/schedules is 404 and four write routes exist (#80)
 r_post_sched = http.post(f"{sched_base}/api/schedules", headers=hdr, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
 r_check_add = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "p", "cron": "* * * * *"}, timeout=5)
 r_check_enable = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": "bad..id", "enabled": True}, timeout=5)
 r_check_delete = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": "bad..id"}, timeout=5)
-check("POST /api/schedules is 404 and three new write routes exist",
+r_check_edit = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "bad..id"}, timeout=5)
+check("POST /api/schedules is 404 and four write routes exist",
       r_post_sched.status_code == 404
       and r_check_add.status_code != 404
       and r_check_enable.status_code != 404
-      and r_check_delete.status_code != 404)
+      and r_check_delete.status_code != 404
+      and r_check_edit.status_code != 404)
 
 # 16. page checks: presence of write controls, handlers, error messages, and in-flight disable
 check("web page contains schedule add form fields",
       'id="schedprompt"' in page_html
       and 'id="schedcron"' in page_html
       and 'id="schedadd"' in page_html)
-check("web page contains calls to all three write routes",
+check("web page contains calls to all four write routes",
       'api("/api/schedule_add", {prompt: p, cron: c})' in page_html
       and 'api("/api/schedule_enable", {id: s.id, enabled: !s.enabled})' in page_html
-      and 'api("/api/schedule_delete", {id: s.id})' in page_html)
+      and 'api("/api/schedule_delete", {id: s.id})' in page_html
+      and 'api("/api/schedule_edit", payload)' in page_html)
 check("web page delete button requires second click with Delete? confirmation",
       'delBtn.textContent = "Delete?";' in page_html
       and 'if (!delArmed)' in page_html)
@@ -2362,9 +2363,11 @@ check("web page shows the card and the add form whenever the page can run, so th
 check("web page labels the toggle Disable or Enable from the current state",
       's.enabled ? "Disable" : "Enable"' in page_html)
 check("web page has a fallback and a network-failure message for each write operation",
-      all(page_html.count(f'"{m}"') == 2 for m in ("Could not add schedule", "Could not update schedule", "Could not delete schedule")))
+      page_html.count('"Could not add schedule"') == 2
+      and page_html.count('"Could not delete schedule"') == 2
+      and page_html.count('"Could not update schedule"') == 4)
 check("web page clears the message after each successful write",
-      page_html.count('$("schedmsg").hidden = true;') == 3)
+      page_html.count('$("schedmsg").hidden = true;') == 4)
 check("web page contains each failure message for write operations",
       'textContent = (res && res.error) || "Could not add schedule"' in page_html
       and 'textContent = (res && res.error) || "Could not update schedule"' in page_html
@@ -2381,12 +2384,62 @@ schedadd_success_code = schedadd_code[schedadd_code.index('if (res && res.ok)'):
 check("web page clears add form only on success",
       '$("schedprompt").value = "";' in schedadd_success_code
       and '$("schedcron").value = "";' in schedadd_success_code)
-tog_code = page_html[page_html.index('togBtn.onclick'):page_html.index('delBtn.onclick')]
+tog_code = page_html[page_html.index('togBtn.onclick'):page_html.index('editBtn = document.createElement')]
+edit_code = page_html[page_html.index('editBtn = document.createElement'):page_html.index('delBtn = document.createElement')]
 del_code = page_html[page_html.index('delBtn.onclick'):page_html.index('function loadSchedules')]
 check("web page refreshes after successful write operations",
       'refresh();' in schedadd_success_code
       and 'refresh();' in tog_code
+      and 'refresh();' in edit_code
       and 'refresh();' in del_code)
+
+# 16b. page checks for schedule edit controls (presence checks only)
+check("web page contains Edit button with text Edit",
+      'editBtn.textContent = "Edit"' in edit_code)
+check("web page pre-fills edit inputs from current schedule prompt and cron",
+      'promptInput.value = s.prompt || "";' in edit_code
+      and 'cronInput.value = s.cron || "";' in edit_code)
+check("web page contains Save and Cancel buttons in editor",
+      'saveBtn.textContent = "Save"' in edit_code
+      and 'cancelBtn.textContent = "Cancel"' in edit_code)
+cancel_code = edit_code[edit_code.index('cancelBtn.onclick'):edit_code.index('saveBtn.onclick')]
+check("web page Cancel button restores row without sending request",
+      'editingScheduleId = null;' in cancel_code
+      and 'renderSchedules();' in cancel_code
+      and 'api(' not in cancel_code)
+check("web page Save closes editor without sending request if nothing changed",
+      'if (!pChanged && !cChanged)' in edit_code
+      and 'return;' in edit_code)
+check("web page Save sends only fields that changed",
+      'if (pChanged) payload.prompt = pVal;' in edit_code
+      and 'if (cChanged) payload.cron = cVal;' in edit_code)
+edit_save_success_code = edit_code[edit_code.index('if (res && res.ok)'):edit_code.index('} else {')]
+check("web page clears schedmsg, resets editingScheduleId, and refreshes on edit success",
+      '$("schedmsg").textContent = "";' in edit_save_success_code
+      and '$("schedmsg").hidden = true;' in edit_save_success_code
+      and 'editingScheduleId = null;' in edit_save_success_code
+      and 'schedulesKey = null;' in edit_save_success_code
+      and 'refresh();' in edit_save_success_code)
+edit_save_fail_code = edit_code[edit_code.index('} else {'):edit_code.index('} catch')]
+check("web page shows server error or fallback on non-ok edit response and keeps editor open",
+      '$("schedmsg").textContent = (res && res.error) || "Could not update schedule";' in edit_save_fail_code
+      and '$("schedmsg").hidden = false;' in edit_save_fail_code
+      and 'renderSchedules' not in edit_save_fail_code
+      and 'editingScheduleId = null' not in edit_save_fail_code)
+edit_save_catch_code = edit_code[edit_code.index('} catch'):edit_code.index('} finally')]
+check("web page shows fallback error on network failure and keeps editor open",
+      '$("schedmsg").textContent = "Could not update schedule";' in edit_save_catch_code
+      and '$("schedmsg").hidden = false;' in edit_save_catch_code
+      and 'renderSchedules' not in edit_save_catch_code
+      and 'editingScheduleId = null' not in edit_save_catch_code)
+check("web page editor guard stops periodic timer re-rendering while editing",
+      'if (editingScheduleId !== null) return;' in page_html)
+check("schedule edit UI uses textContent or .value and no innerHTML",
+      'promptInput.value' in edit_code
+      and 'cronInput.value' in edit_code
+      and 'saveBtn.textContent' in edit_code
+      and 'cancelBtn.textContent' in edit_code
+      and 'innerHTML' not in sched_fn_code)
 
 # 17. POST /api/schedule_add: basic add, listed in GET /api/schedules, enabled=True, returned schedule shape
 import re
@@ -2593,7 +2646,7 @@ r_del_dam = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"i
 check("api/schedule_delete returns 409 for damaged file and leaves file untouched",
       r_del_dam.status_code == 409 and sched_test_file.read_bytes() == b"damaged delete file")
 
-# 22. Id validation for enable and delete: missing, non-string, empty, 65 chars, a/b, a\b, .., ../x
+# 22. Id validation for enable, delete, and edit: missing, non-string, empty, 65 chars, over 200 chars, a/b, a\b, .., ../x
 sched_test_file.write_text(json.dumps([{"id": "valid_id", "prompt": "p", "cron": "* * * * *", "enabled": True}]), encoding="utf-8")
 bytes_id_val = sched_test_file.read_bytes()
 bad_ids = [
@@ -2601,6 +2654,7 @@ bad_ids = [
     (12345, "non-string id"),
     ("", "empty string id"),
     ("x" * 65, "65-character id"),
+    ("x" * 201, "over 200-character id"),
     ("a/b", "id with forward slash"),
     ("a\\b", "id with backslash"),
     ("..", "id with double dot"),
@@ -2609,12 +2663,206 @@ bad_ids = [
 for bid, lbl in bad_ids:
     payload_en = {"id": bid, "enabled": True} if bid is not None else {"enabled": True}
     payload_del = {"id": bid} if bid is not None else {}
+    payload_ed = {"id": bid, "prompt": "new prompt"} if bid is not None else {"prompt": "new prompt"}
     r_e = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json=payload_en, timeout=5)
     r_d = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json=payload_del, timeout=5)
+    r_ed = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json=payload_ed, timeout=5)
     check(f"api/schedule_enable refuses {lbl} with 400 and leaves file untouched",
           r_e.status_code == 400 and sched_test_file.read_bytes() == bytes_id_val)
     check(f"api/schedule_delete refuses {lbl} with 400 and leaves file untouched",
           r_d.status_code == 400 and sched_test_file.read_bytes() == bytes_id_val)
+    check(f"api/schedule_edit refuses {lbl} with 400 and leaves file untouched",
+          r_ed.status_code == 400 and sched_test_file.read_bytes() == bytes_id_val)
+
+# 22b. POST /api/schedule_edit (#80, edit half)
+# Seed two schedules
+sched_test_file.write_text(json.dumps([
+    {"id": "edit_s1", "prompt": "prompt one", "cron": "0 9 * * 1-5", "enabled": False,
+     "last_run": "2026-10-30T08:00:00", "next_run": "2026-11-02T09:00:00", "last_status": "ok", "last_error": ""},
+    {"id": "edit_s2", "prompt": "prompt two", "cron": "0 12 * * *", "enabled": True,
+     "last_run": None, "next_run": "2026-10-31T12:00:00", "last_status": "", "last_error": ""},
+]), encoding="utf-8")
+
+# Auth checks
+r_ed_notok = http.post(f"{sched_base}/api/schedule_edit", json={"id": "edit_s1", "prompt": "p"}, timeout=5)
+check("api/schedule_edit missing token gives 403", r_ed_notok.status_code == 403)
+r_ed_badtok = http.post(f"{sched_base}/api/schedule_edit", headers={"X-Token": "wrong"}, json={"id": "edit_s1", "prompt": "p"}, timeout=5)
+check("api/schedule_edit wrong token gives 403", r_ed_badtok.status_code == 403)
+
+# 1. Valid prompt-only edit: prompt updated, cron and next_run unchanged, metadata unchanged, other schedule untouched
+r_ed_p = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": "updated prompt one"}, timeout=5)
+check("api/schedule_edit valid prompt-only edit returns 200 ok=true with formatted schedule",
+      r_ed_p.status_code == 200 and r_ed_p.json().get("ok") is True
+      and r_ed_p.json().get("schedule", {}).get("prompt") == "updated prompt one"
+      and r_ed_p.json().get("schedule", {}).get("cron") == "0 9 * * 1-5")
+s_after_p = schedules.load()
+check("api/schedule_edit prompt-only edit does not recompute next_run, keeps enabled, last_run, last outcome, other schedule untouched",
+      s_after_p[0]["prompt"] == "updated prompt one"
+      and s_after_p[0]["cron"] == "0 9 * * 1-5"
+      and s_after_p[0]["next_run"] == "2026-11-02T09:00:00"
+      and s_after_p[0]["enabled"] is False
+      and s_after_p[0]["last_run"] == "2026-10-30T08:00:00"
+      and s_after_p[0]["last_status"] == "ok"
+      and s_after_p[0]["last_error"] == ""
+      and s_after_p[1]["id"] == "edit_s2"
+      and s_after_p[1]["prompt"] == "prompt two")
+
+# 2. Valid cron-only edit: cron updated, next_run recomputed, prompt unchanged
+r_ed_c = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "cron": "*/15 * * * *"}, timeout=5)
+check("api/schedule_edit valid cron-only edit returns 200 ok=true with formatted schedule",
+      r_ed_c.status_code == 200 and r_ed_c.json().get("ok") is True
+      and r_ed_c.json().get("schedule", {}).get("cron") == "*/15 * * * *"
+      and r_ed_c.json().get("schedule", {}).get("prompt") == "updated prompt one")
+s_after_c = schedules.load()
+check("api/schedule_edit cron edit recomputes next_run while keeping prompt and metadata",
+      s_after_c[0]["cron"] == "*/15 * * * *"
+      and s_after_c[0]["prompt"] == "updated prompt one"
+      and s_after_c[0]["next_run"] != "2026-11-02T09:00:00"
+      and s_after_c[0]["enabled"] is False
+      and s_after_c[0]["last_run"] == "2026-10-30T08:00:00"
+      and s_after_c[0]["last_status"] == "ok")
+
+# 3. Valid both prompt and cron edit
+r_ed_both = http.post(f"{sched_base}/api/schedule_edit", headers=hdr,
+                      json={"id": "edit_s1", "prompt": "both changed", "cron": "0 18 * * *"}, timeout=5)
+check("api/schedule_edit both prompt and cron edit returns 200 ok=true",
+      r_ed_both.status_code == 200 and r_ed_both.json().get("ok") is True
+      and r_ed_both.json().get("schedule", {}).get("prompt") == "both changed"
+      and r_ed_both.json().get("schedule", {}).get("cron") == "0 18 * * *")
+
+# 4. Nothing to change: body has neither prompt nor cron
+r_ed_nochange = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1"}, timeout=5)
+check("api/schedule_edit refuses request with neither prompt nor cron with 400",
+      r_ed_nochange.status_code == 400 and "error" in r_ed_nochange.json())
+
+# 5. Empty prompt and whitespace prompt
+r_ed_emptyp = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": ""}, timeout=5)
+r_ed_wsp = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": "   \n\t  "}, timeout=5)
+check("api/schedule_edit refuses empty and whitespace prompt with 400",
+      r_ed_emptyp.status_code == 400 and r_ed_wsp.status_code == 400)
+
+# 6. Over-long prompt: 4000 accepted, 4001 refused
+r_ed_4000 = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": "x" * 4000}, timeout=5)
+r_ed_4001 = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": "x" * 4001}, timeout=5)
+check("api/schedule_edit accepts 4000-char prompt with 200 and refuses 4001-char prompt with 400",
+      r_ed_4000.status_code == 200 and r_ed_4001.status_code == 400)
+
+# 7. Invalid cron: empty, invalid string, out of range
+r_ed_ecron = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "cron": ""}, timeout=5)
+r_ed_badc = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "cron": "bad cron"}, timeout=5)
+r_ed_oobc = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "cron": "61 * * * *"}, timeout=5)
+check("api/schedule_edit refuses empty, invalid, and out-of-range cron with 400",
+      r_ed_ecron.status_code == 400 and r_ed_badc.status_code == 400 and r_ed_oobc.status_code == 400)
+
+# 8. Non-string prompt or cron (number, list, null)
+for bad_prop, prop_name in [
+    (1234, "number"),
+    (["a", "b"], "list"),
+    (None, "null/None"),
+]:
+    r_bp = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": bad_prop}, timeout=5)
+    r_bc = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "cron": bad_prop}, timeout=5)
+    check(f"api/schedule_edit refuses {prop_name} prompt with 400", r_bp.status_code == 400)
+    check(f"api/schedule_edit refuses {prop_name} cron with 400", r_bc.status_code == 400)
+
+# 9. Unknown id: 404 {"ok": false}
+bytes_before_un_edit = sched_test_file.read_bytes()
+r_ed_un = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "nonexistent_id", "prompt": "p"}, timeout=5)
+check("api/schedule_edit unknown id returns 404 ok=false and leaves file untouched",
+      r_ed_un.status_code == 404 and r_ed_un.json() == {"ok": False}
+      and sched_test_file.read_bytes() == bytes_before_un_edit)
+
+# 10. Bad id: empty, .., /, over 200 chars, non-string
+for bid, lbl in [
+    ("", "empty"),
+    ("..", ".."),
+    ("a/b", "/"),
+    ("x" * 201, "over 200 chars"),
+    (999, "number"),
+    (None, "null"),
+    (["x"], "list"),
+]:
+    payload_bid = {"id": bid, "prompt": "p"} if bid is not None else {"prompt": "p"}
+    r_bid = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json=payload_bid, timeout=5)
+    check(f"api/schedule_edit refuses bad id ({lbl}) with 400", r_bid.status_code == 400)
+
+# 11. Damaged schedules.json: 409, file unchanged byte for byte
+sched_test_file.write_text("damaged schedules content for edit test", encoding="utf-8")
+r_ed_dam = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "edit_s1", "prompt": "p"}, timeout=5)
+check("api/schedule_edit returns 409 for damaged file and leaves file untouched byte for byte",
+      r_ed_dam.status_code == 409 and r_ed_dam.json() == {"error": "schedules.json is damaged"}
+      and sched_test_file.read_bytes() == b"damaged schedules content for edit test")
+
+# 12. Redaction: secret in prompt of stored schedule, in last_error, and in prompt submitted
+sec_val_edit = "registered-secret-edit-val-987654"
+test_sec_notes_edit = tmp / "notes_for_sched_edit_sec.md"
+test_sec_notes_edit.write_text("- svc: http://example.com | key_env=TEST_SCHED_EDIT_SECRET\n")
+saved_notes_ed = g.NOTES
+g.NOTES = test_sec_notes_edit
+os.environ["TEST_SCHED_EDIT_SECRET"] = sec_val_edit
+sched_test_file.write_text(json.dumps([{
+    "id": "sec_edit_id", "prompt": f"stored prompt with {sec_val_edit}", "cron": "0 9 * * *",
+    "enabled": True, "last_run": None, "next_run": "2026-10-31T09:00:00",
+    "last_status": "error", "last_error": f"CustomError_{sec_val_edit}"
+}]), encoding="utf-8")
+r_ed_sec_ok = http.post(f"{sched_base}/api/schedule_edit", headers=hdr,
+                        json={"id": "sec_edit_id", "prompt": f"submitted prompt with {sec_val_edit}"}, timeout=5)
+check("api/schedule_edit redacts secret from entire response body on success",
+      r_ed_sec_ok.status_code == 200 and sec_val_edit not in r_ed_sec_ok.text)
+sec_sched = r_ed_sec_ok.json().get("schedule", {})
+# Name each field in the test
+for f_name in ["id", "cron", "enabled", "next_run", "last_run", "last_status", "last_error", "prompt"]:
+    check(f"api/schedule_edit redacts secret from returned field '{f_name}'",
+          f_name in sec_sched and sec_val_edit not in str(sec_sched[f_name]))
+
+# Secret in error messages: invalid cron with secret in prompt
+r_ed_sec_err = http.post(f"{sched_base}/api/schedule_edit", headers=hdr,
+                         json={"id": "sec_edit_id", "prompt": f"fail with {sec_val_edit}", "cron": "bad cron"}, timeout=5)
+check("api/schedule_edit redacts secret from error message on invalid cron",
+      r_ed_sec_err.status_code == 400 and sec_val_edit not in r_ed_sec_err.text)
+
+# Secret in ValueError raised by schedules.edit
+saved_sched_edit_fn = schedules.edit
+def _raising_sched_edit(sid, prompt=None, cron=None):
+    raise ValueError(f"Edit failure containing {sec_val_edit} and padding " + "x" * 250)
+schedules.edit = _raising_sched_edit
+r_ed_sec_val = http.post(f"{sched_base}/api/schedule_edit", headers=hdr,
+                         json={"id": "sec_edit_id", "prompt": "some prompt"}, timeout=5)
+schedules.edit = saved_sched_edit_fn
+check("api/schedule_edit redacts secret from ValueError message",
+      r_ed_sec_val.status_code == 400 and sec_val_edit not in r_ed_sec_val.text and "[REDACTED]" in r_ed_sec_val.text)
+
+# 13. Clipping: error message at 200 and over; prompt clipping matches _format_schedule (500)
+check("api/schedule_edit clips error message to exactly 200 characters",
+      len(r_ed_sec_val.json()["error"]) == 200)
+# Format prompt clipping at 500 characters
+sched_test_file.write_text(json.dumps([{
+    "id": "clip_s1", "prompt": "short", "cron": "0 9 * * *",
+    "enabled": True, "last_run": None, "next_run": "2026-10-31T09:00:00",
+    "last_status": "", "last_error": ""
+}]), encoding="utf-8")
+r_ed_clip_p = http.post(f"{sched_base}/api/schedule_edit", headers=hdr,
+                        json={"id": "clip_s1", "prompt": "y" * 600}, timeout=5)
+check("api/schedule_edit clips returned prompt to 500 characters matching _format_schedule",
+      r_ed_clip_p.status_code == 200 and len(r_ed_clip_p.json()["schedule"]["prompt"]) == 500)
+
+g.NOTES = saved_notes_ed
+del os.environ["TEST_SCHED_EDIT_SECRET"]
+
+# 14. Odd inputs: <script> stored and returned as plain text; unicode; 4000-char prompt
+r_ed_script = http.post(f"{sched_base}/api/schedule_edit", headers=hdr,
+                        json={"id": "clip_s1", "prompt": "<script>alert('xss')</script><b>ok</b>"}, timeout=5)
+check("api/schedule_edit stores and returns <script> prompt as plain text unchanged",
+      r_ed_script.status_code == 200
+      and r_ed_script.json()["schedule"]["prompt"] == "<script>alert('xss')</script><b>ok</b>"
+      and schedules.load()[0]["prompt"] == "<script>alert('xss')</script><b>ok</b>")
+
+unicode_prompt = "Unicode test 🐾 Привет 世界 🚀"
+r_ed_uni = http.post(f"{sched_base}/api/schedule_edit", headers=hdr,
+                     json={"id": "clip_s1", "prompt": unicode_prompt}, timeout=5)
+check("api/schedule_edit handles unicode prompt correctly",
+      r_ed_uni.status_code == 200 and r_ed_uni.json()["schedule"]["prompt"] == unicode_prompt
+      and schedules.load()[0]["prompt"] == unicode_prompt)
 
 # 23. Odd inputs from page's point of view
 # Exact 4,000 char prompt accepted
@@ -2628,11 +2876,12 @@ check("odd inputs: cron with extra spaces accepted with 200", r_odd_cron.status_
 # Id of 64 characters accepted as valid id format (returns 404 for unknown, not 400)
 r_odd_64_en = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": "y" * 64, "enabled": True}, timeout=5)
 r_odd_64_del = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": "y" * 64}, timeout=5)
+r_odd_64_ed = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": "y" * 64, "prompt": "p"}, timeout=5)
 check("odd inputs: 64 character id accepted as valid id format (returns 404 for unknown)",
-      r_odd_64_en.status_code == 404 and r_odd_64_del.status_code == 404)
+      r_odd_64_en.status_code == 404 and r_odd_64_del.status_code == 404 and r_odd_64_ed.status_code == 404)
 
-# Empty body and JSON list body for enable/delete
-for route in ["/api/schedule_enable", "/api/schedule_delete"]:
+# Empty body and JSON list body for enable/delete/edit
+for route in ["/api/schedule_enable", "/api/schedule_delete", "/api/schedule_edit"]:
     r_empty = http.post(f"{sched_base}{route}", headers=hdr, data=b"", timeout=5)
     r_arr = http.post(f"{sched_base}{route}", headers=hdr, data=b"[]", timeout=5)
     check(f"odd inputs: {route} refuses empty body with 400", r_empty.status_code == 400)
@@ -2650,6 +2899,7 @@ g.CONFIRM = lambda d: (confirm_calls.append(d), False)[1]
 http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "idle check", "cron": "0 0 * * *"}, timeout=5)
 sid_run_check = schedules.load()[0]["id"]
 http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": sid_run_check, "enabled": False}, timeout=5)
+http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": sid_run_check, "prompt": "idle edit"}, timeout=5)
 http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": sid_run_check}, timeout=5)
 
 g.CONFIRM = saved_confirm
@@ -2668,6 +2918,7 @@ with contextlib.redirect_stdout(buf_out_w), contextlib.redirect_stderr(buf_err_w
     r_add_p = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": distinct_prompt_write, "cron": "* * * * *"}, timeout=5)
     pid = r_add_p.json()["schedule"]["id"]
     http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": pid, "enabled": False}, timeout=5)
+    http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": pid, "prompt": distinct_prompt_write}, timeout=5)
     http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": pid}, timeout=5)
 check("prompts never reach console stdout or stderr on write routes",
       distinct_prompt_write not in buf_out_w.getvalue()
@@ -2678,11 +2929,13 @@ sched_sess.status = "running"
 r_run_add = http.post(f"{sched_base}/api/schedule_add", headers=hdr, json={"prompt": "during run", "cron": "0 10 * * *"}, timeout=5)
 run_sid = r_run_add.json()["schedule"]["id"]
 r_run_en = http.post(f"{sched_base}/api/schedule_enable", headers=hdr, json={"id": run_sid, "enabled": False}, timeout=5)
+r_run_ed = http.post(f"{sched_base}/api/schedule_edit", headers=hdr, json={"id": run_sid, "prompt": "edit during run"}, timeout=5)
 r_run_del = http.post(f"{sched_base}/api/schedule_delete", headers=hdr, json={"id": run_sid}, timeout=5)
 sched_sess.status = "idle"
-check("all three routes succeed while a run is in progress (session.status=='running')",
+check("all four routes succeed while a run is in progress (session.status=='running')",
       r_run_add.status_code == 200
       and r_run_en.status_code == 200
+      and r_run_ed.status_code == 200
       and r_run_del.status_code == 200)
 
 # 27. Concurrency: two threads each adding 20 schedules at once

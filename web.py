@@ -937,6 +937,34 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 except ValueError:
                     return self._send(409, {"error": "schedules.json is damaged"})
                 return self._send(200 if ok else 404, {"ok": ok})
+            if path == "/api/schedule_edit":
+                if _schedules_error():
+                    return self._send(409, {"error": "schedules.json is damaged"})
+                sid = body.get("id")
+                if not _is_valid_schedule_id(sid):
+                    return self._send(400, {"error": "invalid id"})
+                has_prompt = "prompt" in body
+                has_cron = "cron" in body
+                if not has_prompt and not has_cron:
+                    return self._send(400, {"error": "at least one of prompt or cron is required"})
+                if has_prompt and not isinstance(body["prompt"], str):
+                    return self._send(400, {"error": "prompt must be a string"})
+                if has_cron and not isinstance(body["cron"], str):
+                    return self._send(400, {"error": "cron must be a string"})
+                prompt = body.get("prompt")
+                cron = body.get("cron")
+                try:
+                    item = schedules.edit(sid, prompt=prompt, cron=cron)
+                except ValueError as e:
+                    if _schedules_error():
+                        return self._send(409, {"error": "schedules.json is damaged"})
+                    err_msg = str(e)
+                    if prompt and prompt in err_msg:
+                        err_msg = err_msg.replace(prompt, "[REDACTED]")
+                    return self._send(400, {"error": g._redact(err_msg)[:200]})
+                if item is None:
+                    return self._send(404, {"ok": False})
+                return self._send(200, {"ok": True, "schedule": _format_schedule(item)})
             return self._send(404, {"error": "not found"})
 
     return Handler
@@ -1266,7 +1294,7 @@ $("sapply").onclick = async () => {
 };
 let lastSig = null, selectedThread = "", historyKey = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
 let approvalsData = [];
-let schedulesData = [], schedulesError = "", schedulesLoadError = false, schedulesKey = null, schedPoll = 0, canRun = false;
+let schedulesData = [], schedulesError = "", schedulesLoadError = false, schedulesKey = null, schedPoll = 0, canRun = false, editingScheduleId = null;
 function renderApprovals() {
   const card = $("approvalscard");
   const list = $("approvalslist");
@@ -1324,6 +1352,7 @@ function renderApprovals() {
   }
 }
 function renderSchedules() {
+  if (editingScheduleId !== null) return;
   const card = $("schedulescard");
   const list = $("scheduleslist");
   while (list.firstChild) list.removeChild(list.firstChild);
@@ -1397,6 +1426,78 @@ function renderSchedules() {
       }
     };
     row.appendChild(togBtn);
+    const editBtn = document.createElement("button");
+    editBtn.className = "ghost";
+    editBtn.style.padding = "4px 10px";
+    editBtn.style.fontSize = "12px";
+    editBtn.textContent = "Edit";
+    editBtn.onclick = () => {
+      editingScheduleId = s.id;
+      while (item.firstChild) item.removeChild(item.firstChild);
+      const promptInput = document.createElement("textarea");
+      promptInput.rows = 2;
+      promptInput.style.marginBottom = "6px";
+      promptInput.value = s.prompt || "";
+      const cronInput = document.createElement("input");
+      cronInput.style.marginBottom = "6px";
+      cronInput.value = s.cron || "";
+      const editRow = document.createElement("div");
+      editRow.className = "row";
+      editRow.style.marginTop = "4px";
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "ghost";
+      saveBtn.style.padding = "4px 10px";
+      saveBtn.style.fontSize = "12px";
+      saveBtn.textContent = "Save";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "ghost";
+      cancelBtn.style.padding = "4px 10px";
+      cancelBtn.style.fontSize = "12px";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = () => {
+        editingScheduleId = null;
+        renderSchedules();
+      };
+      saveBtn.onclick = async () => {
+        const pVal = promptInput.value;
+        const cVal = cronInput.value;
+        const pChanged = pVal !== (s.prompt || "");
+        const cChanged = cVal !== (s.cron || "");
+        if (!pChanged && !cChanged) {
+          editingScheduleId = null;
+          renderSchedules();
+          return;
+        }
+        const payload = {id: s.id};
+        if (pChanged) payload.prompt = pVal;
+        if (cChanged) payload.cron = cVal;
+        saveBtn.disabled = true;
+        try {
+          const res = await api("/api/schedule_edit", payload);
+          if (res && res.ok) {
+            editingScheduleId = null;
+            $("schedmsg").textContent = "";
+            $("schedmsg").hidden = true;
+            schedulesKey = null;
+            refresh();
+          } else {
+            $("schedmsg").textContent = (res && res.error) || "Could not update schedule";
+            $("schedmsg").hidden = false;
+          }
+        } catch (e) {
+          $("schedmsg").textContent = "Could not update schedule";
+          $("schedmsg").hidden = false;
+        } finally {
+          saveBtn.disabled = false;
+        }
+      };
+      editRow.appendChild(saveBtn);
+      editRow.appendChild(cancelBtn);
+      item.appendChild(promptInput);
+      item.appendChild(cronInput);
+      item.appendChild(editRow);
+    };
+    row.appendChild(editBtn);
     const delBtn = document.createElement("button");
     delBtn.className = "ghost";
     delBtn.style.padding = "4px 10px";
