@@ -216,7 +216,8 @@ try:
           and ok("12 files, including 2 hidden ones") and ok("It holds 10 regular files."))
     check("the entry count called files or items fails", not ok("There are 13 files in downloads/.")
           and not ok("15 items") and not ok("10 files, so 13 files in total"))
-    check("a count with no files wording, or the recursive count, fails", not ok("The count is 10.") and not ok("18 files in all"))
+    check("a count with no files wording, or the recursive count, fails", not ok("The count is 10.") and not ok("18 files in all")
+          and not ok("There are 10 folders and 3 files."))
 
     # --- isolation ----------------------------------------------------------------------------
     check("the stub runs recorded clipped_results", "clipped_results" in r)
