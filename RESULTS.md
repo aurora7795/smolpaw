@@ -558,3 +558,24 @@ The logs of the failed `edit_duplicate_passage` runs showed why Gemma edited the
 - **Cost of the reading.** Qwen used about 22,000 more input tokens per run because it read all six pages.
 - **Caveats.** One session, 10 runs per model. Gemma's runs differ only slightly in order (one read geology before the second hydrology page), so the 0/10 comes from one repeated behaviour, not from ten different failures. Not measured: why Gemma stops (the number of calls so far, the footer wording or the model's judgement that it has seen enough); whether a footer that says the rest of the file is unread changes it; the `--without-tool`-style comparison without the `offset` argument that #89 mentioned, which the arguments now make unnecessary for this question.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking read_three_report --n 10 --label n10`, then the same with `qwen3.5:9b`.
+
+### A footer that says how much is unread (#89, 2026-10-30)
+
+Following the n=10 result above, one change to `read_file`'s footer: a page that is not the last now reads `[characters 0-4000 of 6093; 2093 more characters NOT read yet, so this is only part of the file; call read_file again with offset=4000 to continue]`. Same case, Gemma 4 E4B, Ollama, 32K context, n=10. The change was tried in a separate worktree and is not in the code. Log: `logs/eval-20261030-115802-ollama-gemma4_e4b-tracking-read_three_report-footer-unread.json`. I stopped before running Qwen, because the change was not going to be kept.
+
+- **No effect.** 0/10 passed (mean 6.2 steps, 38,198 input tokens), against 0/10 with the old footer. In all 10 runs Gemma read page 1 of `refuge_inventory.txt` and never read page 2, as before. It read page 2 of the hydrology file in 10 runs and of the geology file in 9.
+- **What this rules out.** The footer wording is not what stops Gemma: it was told in so many words that part of the file was unread. Not examined: whether a different number of files, a different file order or a "read every page of every file before answering" instruction changes it; and why page 2 is skipped only for the last file.
+
+### File count with files, hidden files and folders (#49, 2026-10-30)
+
+`tests/eval.py --counting` (new): "How many files are in the folder downloads/?" against a generated `downloads/` holding 10 files, 2 hidden files and 3 folders of 2 files each (13 visible entries, 15 with hidden ones, 18 files recursively). Ollama, 32K context, native history, n=5 per model, isolated workspace. The checker passes an answer that gives 10 (or 12 with the hidden files) as a number of files and fails one that calls 13 or 15 files or items. It reads wording, so a bare number does not pass. Logs: `logs/eval-20261030-120025-ollama-qwen3.5_9b-counting.json` and `logs/eval-20261030-120116-ollama-gemma4_e4b-counting.json`.
+
+| | Passed (checker) | Stated 12 | Used `list_dir` | Mean steps | Mean input tokens |
+|---|---|---|---|---|---|
+| Gemma 4 E4B | 5/5 | 5/5 | 5/5 | 2.4 | 11,133 |
+| Qwen 3.5 9B | 1/5 | 5/5 | 3/5 | 3.0 | 15,345 |
+
+- **No model called the entry count files.** All 10 answers gave 12, the top-level file count including the 2 hidden files. The mislabelling in #49 (54 entries reported as files) did not appear on this fixture.
+- **Qwen's four failures are wording.** Four of its five answers were the bare number "12", which is a correct answer to the question but which the checker does not accept; only run 4 said "12 files". Read by number alone, Qwen is 5/5. Three Qwen runs used `list_dir`; runs 1 and 3 used `run_shell` (`ls`, `find -type f | wc -l`, `ls | wc -l`, and once a wrong absolute path under `/Users/.../downloads/`) and still answered 12.
+- **Caveats.** n=5. The fixture sits in the workspace, where `list_dir` works and reports the file/folder split; the case that stalled in #49 was the home folder, outside the workspace, which this run does not cover. The checker cannot tell a counted-correctly 12 from a lucky one. Not tested: a change to the `list_dir` docstring or the prompt, which this baseline gives no reason to make.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --counting --n 5`, then the same with `qwen3.5:9b`.
