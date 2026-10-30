@@ -26,6 +26,51 @@ Rules:
 
 The filter used so far. Safe: mechanical, self-contained, testable tasks with a clear input and output contract (a new tool, a convention, a narrow heuristic fix, a fixture). Not safe: measurements and judgment calls, the confirmation layer in `generic_tools.py`, the core history and request flow in `agent.py`, architecture decisions, and anything that needs a credential path.
 
+## Brief template
+
+Every brief so far has been written in chat. This is the shape that came back mergeable for #81 and #80, with the rules added after each review found something the brief had not asked for. Fill the angle-bracket slots; drop a bullet only if it cannot apply.
+
+```text
+Task: SmolPaw issue #<n>, <which half>: <one sentence>. Read the issue first (`gh issue view <n>`), then CLAUDE.md.
+
+Work on a new branch `<type>/<name>` cut from `main`. Do not merge, do not push to main, do not touch any other branch. Commit on the branch only, with the co-author line CLAUDE.md requires.
+
+OUT OF SCOPE (do not build, do not stub, do not add a button, route or placeholder for): <the half that is not delegated>. <What the work must never do, for example run a tool, start a run, write a file other than X.>
+
+What exists now: <the functions, data shapes and endpoints involved, with file names; say which fields may be missing or untrusted, and what must NOT be edited to get what is needed.>
+
+What to build: <numbered list, each item testable. For every value that leaves the server, say how it is coerced, clipped and redacted.>
+
+Rules
+- Only touch <files>. Do NOT touch <the forbidden files: generic_tools.py, agent.py, tests/eval.py, anything about confirmations, approvals flow or path scoping, and whatever else the task borders>.
+- Match the surrounding style. No placeholders or TODOs in docs.
+- Tests must not write to the real workspace/, notes.md, logs/, .undo/ or any real data file; point the module's path at a temp file and restore it.
+
+Tests
+- <each route or function: valid, empty, invalid, missing token, wrong token.>
+- Redaction: put a registered secret in EVERY field the response carries, and in every error message, and assert it is absent from the whole response body. List the fields by name; a field not named in the brief was left untested both times.
+- Clipping: every clipped field and every error message, at the limit and over it, in every place it appears (for example the endpoint and /api/state).
+- Odd input: empty, missing, wrong type, markup (`<script>`), the longest allowed value.
+- Nothing executes: no run starts, status unchanged, a recording fake confirm stays empty, files unchanged byte for byte.
+- The page: the repo has no browser test harness, so assert the served HTML contains each piece (element id, fetch call, failure message, textContent use, no innerHTML in the new function) and say in the report that these are presence checks only. For every user-visible behaviour in the new code (each field shown, the failure message, the refresh after an action) delete the one line that does it and confirm a test fails; add a test for any that survives.
+- Mutation checks, committed BEFORE mutating (a `git checkout` of a file discards uncommitted edits): <list at least one per validation, cap, redaction and status code>. Restore after each and report which test caught which.
+
+Before you report
+Run each suite with `.venv/bin/python` and report the counts: <the suites in CLAUDE.md section 1>. All must show 0 failed. Run the suite that holds the new tests three times and say whether any run differed.
+
+Report format
+- Branch name and commit hash(es).
+- Files changed, one line each.
+- Test counts and mutation results (which mutation or deleted line, which test).
+- Anything you were unsure about or chose not to do, and anything that looks wrong elsewhere but is out of scope (list it, do not fix it). Do not claim a check you did not run.
+```
+
+What the reviews added to the template so far:
+- Redaction and clipping tests must name every field and every error message (#80: ids, cron, run times, status and the error text were unchecked).
+- Delete one line per presence check (#81: the refresh after a dismiss and the failure message could be deleted unnoticed; #80's brief asked for this and it held).
+- Say what must not be edited and how to get the data anyway (#80: the scheduler's last error comes from calling `schedules.load()`, not from `scheduler.py`).
+- Run the mutations from a committed state (a `git checkout` restored over uncommitted fixes in #73).
+
 ## Log
 
 | Issue | Kind | Review outcome | Defects found | Review cost | Fix commits | Verdict |
