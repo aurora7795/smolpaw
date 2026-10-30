@@ -2222,6 +2222,30 @@ check("after damaged schedules file is fixed, error fields are empty again",
       and r_fixed.json()["error"] == ""
       and st_fixed.get("schedules_error") == "")
 
+# 9b. redaction and clipping of every field and of the error message (review addition)
+g.NOTES = test_sec_notes
+os.environ["TEST_SCHED_SECRET"] = "registered-secret-sched-77777"
+sec_all = [{"id": "id-registered-secret-sched-77777", "cron": "cron-registered-secret-sched-77777", "enabled": True,
+            "next_run": "n-registered-secret-sched-77777", "last_run": "l-registered-secret-sched-77777",
+            "last_status": "st-registered-secret-sched-77777", "prompt": "p"}]
+sched_test_file.write_text(json.dumps(sec_all), encoding="utf-8")
+r_sec_all = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5)
+saved_load = schedules.load
+def _raising_load():
+    raise ValueError("bad file registered-secret-sched-77777 " + "Z" * 600)
+schedules.load = _raising_load
+r_sec_err = http.get(f"{sched_base}/api/schedules", headers=hdr, timeout=5).json()
+st_sec_err = http.get(f"{sched_base}/api/state", headers=hdr, timeout=5).json()
+schedules.load = saved_load
+g.NOTES = saved_notes
+del os.environ["TEST_SCHED_SECRET"]
+check("api/schedules redacts a registered secret in id, cron, next_run, last_run and last_status",
+      "registered-secret-sched-77777" not in r_sec_all.text and r_sec_all.text.count("[REDACTED]") == 5)
+check("the error message is redacted and clipped to 500 characters in /api/schedules and /api/state",
+      "registered-secret-sched-77777" not in json.dumps([r_sec_err, st_sec_err.get("schedules_error")])
+      and "[REDACTED]" in r_sec_err["error"] and len(r_sec_err["error"]) == 500
+      and st_sec_err["schedules_error"] == r_sec_err["error"])
+
 # 10. viewing executes nothing
 bytes_before = sched_test_file.read_bytes()
 status_before = sched_sess.status
@@ -2290,6 +2314,8 @@ check("web page adds schedules to refresh cycle", 'schedKey !== schedulesKey' in
 idx_sched_func = page_html.index("function renderSchedules")
 idx_runs_func = page_html.index("function renderRuns")
 sched_fn_code = page_html[idx_sched_func:idx_runs_func]
+check("web page shows the on/off state and the last error of a schedule (presence check only)",
+      'const statusText = s.enabled ? "on" : "off"' in page_html and 'errDiv.textContent = "error: " + s.last_error' in page_html)
 check("new renderSchedules function contains no innerHTML", "innerHTML" not in sched_fn_code)
 
 # 14. served page contains no add/edit/delete/enable control for schedules

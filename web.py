@@ -701,9 +701,7 @@ def _schedules_payload() -> tuple[list[dict], str]:
     """Read-only view of schedules.json, redacted and clipped."""
     try:
         raw_list = schedules.load()
-    except ValueError as e:
-        return [], g._redact(str(e))[:500]
-    except Exception as e:
+    except Exception as e:  # ValueError for a damaged file; never let the view break the page
         return [], g._redact(str(e))[:500]
     items = []
     for item in raw_list[:100]:
@@ -732,8 +730,6 @@ def _schedules_error() -> str:
     try:
         schedules.load()
         return ""
-    except ValueError as e:
-        return g._redact(str(e))[:500]
     except Exception as e:
         return g._redact(str(e))[:500]
 
