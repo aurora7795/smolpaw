@@ -38,7 +38,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import generic_tools as g  # noqa: E402
-from agent import BACKENDS, NO_ANSWER, build_agent, load_env  # noqa: E402
+from agent import BACKENDS, NO_ANSWER, build_agent, load_env, step_trace  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
 from tests import readonly_fixture, tracking_fixture  # noqa: E402
@@ -280,6 +280,11 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "parse_errors": sum(isinstance(s.error, AgentParsingError) for s in steps),
         # text of each parse error, to see which failure mode recurs (#14) instead of only a count
         "parse_error_detail": [str(s.error)[:300] for s in steps if isinstance(s.error, AgentParsingError)],
+        # what the model wrote in a step that failed to parse, to see whether a repair could recover it (#78)
+        "parse_error_output": [str(s.model_output)[:400] for s in steps if isinstance(s.error, AgentParsingError)],
+        # per step: call, failed, result repeats an earlier one; the second stall rule can be replayed on it (#77)
+        "trace": [{"call": str(t["call"])[:120], "failed": t["failed"], "repeat": t["repeat"]} for t in step_trace(steps)],
+        "stalled": getattr(agent, "stall_reason", None),
         "input_tokens": tokens_in,
         "output_tokens": tokens_out,
         "tools": [tc.name for s in steps for tc in (s.tool_calls or [])],

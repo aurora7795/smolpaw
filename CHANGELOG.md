@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- A second stall rule (#77): a run stops with the usual `STOPPED EARLY` message when two results in a row repeat earlier results (a declined action answered the same way again, a file re-read unchanged). Default `SMOLPAW_STALL_REPEATS=2`; 0 switches it off. `SMOLPAW_STALL_FAILS` (that many failing steps in a row) exists but is off. Qwen 3.5 9B: capped runs 17 to 2 of 37, input tokens down 26%, pass count 14 to 15; Gemma 4 E4B: capped runs 3 to 0, passes 25 to 26 (n=37 each; see RESULTS.md for the per-task losses and caveats). No prompt cost. `tests/eval.py` records a per-step trace, the stop reason and what the model wrote in a step that failed to parse; new `tests/replay_stall.py` replays stall limits on saved traces.
 - RESULTS.md: Granite 4.2 8B sanity check on Tidepool `easy` (n=3, native and text history). First call 4,927 tokens; native tool calls with 0 parse errors; 2 of 3 passed in each cell, the third failing both times with a Metal out-of-memory in LM Studio at 32768 context. No code change.
 
 ### Fixed

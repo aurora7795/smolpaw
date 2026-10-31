@@ -1773,14 +1773,47 @@ check("same call failing with HTTP 4xx repeatedly is a stall", a.interrupted and
 a = _FakeAgent([_step([ToolCall("run_shell", {"cmd": "echo a"}, "x")], observations="a\n")
                 for _ in range(STALL_WINDOW)])
 check_stall(a.memory.steps[-1], a)
-check("repeating a succeeding call is not a stall", not a.interrupted)
-a = _FakeAgent([_step([ToolCall("read_file", {"path": f"f{i}"}, "x")], observations="ERROR: no such file")
+check("first rule: repeating a succeeding call is not a same-call failure", "failed" not in (a.stall_reason or ""))
+check("second rule (#77): the same succeeding call returning the same text again and again is a stall",
+      a.interrupted and "repeated earlier results" in a.stall_reason)
+a = _FakeAgent([_step([ToolCall("read_file", {"path": f"f{i}"}, "x")], observations=f"ERROR: no such file f{i}")
                 for i in range(STALL_WINDOW)])
 check_stall(a.memory.steps[-1], a)
-check("different arguments each time is not a stall", not a.interrupted)
+check("different arguments each time, each with its own error, is not a stall", not a.interrupted)
 a = _FakeAgent(failing[:STALL_WINDOW - 1] + [_step([same_call[0]], error=ValueError("boom"))])
 check_stall(a.memory.steps[-1], a)
 check("a smolagents-level error counts as a failure too", a.interrupted)
+
+# second stall rule (#77): off by default, replayable on a recorded trace
+import agent as _agent  # noqa: E402
+from agent import no_progress, step_trace  # noqa: E402
+
+_bad = lambda i: _step([ToolCall("run_shell", {"cmd": f"c{i}"}, "x")], observations="DECLINED: no")  # noqa: E731
+_trace = step_trace([_bad(i) for i in range(4)])
+check("no_progress is off with both limits 0", no_progress(_trace) is None)
+check("N different failing steps in a row stop a run", no_progress(_trace, fails=4) and not no_progress(_trace, fails=5))
+check("a success in the window resets the failing rule",
+      no_progress(step_trace([_bad(0), _bad(1), _step([ToolCall("read_file", {"p": "a"}, "x")], observations="ok"), _bad(3)]), fails=2) is None)
+_same = lambda i: _step([ToolCall("read_file", {"p": f"p{i}"}, "x")], observations="same text")  # noqa: E731
+_rt = step_trace([_same(i) for i in range(4)])
+check("a step is a repeat only from the second identical result", [t["repeat"] for t in _rt] == [False, True, True, True])
+check("repeated results stop a run at the limit", no_progress(_rt, repeats=3) and not no_progress(_rt[:3], repeats=3))
+_agent.STALL_REPEATS = 0
+a = _FakeAgent([_bad(i) for i in range(4)])
+check_stall(a.memory.steps[-1], a)
+check("with both limits 0 check_stall leaves different failing calls alone", not a.interrupted)
+_agent.STALL_FAILS = 4
+a = _FakeAgent([_bad(i) for i in range(4)])
+check_stall(a.memory.steps[-1], a)
+check("check_stall applies the failing-steps rule when its limit is set", a.interrupted and "4 steps" in a.stall_reason)
+_agent.STALL_FAILS, _agent.STALL_REPEATS = 0, 2
+a = _FakeAgent([_bad(i) for i in range(3)])
+check_stall(a.memory.steps[-1], a)
+check("repeats limit 2 is the default: a declined action answered the same way three times stops the run",
+      a.interrupted and "repeated earlier results" in a.stall_reason)
+a = _FakeAgent([_step([ToolCall("read_file", {"p": f"p{i}"}, "x")], observations=f"text {i}") for i in range(4)])
+check_stall(a.memory.steps[-1], a)
+check("four different successful results are progress", not a.interrupted)
 
 # run_request() reports a stall as a finished answer, but still lets a real Stop-button interrupt through
 from smolagents.utils import AgentError  # noqa: E402
