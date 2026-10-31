@@ -179,6 +179,35 @@ def _is_failure(step: ActionStep) -> bool:
     return text.startswith(("ERROR", "DECLINED")) or bool(re.match(r"^HTTP [45]\d\d\b", text))
 
 
+def step_trace(steps: list[ActionStep]) -> list[dict]:
+    """Per step: the call signature, whether it failed, and whether its result repeats an earlier one (#77)."""
+    seen: set[str] = set()
+    trace = []
+    for s in steps:
+        obs = (s.observations or "").strip()
+        trace.append({"call": _tool_calls_key(s.tool_calls), "failed": _is_failure(s), "repeat": bool(obs) and obs in seen})
+        seen.add(obs)
+    return trace
+
+
+def no_progress(trace: list[dict], fails: int = 0, repeats: int = 0) -> str | None:
+    """Why a run should stop although no single call failed three times (#77), or None. 0 switches a rule off.
+
+    `fails`: that many steps in a row failed, whatever the call. `repeats`: that many steps in a row returned
+    a result identical to an earlier step's.
+    """
+    if fails and len(trace) >= fails and all(t["failed"] for t in trace[-fails:]):
+        return f"the last {fails} steps all failed"
+    if repeats and len(trace) >= repeats and all(t["repeat"] for t in trace[-repeats:]):
+        return f"the last {repeats} results repeated earlier results"
+    return None
+
+
+# Second stall rule (#77): two results in a row that repeat earlier ones. 0 switches a limit off (the env vars).
+STALL_FAILS = int(os.environ.get("SMOLPAW_STALL_FAILS", "0"))
+STALL_REPEATS = int(os.environ.get("SMOLPAW_STALL_REPEATS", "2"))
+
+
 def check_stall(step, agent) -> None:
     """Step callback (#19): stop early when the same call fails the same way several times running.
 
@@ -186,11 +215,15 @@ def check_stall(step, agent) -> None:
     """
     steps = [s for s in agent.memory.steps if isinstance(s, ActionStep)]
     window = steps[-STALL_WINDOW:]
-    if len(window) < STALL_WINDOW:
-        return
-    keys = {_tool_calls_key(s.tool_calls) for s in window}
-    if len(keys) == 1 and None not in keys and all(_is_failure(s) for s in window):
-        agent.stall_reason = f"the same call failed {STALL_WINDOW} times in a row"
+    if len(window) >= STALL_WINDOW:
+        keys = {_tool_calls_key(s.tool_calls) for s in window}
+        if len(keys) == 1 and None not in keys and all(_is_failure(s) for s in window):
+            agent.stall_reason = f"the same call failed {STALL_WINDOW} times in a row"
+            agent.interrupt()
+            return
+    reason = no_progress(step_trace(steps), STALL_FAILS, STALL_REPEATS)
+    if reason:
+        agent.stall_reason = reason
         agent.interrupt()
 
 

@@ -111,7 +111,7 @@ python3 agent.py --model google/gemma-4-e4b
 
 | Flag | Default | Notes |
 |---|---|---|
-| `-p` | none | Non-interactive mode: run once with this request and exit (no banner, no `You:` loop, no `--web`). Generic tools only. Approvals are declined; `ask_user` returns a no-answer reply. Exit codes: 0 finished, 1 error, 2 step limit, 3 stall stop |
+| `-p` | none | Non-interactive mode: run once with this request and exit (no banner, no `You:` loop, no `--web`). Generic tools only. Approvals are declined; `ask_user` returns a no-answer reply. Exit codes: 0 finished, 1 error, 2 step limit, 3 stall stop (the same call failed three times, or two results in a row repeated earlier ones) |
 | `--json` | off | With `-p`: stream the run's redacted log entries as JSON lines to stdout as they are written, ending with `final`. Other output (`[log]` line, errors) goes to stderr |
 | `--backend` | `lmstudio` | `lmstudio` (port 1234) or `ollama` (port 11434) |
 | `--model` | `ternary-bonsai-8b-mlx` on LM Studio, `qwen3.5:9b` on Ollama | Model identifier on the chosen backend (see `lms ls` or `ollama list`) |
