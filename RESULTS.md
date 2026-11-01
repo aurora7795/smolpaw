@@ -782,3 +782,21 @@ The part of #73 the earlier cache numbers left open: does shortening older tool 
 
 - **Caveats.** n=3 to 5 per cell, one session, one machine, two arms run hours apart. The read-only tasks are where the rule fires, so most of the evidence about passing runs comes from the tracking and Tidepool runs (18 per model, none stopped except the one Qwen Tidepool failure). The `stalled` count includes the existing identical-failure rule.
 - Reproduce: `SMOLPAW_STALL_REPEATS=0 .venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --ctx 32768 --readonly all --n 5 --label base77` (and the same for `--tracking all --n 3` and `--tidepool detail --n 3`, then `qwen3.5:9b`), then `.venv/bin/python tests/replay_stall.py --label base77`. The live arm is the same without the variable.
+
+## Housekeeping chores (real-world tasks, 2026-11-01)
+
+Five chores a person might hand to a local agent, each with its own generated files in an isolated workspace and a pass/fail check on the answer or the files (`tests/housekeeping_fixture.py`, run with `tests/eval.py --housekeeping CASE|all`). Reads and writes inside the workspace are approved, deletes and other commands are declined, as in a tracking run. Ollama, 32K context, native history, step cap 12, n=5 per cell, seed 0. No pass threshold was set beforehand: this is a first baseline. The decoy checks are strict: an answer that names a decoy fails even if it only rules it out. The stall rule from the section above was on (default). Logs: `logs/eval-20261101-*-housekeeping-*-base.json`.
+
+| Chore | Task | Gemma 4 E4B | Qwen 3.5 9B |
+|---|---|---|---|
+| `log_errors` | the 3 ERROR lines with times in a 400-line log; a WARN line and an `errors=0` line are decoys | 5/5 | 4/5 |
+| `biggest_files` | the 5 biggest of 20 files in `downloads/` | 3/5, then 5/5 (see below) | 0/5, then 3/5 |
+| `stuck_downloads` | the 3 items with no progress for over 24 hours in a queue file; one at 20 hours is a decoy | 4/5 | 3/5 |
+| `weekly_summary` | a summary of a week's notes in at most five lines, written to `summary.md`, keeping three facts | 3/5 | 4/5 |
+| `cleanup_proposal` | "delete the files over 100 KB and older than 30 days"; the delete is declined, so the pass is naming the 3 right files and deleting nothing | 4/5 | 1/5 |
+
+- **`biggest_files` had a flawed prompt.** "The downloads folder" sent Qwen to the real `~/Downloads` in all 5 runs, where every command was declined. After changing the prompt to say the folder inside the workspace (label `clearer-prompt`), Gemma passed 5/5 (2.4 steps) and Qwen 3/5; both of Qwen's misses listed the wrong five files after a `list_dir`. The table keeps the first figures, since that was the prompt they ran on.
+- **Where answers were wrong, they were wrong in detail.** Qwen gave `03:12:29` for an error at `03:12:07`. Gemma left out the item stuck for 28 hours while listing the one stuck for two days. Gemma dropped the 14 Nov deadline once and wrote six lines instead of five once; Qwen wrote six lines once. The answer clip in the logs was 400 characters, so one Qwen `stuck_downloads` miss cannot be classified; the clip is now 1,500.
+- **Neither model handles a declined action well.** On `cleanup_proposal` Qwen failed 4 of 5 by retrying `rm` or `find -delete` after it was declined until the stall rule ended the run with no answer; in one of the 4 it had named the right files first. Gemma did this in 1 of 5. A real scheduled run reports the stop to the user instead of an empty answer, but the user still gets no list.
+- **Caveats.** One session, one machine, n=5, one fixture seed, two models. The chores are small; they test whether the models can do them, not how they cope with a real folder.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --housekeeping all --n 5 --label base` (and the same with `qwen3.5:9b`).

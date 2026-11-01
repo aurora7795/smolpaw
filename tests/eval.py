@@ -41,7 +41,7 @@ import generic_tools as g  # noqa: E402
 from agent import BACKENDS, NO_ANSWER, build_agent, load_env, step_trace  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
-from tests import readonly_fixture, tracking_fixture  # noqa: E402
+from tests import housekeeping_fixture, readonly_fixture, tracking_fixture  # noqa: E402
 
 LMS = Path.home() / ".lmstudio/bin/lms"
 OLLAMA = BACKENDS["ollama"]["url"].removesuffix("/v1")
@@ -297,7 +297,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "declined": [a for a in g.ACTIONS if a.startswith("declined")],
         "confirm_prompts": prompts,
         "actions": list(g.ACTIONS),  # what [Harness says] would report, to check the answer against
-        "answer": answer.strip()[:400],
+        "answer": answer.strip()[:1500],
         "error": error,
     }
 
@@ -336,6 +336,25 @@ def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
         ws = tmp / f"tracking-{case_name}-{i}"
         case = next(c for c in tracking_fixture.build(ws, variants=case_name in READ_VARIANTS, long_files=case_name == "read_three_long") if c.name == case_name)
         g.WORKSPACE, g.UNDO_DIR = ws, tmp / f".undo-{case_name}-{i}"
+        g.CONFIRM = workspace_write_confirm(ws)
+        prompt, expects = case.prompt, case.expects
+        r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history,
+                     check=lambda case=case, ws=ws: case.check(ws))
+        results.append(r)
+        print_run(i, r)
+    save_results(args, label, ctx, prompt, expects, results)
+
+
+def run_housekeeping(args, tmp: Path, case_name: str, ctx: int | None) -> None:
+    """Run one housekeeping chore n times, each in a fresh fixture workspace. Reads and workspace writes are approved,
+    deletes and other commands are declined, as in a tracking run."""
+    label = f"housekeeping-{case_name}" + (f"-{args.label}" if args.label else "")
+    print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
+    results, prompt, expects = [], "", []
+    for i in range(1, args.n + 1):
+        ws = tmp / f"housekeeping-{case_name}-{i}"
+        case = next(c for c in housekeeping_fixture.build(ws) if c.name == case_name)
+        g.WORKSPACE, g.UNDO_DIR = ws, tmp / f".undo-housekeeping-{case_name}-{i}"
         g.CONFIRM = workspace_write_confirm(ws)
         prompt, expects = case.prompt, case.expects
         r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history,
@@ -388,6 +407,9 @@ def main() -> None:
     ap.add_argument("--counting-home", action="store_true",
                     help="the --counting task on a Downloads folder in a temporary home folder, outside the workspace; "
                          "listing a folder outside workspace/ is approved, everything else is declined (#49)")
+    ap.add_argument("--housekeeping", metavar="CASE", choices=[*housekeeping_fixture.HOUSEKEEPING_CASES, "all"],
+                    help="chore from tests/housekeeping_fixture.py in a fresh isolated workspace per run: "
+                         + "|".join([*housekeeping_fixture.HOUSEKEEPING_CASES, "all"]))
     ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, *READ_VARIANTS, *EDIT_CASES, *TRACKING_GROUPS],
                     help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
                          "run, passing on the file written to disk or the figures reported (#87): "
@@ -446,8 +468,8 @@ def main() -> None:
         prompt = prompt or COUNTING_HOME_PROMPT
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
-    if not prompt and not args.tracking and not args.readonly:
-        ap.error("--prompt is required unless --tidepool, --listing, --counting, --counting-home, --tracking or --readonly is used")
+    if not prompt and not args.tracking and not args.readonly and not args.housekeeping:
+        ap.error("--prompt is required unless --tidepool, --listing, --counting, --counting-home, --tracking, --housekeeping or --readonly is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
     web_server, web_info = None, {}
@@ -462,7 +484,7 @@ def main() -> None:
     elif args.readonly:
         g.CONFIRM = lambda desc: False
         g.ASK = lambda question: NO_ANSWER
-    elif args.tracking:
+    elif args.tracking or args.housekeeping:
         g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
     elif args.counting_home:
         g.CONFIRM = lambda desc: desc.startswith("List folder outside workspace/")
@@ -478,6 +500,10 @@ def main() -> None:
         if args.tracking:
             for case_name in TRACKING_GROUPS.get(args.tracking, [args.tracking]):
                 run_tracking(args, tmp, case_name, ctx)
+            return
+        if args.housekeeping:
+            for case_name in housekeeping_fixture.HOUSEKEEPING_CASES if args.housekeeping == "all" else [args.housekeeping]:
+                run_housekeeping(args, tmp, case_name, ctx)
             return
         if args.readonly:
             for case_name in READONLY_CASES if args.readonly == "all" else [args.readonly]:
