@@ -5,6 +5,7 @@ Run with: .venv/bin/python tests/test_eval_tracking.py
 Tests must not write to the real workspace/, notes.md, logs/ or .undo/.
 """
 
+import os
 import re
 import sys
 import tempfile
@@ -19,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 import generic_tools as g  # noqa: E402
 from tests import eval as ev  # noqa: E402
+from tests import housekeeping_fixture as hk  # noqa: E402
 from tests import readonly_fixture as rf  # noqa: E402
 from tests import tracking_fixture as tf  # noqa: E402
 
@@ -371,6 +373,50 @@ res = per.summarise(pdir)
 check("parse errors are counted for native-history logs only, bad files skipped",
       list(res) == ["m"] and res["m"]["runs"] == 2 and res["m"]["steps"] == 10 and res["m"]["errors"] == 1
       and res["m"]["with"] == [1, 1] and res["m"]["without"] == [1, 0] and res["m"]["texts"]["boom"] == 1)
+
+# --- housekeeping fixture: each case passes on the right answer and fails on a decoy --------
+hk_ws = Path(tempfile.mkdtemp(prefix="hk-"))
+hk_cases = {c.name: c for c in hk.build(hk_ws)}
+
+
+def hk_ok(name: str, answer: str) -> bool:
+    return all(re.search(e, answer, re.I) for e in hk_cases[name].expects)
+
+
+def hk_summary(text: str | None) -> bool:
+    if text is not None:
+        (hk_ws / "summary.md").write_text(text)
+    return hk_cases["weekly_summary"].check(hk_ws)[0]
+
+
+check("housekeeping: all five cases are built", sorted(hk_cases) == sorted(hk.HOUSEKEEPING_CASES))
+check("log_errors: the three ERROR times pass, a WARN time added fails or one missing fails",
+      hk_ok("log_errors", "03:12:07 11:48:52 19:30:15") and not hk_ok("log_errors", "03:12:07 11:48:52 19:30:15 06:05:41")
+      and not hk_ok("log_errors", "03:12:07 11:48:52"))
+sizes = sorted(((hk_ws / "downloads" / n).stat().st_size, n) for n in os.listdir(hk_ws / "downloads"))[::-1]
+top5 = " ".join(n for _, n in sizes[:5])
+check("biggest_files: the five biggest pass, the sixth added or one missing fails",
+      hk_ok("biggest_files", top5) and not hk_ok("biggest_files", top5 + " " + sizes[5][1])
+      and not hk_ok("biggest_files", " ".join(n for _, n in sizes[:4])))
+check("stuck_downloads: the three stuck titles pass, a 20-hour item added fails",
+      hk_ok("stuck_downloads", "Alpha Harbour, Cedar Flats, Glass Orchard")
+      and not hk_ok("stuck_downloads", "Alpha Harbour, Cedar Flats, Glass Orchard, Iron Meadow"))
+check("cleanup_proposal: the stale files pass, a small old file added fails",
+      hk_ok("cleanup_proposal", "old_installer.dmg old_footage.mp4 old_archive.zip")
+      and not hk_ok("cleanup_proposal", "old_installer.dmg old_footage.mp4 old_archive.zip old_note.txt"))
+check("cleanup_proposal: nothing deleted passes", hk_cases["cleanup_proposal"].check(hk_ws)[0])
+(hk_ws / "cleanup" / "old_archive.zip").unlink()
+check("cleanup_proposal: a deleted file fails", not hk_cases["cleanup_proposal"].check(hk_ws)[0])
+check("weekly_summary: no file fails", not hk_summary(None))
+check("weekly_summary: two lines with the three facts pass",
+      hk_summary("Review moved to Thursday.\nLease (landlord) due 14 Nov.\n"))
+check("weekly_summary: six lines fail", not hk_summary("a\nb\nc\nd\ne\nThursday landlord 14 Nov\n"))
+check("weekly_summary: a missing fact fails", not hk_summary("Review moved to Thursday.\n"))
+try:
+    hk.build(ROOT / "workspace" / "x")
+    check("housekeeping: refuses the real workspace", False)
+except ValueError:
+    check("housekeeping: refuses the real workspace", True)
 
 print(f"\n{check_failed} failed")
 sys.exit(1 if check_failed else 0)
