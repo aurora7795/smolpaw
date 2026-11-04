@@ -605,6 +605,25 @@ for seed in (0, 1, 2):
     dp.write_bytes(orig_dp[:-1] + (b"Y" if orig_dp[-1:] != b"Y" else b"Z"))
     check(f"disk_report (seed {seed}): edited file fails", not disk_c.check(sws)[0])
     dp.write_bytes(orig_dp)
+# eval.py --housekeeping --seed builds the chosen seed's data (run_once and save_results are stubbed: no model runs)
+seen_ws: list[Path] = []
+stub_run_once, stub_save, stub_print = ev.run_once, ev.save_results, ev.print_run
+ev.run_once = lambda *a, check=None, **k: {"passed": True, "check": check()}
+ev.save_results = lambda args, label, *a, **k: seen_ws.append(label)
+ev.print_run = lambda *a, **k: None
+try:
+    seed_tmp = Path(tempfile.mkdtemp(prefix="hk-eval-"))
+    for seed_arg in (0, 2):
+        ev.run_housekeeping(SimpleNamespace(seed=seed_arg, n=1, label="", backend="ollama", model="m", max_steps=1,
+                                            text_history=False), seed_tmp / f"s{seed_arg}", "disk_report", None)
+finally:
+    ev.run_once, ev.save_results, ev.print_run = stub_run_once, stub_save, stub_print
+check("eval --seed: the label names a non-zero seed and not seed 0",
+      seen_ws == ["housekeeping-disk_report", "housekeeping-disk_report-seed2"])
+want2 = hk.build(Path(tempfile.mkdtemp(prefix="hk-eval-w-")), seed=2)[-1].details["biggest_folder"]
+ws2 = seed_tmp / "s2" / "housekeeping-disk_report-1" / "data"
+sizes2 = {d.name: sum(f.stat().st_size for f in d.iterdir()) for d in ws2.iterdir()}
+check("eval --seed: seed 2 builds seed 2's data in the run workspace", max(sizes2, key=sizes2.get) == want2)
 try:
     hk.build(ROOT / "workspace" / "x")
     check("housekeeping: refuses the real workspace", False)

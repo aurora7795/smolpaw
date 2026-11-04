@@ -348,12 +348,13 @@ def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
 def run_housekeeping(args, tmp: Path, case_name: str, ctx: int | None) -> None:
     """Run one housekeeping chore n times, each in a fresh fixture workspace. Reads and workspace writes are approved,
     deletes and other commands are declined, as in a tracking run."""
-    label = f"housekeeping-{case_name}" + (f"-{args.label}" if args.label else "")
+    label = (f"housekeeping-{case_name}" + (f"-seed{args.seed}" if args.seed else "")
+             + (f"-{args.label}" if args.label else ""))
     print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
     results, prompt, expects = [], "", []
     for i in range(1, args.n + 1):
         ws = tmp / f"housekeeping-{case_name}-{i}"
-        case = next(c for c in housekeeping_fixture.build(ws) if c.name == case_name)
+        case = next(c for c in housekeeping_fixture.build(ws, seed=args.seed) if c.name == case_name)
         g.WORKSPACE, g.UNDO_DIR = ws, tmp / f".undo-housekeeping-{case_name}-{i}"
         g.CONFIRM = workspace_write_confirm(ws)
         prompt, expects = case.prompt, case.expects
@@ -410,6 +411,8 @@ def main() -> None:
     ap.add_argument("--housekeeping", metavar="CASE", choices=[*housekeeping_fixture.HOUSEKEEPING_CASES, "all"],
                     help="chore from tests/housekeeping_fixture.py in a fresh isolated workspace per run: "
                          + "|".join([*housekeeping_fixture.HOUSEKEEPING_CASES, "all"]))
+    ap.add_argument("--seed", type=int, default=0,
+                    help="--housekeeping only: seed for the generated names, times and sizes (default 0, the baseline data)")
     ap.add_argument("--tracking", metavar="CASE", choices=[*TRACKING_CASES, *READ_VARIANTS, *EDIT_CASES, *TRACKING_GROUPS],
                     help="long-file tracking task from tests/tracking_fixture.py in a fresh isolated workspace per "
                          "run, passing on the file written to disk or the figures reported (#87): "
