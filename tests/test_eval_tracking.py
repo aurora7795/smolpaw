@@ -376,6 +376,7 @@ check("parse errors are counted for native-history logs only, bad files skipped"
 
 # --- housekeeping fixture: each case passes on the right answer and fails on a decoy --------
 import hashlib  # noqa: E402
+import subprocess  # noqa: E402
 
 hk_ws = Path(tempfile.mkdtemp(prefix="hk-"))
 hk_case_list = hk.build(hk_ws, seed=0)
@@ -534,6 +535,8 @@ for seed in (0, 1, 2):
           not sok("calendar_conflicts", cal_right + f" Also {b2b[0]} and {b2b[1]} overlap."))
     check(f"calendar_conflicts (seed {seed}): titles paired across the two overlaps fail",
           not sok("calendar_conflicts", f"{p1[0]} and {p2[1]} overlap at {p1[2]}. {p2[0]} and {p1[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): a pair split around the other pair in one sentence fails",
+          not sok("calendar_conflicts", f"{p1[0]} and {p2[0]} overlap at {p1[2]}, {p2[1]} and {p1[1]} overlap at {p2[2]}."))
     check(f"calendar_conflicts (seed {seed}): the overnight event named as a conflict fails",
           not sok("calendar_conflicts", cal_right + f" {cd['night']} also overlaps."))
     check(f"calendar_conflicts (seed {seed}): back-to-back event 1 alone passes",
@@ -577,6 +580,8 @@ for seed in (0, 1, 2):
     check(f"disk_report (seed {seed}): right answer passes", sok("disk_report", disk_right))
     check(f"disk_report (seed {seed}): every accepted total passes (file sizes added up, and du -sk)",
           all(sok("disk_report", f"Subfolder {bf} uses {t} KB.") for t in dd["accepted_totals"]) and bt in dd["accepted_totals"])
+    du_kb = int(subprocess.run(["du", "-sk", str(sws / "data" / bf)], capture_output=True, text=True).stdout.split()[0])
+    check(f"disk_report (seed {seed}): the total that du -sk reports passes", sok("disk_report", f"Subfolder {bf} uses {du_kb} KB."))
     check(f"disk_report (seed {seed}): comma formatted size passes", sok("disk_report", f"{bf}: {bt:,} KB"))
     check(f"disk_report (seed {seed}): no space formatted size passes", sok("disk_report", f"{bf}: {bt}KB"))
     check(f"disk_report (seed {seed}): decoy folder fails", not sok("disk_report", disk_right + f" {df} has the biggest file."))
