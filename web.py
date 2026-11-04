@@ -232,7 +232,8 @@ class Session:
     def __init__(self, agent, model: str, approvals: Approvals, backend: str = "lmstudio",
                  max_steps: int = MAX_STEPS, run_summaries: bool | None = None,
                  call_model: Callable[[str], str] | None = None,
-                 schedule_timeout: float | None = None):
+                 schedule_timeout: float | None = None,
+                 search_provider: str | None = None):
         self.agent, self.model, self.approvals = agent, model, approvals
         self.backend, self.max_steps = backend, max_steps
         if run_summaries is None:
@@ -247,6 +248,12 @@ class Session:
             if not 0 <= schedule_timeout < 86_400 * 365:  # negative, nan or inf: a bad value must not drop the limit
                 schedule_timeout = 900.0
         self.schedule_timeout = float(schedule_timeout)
+        if search_provider is None:
+            raw_sp = os.environ.get("SMOLPAW_SEARCH_PROVIDER", "").strip().lower() or "ddgs"
+        else:
+            raw_sp = search_provider.strip().lower() if isinstance(search_provider, str) else ""
+        valid_sp = list(g.SEARCH_PROVIDERS.keys()) + ["none"]
+        self.search_provider = raw_sp if raw_sp in valid_sp else "ddgs"
         self.call_model = call_model
         self._lock = threading.Lock()
         self.status, self.prompt, self.answer, self.outcome, self.error = "idle", "", "", "", ""
@@ -450,21 +457,62 @@ class Session:
 
     def configure(self, backend: str, model: str, max_steps: int, timeout: float,
                   run_summaries: bool | None = None,
-                  schedule_timeout: float | None = None) -> bool:
-        """Switch backend, model, step limit, prompt timeout, run summaries, and schedule timeout between requests; refused while one runs."""
+                  schedule_timeout: float | None = None,
+                  search_provider: str | None = None) -> bool:
+        """Switch backend, model, step limit, prompt timeout, run summaries, schedule timeout, and search provider between requests; refused while one runs."""
         with self._lock:
             if self.status == "running":
                 return False
-            self._run_id += 1
-            if (backend, model, max_steps) != (self.backend, self.model, self.max_steps):
-                self.agent = build_agent(model, "tool", max_steps, "generic", backend)
+            provider_changed = search_provider is not None and search_provider != self.search_provider
+            rebuild = ((backend, model, max_steps) != (self.backend, self.model, self.max_steps)
+                       or provider_changed)
+            if rebuild:
+                saved_agent = self.agent
+                saved_env = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
+                if provider_changed:
+                    os.environ["SMOLPAW_SEARCH_PROVIDER"] = search_provider
+                try:
+                    self.agent = build_agent(model, "tool", max_steps, "generic", backend)
+                except Exception:
+                    if provider_changed:
+                        if saved_env is not None:
+                            os.environ["SMOLPAW_SEARCH_PROVIDER"] = saved_env
+                        else:
+                            os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
+                        g.apply_search_provider()
+                    self.agent = saved_agent
+                    return False
                 self.backend, self.model, self.max_steps = backend, model, max_steps
+                if provider_changed:
+                    self.search_provider = search_provider
+            self._run_id += 1
             self.approvals.timeout = timeout
             if run_summaries is not None:
                 self.run_summaries = run_summaries
             if schedule_timeout is not None:
                 self.schedule_timeout = float(schedule_timeout)
             return True
+
+
+def _has_web_search(agent) -> bool:
+    """Whether web_search tool is in the agent's toolset."""
+    if not agent:
+        return False
+    tools = getattr(agent, "tools", None)
+    if isinstance(tools, dict):
+        return "web_search" in tools
+    if isinstance(tools, (list, tuple, set)):
+        return any(getattr(t, "name", t) == "web_search" or t == "web_search" for t in tools)
+    return False
+
+
+def _current_search_provider(session: Session | None) -> str:
+    """Current search provider name, falling back to ddgs if unset or invalid."""
+    if session:
+        return session.search_provider
+    raw = os.environ.get("SMOLPAW_SEARCH_PROVIDER", "").strip().lower() or "ddgs"
+    valid = set(g.SEARCH_PROVIDERS.keys()) | {"none"}
+    return raw if raw in valid else "ddgs"
 
 
 def list_models(backend: str) -> list[str]:
@@ -784,6 +832,13 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, {
                     **info, "can_run": s is not None,
                     "schedules_error": _schedules_error(),
+                    "search": {
+                        "provider": _current_search_provider(s),
+                        "web_search": _has_web_search(s.agent) if s else False,
+                        "fetch_page": True,
+                        "providers": [p for p in sorted(g.SEARCH_PROVIDERS.keys()) if p != "none"] + ["none"],
+                        "url_configured": bool(os.environ.get("SMOLPAW_SEARCH_URL", "").strip()),
+                    },
                     **({"backends": sorted(BACKENDS), "backend": s.backend, "model": s.model,
                         "max_steps": s.max_steps, "timeout": approvals.timeout,
                         "run_summaries": s.run_summaries,
@@ -869,6 +924,18 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 steps, timeout = body.get("max_steps"), body.get("timeout")
                 summaries = body.get("run_summaries", session.run_summaries)
                 sched_timeout = body.get("schedule_timeout", session.schedule_timeout)
+                search_provider = None
+                if "search_provider" in body:
+                    raw_sp = body["search_provider"]
+                    valid_providers = set(g.SEARCH_PROVIDERS.keys()) | {"none"}
+                    if (isinstance(raw_sp, bool)
+                            or not isinstance(raw_sp, str)
+                            or len(raw_sp) > 50
+                            or raw_sp != raw_sp.strip()
+                            or raw_sp != raw_sp.lower()
+                            or raw_sp not in valid_providers):
+                        return self._send(400, {"error": "invalid settings"})
+                    search_provider = raw_sp
                 if (backend not in BACKENDS or not isinstance(model, str) or not model.strip()
                         or len(model) > 200 or isinstance(steps, bool) or not isinstance(steps, int)
                         or not 1 <= steps <= 50 or isinstance(timeout, bool)
@@ -880,7 +947,8 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                         or not 0 <= sched_timeout <= 86400):
                     return self._send(400, {"error": "invalid settings"})
                 ok = session.configure(backend, model.strip(), steps, float(timeout), summaries,
-                                       schedule_timeout=float(sched_timeout))
+                                       schedule_timeout=float(sched_timeout),
+                                       search_provider=search_provider)
                 return self._send(200 if ok else 409, {"ok": ok})
             if path == "/api/stop" and session:
                 session.stop()
@@ -1157,6 +1225,8 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <h3>Step limit</h3><input id="ssteps" type="number" min="1" max="50">
     <h3>Prompt timeout (seconds, 0 waits forever)</h3><input id="stimeout" type="number" min="0" max="3600">
     <h3>Scheduled-run time limit (seconds, 0 disables)</h3><input id="sschedtimeout" type="number" min="0" max="86400">
+    <h3>Web search provider</h3><select id="ssearchprovider"></select>
+    <div class="meta" id="ssearchhint" hidden></div>
     <h3>Run summaries</h3><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input id="ssummaries" type="checkbox"> Model-written one-sentence summaries for recent runs</label>
     <div class="row"><button id="sapply">Apply</button></div>
     <div class="meta" id="smsg"></div>
@@ -1253,6 +1323,14 @@ async function loadFiles() {
   } catch (e) {}
 }
 let setLoaded = false;
+let searchUrlConfigured = false;
+function updateSearchHint() {
+  const isSearxng = $("ssearchprovider").value === "searxng";
+  const showHint = isSearxng && !searchUrlConfigured;
+  const hint = $("ssearchhint");
+  hint.hidden = !showHint;
+  hint.textContent = showHint ? "Set SMOLPAW_SEARCH_URL in your environment to use SearXNG." : "";
+}
 async function loadModels() {
   try {
     const models = await api("/api/models?backend=" + encodeURIComponent($("sbackend").value));
@@ -1272,8 +1350,18 @@ function fillSettings(s) {
   sel.value = s.backend; $("smodel").value = s.model;
   $("ssteps").value = s.max_steps; $("stimeout").value = s.timeout;
   $("sschedtimeout").value = s.schedule_timeout;
+  if (s.search) {
+    const selSearch = $("ssearchprovider");
+    for (const p of s.search.providers || []) {
+      const o = document.createElement("option"); o.value = o.textContent = p; selSearch.appendChild(o);
+    }
+    selSearch.value = s.search.provider;
+    searchUrlConfigured = !!s.search.url_configured;
+    updateSearchHint();
+  }
   $("ssummaries").checked = !!s.run_summaries;
 }
+$("ssearchprovider").onchange = updateSearchHint;
 $("sbackend").onchange = () => { $("smodel").value = ""; loadModels(); };
 $("setcard").ontoggle = () => { if ($("setcard").open) { loadModels(); loadFiles(); } };
 $("sapply").onclick = async () => {
@@ -1282,7 +1370,8 @@ $("sapply").onclick = async () => {
     body: JSON.stringify({backend: $("sbackend").value, model: $("smodel").value,
       max_steps: parseInt($("ssteps").value, 10), timeout: Number($("stimeout").value),
       schedule_timeout: $("sschedtimeout").value.trim() === "" ? undefined : Number($("sschedtimeout").value),
-      run_summaries: $("ssummaries").checked})});
+      run_summaries: $("ssummaries").checked,
+      search_provider: $("ssearchprovider").value})});
   $("smsg").textContent = r.ok ? "Applied." : r.status === 409 ? "A request is running; try again when it finishes." : "Invalid settings.";
   refresh();
 };
@@ -1672,6 +1761,7 @@ async function refresh() {
   $("runcard").hidden = !s.can_run;
   $("setform").hidden = !s.can_run;
   if (s.can_run) fillSettings(s);
+  if (s.search) { searchUrlConfigured = !!s.search.url_configured; updateSearchHint(); }
   $("sapply").disabled = s.status === "running";
   $("run").disabled = s.status === "running"; $("stop").disabled = s.status !== "running";
   $("working").hidden = s.status !== "running";

@@ -2040,6 +2040,165 @@ check("web page contains scheduled-run time limit input", 'id="sschedtimeout"' i
 check("the page fills the field from /api/state", '$("sschedtimeout").value = s.schedule_timeout' in page_html)
 check("the page sends the field on Apply, and omits it when the field is empty (an empty number field is 0, which would turn the limit off)",
       'schedule_timeout: $("sschedtimeout").value.trim() === "" ? undefined' in page_html)
+
+# search provider in settings (#83)
+saved_sp_env = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
+saved_sp_url = os.environ.get("SMOLPAW_SEARCH_URL")
+saved_generic_tools = list(g.GENERIC_TOOLS)
+saved_providers = dict(g.SEARCH_PROVIDERS)
+g.SEARCH_PROVIDERS["fake"] = lambda q, n: [{"title": "Fake", "url": "https://fake.example", "snippet": "fake snippet"}]
+
+try:
+    # Session startup initialization
+    os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
+    dummy_a = type("DummyAgent", (), {"model": lambda *a, **k: None})()
+    check("Session startup with unset env defaults search_provider to ddgs",
+          web.Session(dummy_a, "m", web.Approvals(), run_summaries=False).search_provider == "ddgs")
+    os.environ["SMOLPAW_SEARCH_PROVIDER"] = "searxng"
+    check("Session startup with searxng env sets search_provider to searxng",
+          web.Session(dummy_a, "m", web.Approvals(), run_summaries=False).search_provider == "searxng")
+    os.environ["SMOLPAW_SEARCH_PROVIDER"] = "none"
+    check("Session startup with none env sets search_provider to none",
+          web.Session(dummy_a, "m", web.Approvals(), run_summaries=False).search_provider == "none")
+    os.environ["SMOLPAW_SEARCH_PROVIDER"] = "invalid_provider_name"
+    check("Session startup with invalid env falls back to ddgs without raising",
+          web.Session(dummy_a, "m", web.Approvals(), run_summaries=False).search_provider == "ddgs")
+    os.environ["SMOLPAW_SEARCH_PROVIDER"] = "   "
+    check("Session startup with empty env falls back to ddgs",
+          web.Session(dummy_a, "m", web.Approvals(), run_summaries=False).search_provider == "ddgs")
+
+    # State reports search object
+    st = http.get(f"{set_base}/api/state", headers=hdr, timeout=5).json()
+    check("/api/state includes search object", "search" in st and isinstance(st["search"], dict))
+    sinfo = st["search"]
+    check("search object has exact expected keys",
+          set(sinfo.keys()) == {"provider", "web_search", "fetch_page", "providers", "url_configured"})
+    check("fetch_page is always true", sinfo["fetch_page"] is True)
+    check("providers contains valid names and none",
+          set(sinfo["providers"]) == set(g.SEARCH_PROVIDERS.keys()) | {"none"})
+    check("url_configured reflects unset SMOLPAW_SEARCH_URL", sinfo["url_configured"] is False)
+    check("initial search provider is reported", sinfo["provider"] == set_sess.search_provider)
+
+    # Valid provider accepted
+    r = http.post(f"{set_base}/api/settings", json={**good, "search_provider": "fake"}, headers=hdr, timeout=5)
+    st = http.get(f"{set_base}/api/state", headers=hdr, timeout=5).json()
+    check("valid provider accepted with 200", r.status_code == 200)
+    check("session search_provider updated to fake", set_sess.search_provider == "fake")
+    check("SMOLPAW_SEARCH_PROVIDER environment set to fake", os.environ.get("SMOLPAW_SEARCH_PROVIDER") == "fake")
+    check("agent rebuilt with web_search in toolset",
+          st["search"]["provider"] == "fake" and st["search"]["web_search"] is True and "web_search" in set_sess.agent.tools)
+
+    # 'none' removes web_search from toolset and a later valid provider puts it back
+    r_none = http.post(f"{set_base}/api/settings", json={**good, "search_provider": "none"}, headers=hdr, timeout=5)
+    st_none = http.get(f"{set_base}/api/state", headers=hdr, timeout=5).json()
+    check("'none' accepted with 200", r_none.status_code == 200)
+    check("session search_provider updated to none", set_sess.search_provider == "none")
+    check("SMOLPAW_SEARCH_PROVIDER environment set to none", os.environ.get("SMOLPAW_SEARCH_PROVIDER") == "none")
+    check("none removes web_search from agent toolset",
+          st_none["search"]["provider"] == "none" and st_none["search"]["web_search"] is False
+          and "web_search" not in set_sess.agent.tools)
+
+    r_back = http.post(f"{set_base}/api/settings", json={**good, "search_provider": "fake"}, headers=hdr, timeout=5)
+    st_back = http.get(f"{set_base}/api/state", headers=hdr, timeout=5).json()
+    check("later valid provider puts web_search back in toolset",
+          r_back.status_code == 200 and st_back["search"]["provider"] == "fake"
+          and st_back["search"]["web_search"] is True and "web_search" in set_sess.agent.tools)
+
+    # Invalid providers refused with 400 and leave provider and env unchanged
+    for label, bad_sp in [
+        ("unknown name", "unknown_engine"),
+        ("number", 42),
+        ("bool", True),
+        ("list", ["fake"]),
+        ("null", None),
+        ("empty string", ""),
+        ("uppercase", "FAKE"),
+        ("mixed case", "Fake"),
+        ("padded with spaces", " fake "),
+        ("over-long", "fake" * 50),
+    ]:
+        cur_sp = set_sess.search_provider
+        cur_env = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
+        payload = json.dumps({**good, "search_provider": bad_sp})
+        r_bad = http.post(f"{set_base}/api/settings", data=payload,
+                          headers={"Content-Type": "application/json", **hdr}, timeout=5)
+        check(f"search_provider refuses {label} with 400 and leaves value unchanged",
+              r_bad.status_code == 400 and set_sess.search_provider == cur_sp
+              and os.environ.get("SMOLPAW_SEARCH_PROVIDER") == cur_env)
+
+    # Missing key leaves provider unchanged
+    cur_sp = set_sess.search_provider
+    r_missing = http.post(f"{set_base}/api/settings", json=good, headers=hdr, timeout=5)
+    check("missing search_provider key leaves provider unchanged",
+          r_missing.status_code == 200 and set_sess.search_provider == cur_sp)
+
+    # 409 while a run is in progress with provider and environment unchanged
+    set_sess.status = "running"
+    cur_sp = set_sess.search_provider
+    cur_env = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
+    cur_agent = set_sess.agent
+    r_run = http.post(f"{set_base}/api/settings", json={**good, "search_provider": "none"}, headers=hdr, timeout=5)
+    check("search_provider change refused with 409 while running",
+          r_run.status_code == 409 and set_sess.search_provider == cur_sp
+          and os.environ.get("SMOLPAW_SEARCH_PROVIDER") == cur_env and set_sess.agent is cur_agent)
+    set_sess.status = "idle"
+
+    # Failing rebuild leaves provider, environment and agent unchanged
+    cur_sp = set_sess.search_provider
+    cur_env = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
+    cur_agent = set_sess.agent
+    saved_build_agent = web.build_agent
+    web.build_agent = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rebuild failed"))
+    try:
+        r_fail = http.post(f"{set_base}/api/settings", json={**good, "search_provider": "none"}, headers=hdr, timeout=5)
+        check("failing rebuild returns 409 and leaves provider, environment and agent unchanged",
+              r_fail.status_code == 409 and set_sess.search_provider == cur_sp
+              and os.environ.get("SMOLPAW_SEARCH_PROVIDER") == cur_env and set_sess.agent is cur_agent)
+    finally:
+        web.build_agent = saved_build_agent
+
+    # No credentials in /api/state or settings error bodies
+    secret_url = "http://user:SECRETPASS@host.example:8080/path"
+    os.environ["SMOLPAW_SEARCH_URL"] = secret_url
+    st_secret = http.get(f"{set_base}/api/state", headers=hdr, timeout=5)
+    st_text = st_secret.text
+    st_json = st_secret.json()
+    check("url_configured is True when SMOLPAW_SEARCH_URL is set", st_json["search"]["url_configured"] is True)
+    check("SECRETPASS absent from /api/state body", "SECRETPASS" not in st_text)
+    check("host.example absent from /api/state body", "host.example" not in st_text)
+    check("whole URL absent from /api/state body", secret_url not in st_text)
+
+    r_err = http.post(f"{set_base}/api/settings", json={**good, "search_provider": "bogus"}, headers=hdr, timeout=5)
+    err_text = r_err.text
+    check("SECRETPASS absent from /api/settings error body", "SECRETPASS" not in err_text)
+    check("host.example absent from /api/settings error body", "host.example" not in err_text)
+    check("whole URL absent from /api/settings error body", secret_url not in err_text)
+
+    # Page presence checks (presence checks only; repo has no browser test harness)
+    page_html = http.get(f"{set_base}/?t={token}", timeout=5).text
+    check("page presence: contains select id ssearchprovider", 'id="ssearchprovider"' in page_html)
+    check("page presence: contains hint id ssearchhint", 'id="ssearchhint"' in page_html)
+    check("page presence: populates select from search.providers", "s.search.providers" in page_html)
+    check("page presence: sets select value from search.provider", "selSearch.value = s.search.provider" in page_html)
+    check("page presence: sends search_provider with Apply", 'search_provider: $("ssearchprovider").value' in page_html)
+    check("page presence: contains searxng hint text", "Set SMOLPAW_SEARCH_URL in your environment to use SearXNG." in page_html)
+    check("page presence: shows hint when searxng chosen and url not configured",
+          '$("ssearchprovider").value === "searxng"' in page_html and "!searchUrlConfigured" in page_html)
+    check("page presence: uses textContent, no innerHTML in search provider wiring",
+          "textContent" in page_html and "innerHTML" not in page_html.split("ssearchprovider")[1].split("ssummaries")[0])
+
+finally:
+    if saved_sp_env is not None:
+        os.environ["SMOLPAW_SEARCH_PROVIDER"] = saved_sp_env
+    else:
+        os.environ.pop("SMOLPAW_SEARCH_PROVIDER", None)
+    if saved_sp_url is not None:
+        os.environ["SMOLPAW_SEARCH_URL"] = saved_sp_url
+    else:
+        os.environ.pop("SMOLPAW_SEARCH_URL", None)
+    g.GENERIC_TOOLS[:] = saved_generic_tools
+    g.SEARCH_PROVIDERS.clear()
+    g.SEARCH_PROVIDERS.update(saved_providers)
 check("models endpoint refuses an unknown backend",
       http.get(f"{set_base}/api/models?backend=x", headers=hdr, timeout=5).status_code == 404)
 saved_list_models = web.list_models
