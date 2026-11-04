@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import random
 import re
+import subprocess
 import time
 
 REAL_WORKSPACE = (Path(__file__).resolve().parent.parent / "workspace").resolve()
@@ -234,15 +235,20 @@ def _mail(ws: Path, rng: random.Random) -> Case:
     deadlines = []
     for i in range(3):
         first, last = reply_senders[i].split()
-        expects.append(rf"\b{re.escape(first)}(?:\s+{re.escape(last)})?\b")
+        name_re = rf"\b{re.escape(first)}(?:\s+{re.escape(last)})?\b"
+        others = "|".join(rf"\b{re.escape(reply_senders[j].split()[0])}\b" for j in range(3) if j != i)
+        gap = rf"(?:(?!{others})[^\n.;]){{0,150}}"  # same sentence, and no other sender's name in between
         d = deadline_days[i]
         h = deadline_hours[i]
         h12 = h % 12 or 12
         ampm = "am" if h < 12 else "pm"
-        date_re = rf"(?:\b{d}\b\s*Nov|Nov\s*\b{d}\b)"
+        ordinal = r"(?:st|nd|rd|th)?"
+        date_re = rf"(?:\b{d}{ordinal}\b\s*(?:of\s+)?Nov(?:ember)?|Nov(?:ember)?\.?\s*{d}{ordinal}\b|\b2026-11-{d:02d}\b)"
         time_re = rf"(?:{h:02d}:00|{h12}(?::00)?\s*{ampm})"
         deadlines.append(f"{d} Nov {h:02d}:00")
-        expects.append(rf"(?i)(?:{date_re}.*{time_re}|{time_re}.*{date_re})")
+        when_re = rf"(?:{date_re}[^\n]{{0,40}}?{time_re}|{time_re}[^\n]{{0,40}}?{date_re})"
+        # the sender and their own deadline together, in either order: a deadline swapped between senders must fail
+        expects.append(rf"(?i)(?:{name_re}{gap}{when_re}|{when_re}{gap}{name_re})")
 
     decoys = [nl_sender, nr_sender]
     expects.append(_none_of(decoys))
@@ -319,14 +325,20 @@ def _calendar(ws: Path, rng: random.Random) -> Case:
         rf"{re.escape(b2b_b)}.*{re.escape(b2b_a)}",
     ], raw=True)
 
+    def pair_re(a: str, b: str) -> str:
+        """Both titles of an overlapping pair in one sentence with no other event's title between them, in either
+        order (a wrongly paired answer must fail)."""
+        rest = "|".join(re.escape(t) for t in titles if t not in (a, b))
+        gap = rf"(?:(?!{rest})[^\n.;]){{0,200}}"
+        return rf"(?i)(?:{re.escape(a)}{gap}{re.escape(b)}|{re.escape(b)}{gap}{re.escape(a)})"
+
     expects = [
-        re.escape(titles[0]),
-        re.escape(titles[1]),
+        pair_re(titles[0], titles[1]),
         ov1_time_re,
-        re.escape(titles[2]),
-        re.escape(titles[3]),
+        pair_re(titles[2], titles[3]),
         ov2_time_re,
         b2b_pattern,
+        _none_of([titles[6]]),  # the overnight event overlaps nothing
     ]
 
     prompt = "List every pair of events in calendar.json that overlap, with times."
@@ -404,16 +416,22 @@ def _disk(ws: Path, rng: random.Random) -> Case:
     biggest_folder = folder_names[0]
     decoy_folder = folder_names[1]
     biggest_total = f0_total
-    biggest_total_comma = f"{biggest_total:,}"
+    totals = {biggest_total}  # the sum of file sizes; `du -sk` rounds each file up to whole blocks, so accept that too
+    try:
+        out = subprocess.run(["du", "-sk", str(data_dir / biggest_folder)], capture_output=True, text=True, timeout=10)
+        totals.add(int(out.stdout.split()[0]))
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        pass
+    totals_re = "|".join(f"{t}|{t:,}" for t in sorted(totals))
 
     num_start = r"(?<![\d,])"
-    pat_fwd = rf"{re.escape(biggest_folder)}[^.!?\n]*{num_start}(?!(?:{biggest_total}|{biggest_total_comma})\s*kb)\d+[\d,]*\s*kb"
-    pat_rev = rf"{num_start}(?!(?:{biggest_total}|{biggest_total_comma})\s*kb)\d+[\d,]*\s*kb[^.!?\n]*{re.escape(biggest_folder)}"
+    pat_fwd = rf"{re.escape(biggest_folder)}[^.!?\n]*{num_start}(?!(?:{totals_re})\s*kb)\d+[\d,]*\s*kb"
+    pat_rev = rf"{num_start}(?!(?:{totals_re})\s*kb)\d+[\d,]*\s*kb[^.!?\n]*{re.escape(biggest_folder)}"
     no_wrong_num = rf"(?si)^(?!.*(?:{pat_fwd}|{pat_rev}))"
 
     expects = [
         re.escape(biggest_folder),
-        rf"(?i)\b(?:{biggest_total}|{biggest_total_comma})\s*kb\b",
+        rf"(?i)\b(?:{totals_re})\s*kb\b",
         no_wrong_num,
         _none_of([decoy_folder]),
     ]
@@ -422,6 +440,7 @@ def _disk(ws: Path, rng: random.Random) -> Case:
     details = {
         "biggest_folder": biggest_folder,
         "biggest_total": biggest_total,
+        "accepted_totals": sorted(totals),
         "decoy_folder": decoy_folder,
         "max_file_size": M,
     }

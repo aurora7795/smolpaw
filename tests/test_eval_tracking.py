@@ -488,6 +488,17 @@ for seed in (0, 1, 2):
     mail_right = f"{s1}: {d1}. {s2}: {d2}. {s3}: {d3}."
 
     check(f"mail_summary (seed {seed}): right answer passes", sok("mail_summary", mail_right))
+    check(f"mail_summary (seed {seed}): deadlines swapped between two senders fail",
+          not sok("mail_summary", f"{s1}: {d2}. {s2}: {d1}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): deadlines swapped in one comma-separated sentence fail",
+          not sok("mail_summary", f"{s1}: {d2}, {s2}: {d1}, {s3}: {d3}"))
+    day1, hour1 = md["deadline_days"][0], md["deadline_hours"][0]
+    for label, when in [("November 14 style", f"November {day1}, {hour1:02d}:00"), ("14th November style", f"{day1}th November at {hour1:02d}:00"),
+                        ("ISO date", f"2026-11-{day1:02d} {hour1:02d}:00"), ("12-hour time", f"Nov {day1} at {hour1 % 12 or 12} {'am' if hour1 < 12 else 'pm'}")]:
+        check(f"mail_summary (seed {seed}): {label} passes",
+              sok("mail_summary", f"{s1}: {when}. {s2}: {d2}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): one line per sender with the deadline first passes",
+          sok("mail_summary", f"{d1} - {s1}\n{d2} - {s2}\n{d3} - {s3}"))
     check(f"mail_summary (seed {seed}): decoy newsletter fails", not sok("mail_summary", mail_right + f" {nl}: 20 Nov 12:00."))
     check(f"mail_summary (seed {seed}): decoy no-reply fails", not sok("mail_summary", mail_right + f" {nr}: 22 Nov 08:00."))
     check(f"mail_summary (seed {seed}): missing sender 1 fails", not sok("mail_summary", f"{d1}. {s2}: {d2}. {s3}: {d3}."))
@@ -521,6 +532,10 @@ for seed in (0, 1, 2):
     check(f"calendar_conflicts (seed {seed}): right answer passes", sok("calendar_conflicts", cal_right))
     check(f"calendar_conflicts (seed {seed}): back-to-back pair together fails",
           not sok("calendar_conflicts", cal_right + f" Also {b2b[0]} and {b2b[1]} overlap."))
+    check(f"calendar_conflicts (seed {seed}): titles paired across the two overlaps fail",
+          not sok("calendar_conflicts", f"{p1[0]} and {p2[1]} overlap at {p1[2]}. {p2[0]} and {p1[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): the overnight event named as a conflict fails",
+          not sok("calendar_conflicts", cal_right + f" {cd['night']} also overlaps."))
     check(f"calendar_conflicts (seed {seed}): back-to-back event 1 alone passes",
           sok("calendar_conflicts", cal_right + f" Note: {b2b[0]} is not a conflict."))
     check(f"calendar_conflicts (seed {seed}): back-to-back event 2 alone passes",
@@ -560,6 +575,8 @@ for seed in (0, 1, 2):
     disk_right = f"Subfolder {bf} uses the most space with a total size of {bt} KB."
 
     check(f"disk_report (seed {seed}): right answer passes", sok("disk_report", disk_right))
+    check(f"disk_report (seed {seed}): every accepted total passes (file sizes added up, and du -sk)",
+          all(sok("disk_report", f"Subfolder {bf} uses {t} KB.") for t in dd["accepted_totals"]) and bt in dd["accepted_totals"])
     check(f"disk_report (seed {seed}): comma formatted size passes", sok("disk_report", f"{bf}: {bt:,} KB"))
     check(f"disk_report (seed {seed}): no space formatted size passes", sok("disk_report", f"{bf}: {bt}KB"))
     check(f"disk_report (seed {seed}): decoy folder fails", not sok("disk_report", disk_right + f" {df} has the biggest file."))
