@@ -154,7 +154,7 @@ Open the printed URL. On a wide screen the page has a sidebar (Chat, Settings, R
 | `--backend`, `--model`, `--max-steps` | as for `agent.py` | Generic toolset only |
 | `--host` | `127.0.0.1` | `0.0.0.0` to reach it from other devices |
 | `--port` | 8770 | |
-| `--timeout` | 0 (wait forever) | Seconds before an unanswered prompt counts as no. These flags and environment variables set the starting values; the Settings card changes them without a restart |
+| `--timeout` | 0 (wait forever) | Seconds before an unanswered prompt counts as no. These flags set the starting values; the Settings card changes them without a restart |
 
 The confirmation rules are the same as in the terminal; only where you answer changes. Every request must carry the access token (random per start, or fixed with `SMOLPAW_WEB_TOKEN` in `.env` so a bookmark keeps working). Only a real Yes approves: a wrong token, a stale prompt or a timeout counts as no. Keys are redacted from everything the page shows. Anyone with the URL can approve shell commands as you, so keep it on a private network and do not forward the port to the internet. The server is plain HTTP; over Tailscale the connection is encrypted by the tunnel.
 

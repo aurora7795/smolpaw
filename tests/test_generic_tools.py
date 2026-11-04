@@ -2184,8 +2184,16 @@ try:
     check("page presence: contains searxng hint text", "Set SMOLPAW_SEARCH_URL in your environment to use SearXNG." in page_html)
     check("page presence: shows hint when searxng chosen and url not configured",
           '$("ssearchprovider").value === "searxng"' in page_html and "!searchUrlConfigured" in page_html)
-    check("page presence: uses textContent, no innerHTML in search provider wiring",
-          "textContent" in page_html and "innerHTML" not in page_html.split("ssearchprovider")[1].split("ssummaries")[0])
+    check("page presence: fills the select with one option per provider", "selSearch.appendChild(o)" in page_html)
+    check("page presence: hint refreshes when the choice changes",
+          '$("ssearchprovider").onchange = updateSearchHint;' in page_html)
+    check("page presence: hint is unhidden for searxng without a URL", "hint.hidden = !showHint;" in page_html)
+    check("page presence: refresh updates the URL flag",
+          "searchUrlConfigured = !!s.search.url_configured; updateSearchHint();" in page_html)
+    search_js = page_html.split("let searchUrlConfigured")[1].split("async function loadModels")[0]
+    search_js += page_html.split("if (s.search) {")[1].split("}")[0]
+    check("page presence: uses textContent, no innerHTML in the search provider wiring",
+          "textContent" in search_js and "innerHTML" not in search_js)
 
 finally:
     if saved_sp_env is not None:
