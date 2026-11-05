@@ -375,8 +375,12 @@ check("parse errors are counted for native-history logs only, bad files skipped"
       and res["m"]["with"] == [1, 1] and res["m"]["without"] == [1, 0] and res["m"]["texts"]["boom"] == 1)
 
 # --- housekeeping fixture: each case passes on the right answer and fails on a decoy --------
+import hashlib  # noqa: E402
+import subprocess  # noqa: E402
+
 hk_ws = Path(tempfile.mkdtemp(prefix="hk-"))
-hk_cases = {c.name: c for c in hk.build(hk_ws)}
+hk_case_list = hk.build(hk_ws, seed=0)
+hk_cases = {c.name: c for c in hk_case_list}
 
 
 def hk_ok(name: str, answer: str) -> bool:
@@ -389,7 +393,50 @@ def hk_summary(text: str | None) -> bool:
     return hk_cases["weekly_summary"].check(hk_ws)[0]
 
 
-check("housekeeping: all five cases are built", sorted(hk_cases) == sorted(hk.HOUSEKEEPING_CASES))
+check("housekeeping: all eight cases are built in order", [c.name for c in hk_case_list] == hk.HOUSEKEEPING_CASES)
+
+# Verify seed 0 files of the first five chores match main baseline byte for byte
+SEED0_BASELINE = {
+    "app.log": (20078, "7163a5ac07ce5657566ee32b7cf21facad827c17ea4276e6c8cec936242921dc"),
+    "cleanup/new_scan.pdf": (184320, "11678e65405e7b33eaef416881ad3985234f8d17bcba9f1fbe9f04c45dbea48c"),
+    "cleanup/new_video.mp4": (409600, "8e34db766c53592aa06a8c59252209b819e92bda8f1f57b8ec483432b2e25fbd"),
+    "cleanup/old_archive.zip": (153600, "cf89f3924fe219489a60a8bf5440525d0d01203a669e5d653e58554f9ad38033"),
+    "cleanup/old_footage.mp4": (256000, "6611a3a60def9e1902a7f4931fc260960f96ad80fa2cb514f812a655400615dd"),
+    "cleanup/old_installer.dmg": (307200, "def89517b7d1690aac7628fccbe266a6c5b30c4bc4e4e226b2f32e27a370a588"),
+    "cleanup/old_note.txt": (2048, "1d1801f753ccd9fa57966c46f360585caf83337a394a5f238d4e4e7d6005788d"),
+    "cleanup/old_receipt.pdf": (20480, "9f7c43699b2162d78b1bd59765ff87b1f8d50836451d244478cfa4a6dc5d73f9"),
+    "downloads/album.pdf": (277504, "4159e733e145195e20962800706c0693b980f8ff9ba5b78e70f68f3f488bdcb6"),
+    "downloads/archive.jpg": (70656, "798bad1c184a8cbde27bbb74477f49761d8c16c7421404eb67e507eb878e5bea"),
+    "downloads/backup.zip": (400384, "4e0625114c424d8b8537a618e13f2619941843b70aea36658f83e02f225935d0"),
+    "downloads/budget.jpg": (15360, "448e72d5a77b0f93e7f5d3d2527a3a4df984c0cf2064829e971d168bcec2c6cd"),
+    "downloads/design.dmg": (324608, "3edfa4c0c7c7e186c70400818dc95bb108b68e243ed8fdb3392c560d261cc7a1"),
+    "downloads/draft.jpg": (186368, "37083a9a3b6ea9b2b68415aaf83e486a2fbec9f0951ad78d00f480002819a846"),
+    "downloads/holiday.zip": (123904, "7e6a67e4ccc4f904c5b1bc937f26a5d3c8251827baf5bcea9efd9602bf5b30b1"),
+    "downloads/invoice.txt": (258048, "3f4aaac6c4b3ca30fea8aae72a97cc5a65a14adf72640cf00d7ed92ed2c21534"),
+    "downloads/lecture.txt": (163840, "ece332d5a8bd5bbbfbb24397d48d3ff24f1c5bb6e9aabed1f920c93763003450"),
+    "downloads/manual.jpg": (240640, "39c0782be6419b4a42f2366ccf5765c5f994a8c6bc9cc1bf7d31a0709d51c681"),
+    "downloads/movie.txt": (314368, "9034973ad6cf6e720709ca0e944d71b877760b356e7163c4e85d8a720867875a"),
+    "downloads/notes.jpg": (311296, "ef3430d115575b3e47d17923261a6cbc00a98e42eb399f2b5d055b77270711b5"),
+    "downloads/photos.zip": (320512, "5f0a1ccfa5b20b0ed546784cf2e394fd57caf4b6dafacf5c8ba22a16e9db5014"),
+    "downloads/recipe.txt": (189440, "530c25988d4387dfe0fe004f21f83c4e5ee745e37b0285590d6662b3062c46a1"),
+    "downloads/report.pdf": (331776, "6d3e526e6c05f2b90f26b5c913a6303539d6ad5ac47e65e8ace6e957f4053557"),
+    "downloads/scan.pdf": (263168, "cb04ea34863db251a1befda049ed2a0147e2701ea94b7572561e69b4f8cd5aa7"),
+    "downloads/setup.zip": (8192, "18f8d2eb4a387bbc1e37ec099a7326805739bc9c99ecf0f14b808a5bcb65bf49"),
+    "downloads/slides.txt": (202752, "94f050134658d66a28e932a6372d018038ab07a29f2a45dc9fd74e59f1a9e1b4"),
+    "downloads/tax.mp4": (58368, "c6134b89621ef559f77d80e53306c4a500ece7dbb04ad7f42bae25dd02305607"),
+    "downloads/ticket.zip": (386048, "03416b485c4439d8588bc6918f5c2aa03dd9d9a6b5315ea98d0ecca50673a251"),
+    "notes.md": (993, "eed20b2eaebb5f0089929437abf932ca9a48709eb4fa536897e3a1d2ff0c09cc"),
+    "queue.json": (1888, "c20ca44556b66252836df08b445481e123c21fd5e8e869d4ae9d3d0075567d55"),
+}
+baseline_match = all(
+    (hk_ws / rel).is_file()
+    and (hk_ws / rel).stat().st_size == exp_sz
+    and hashlib.sha256((hk_ws / rel).read_bytes()).hexdigest() == exp_sha
+    for rel, (exp_sz, exp_sha) in SEED0_BASELINE.items()
+)
+check("housekeeping: first five cases seed 0 files match main baseline byte for byte", baseline_match)
+
+# Existing chores checks
 check("log_errors: the three ERROR times pass, a WARN time added fails or one missing fails",
       hk_ok("log_errors", "03:12:07 11:48:52 19:30:15") and not hk_ok("log_errors", "03:12:07 11:48:52 19:30:15 06:05:41")
       and not hk_ok("log_errors", "03:12:07 11:48:52"))
@@ -412,6 +459,171 @@ check("weekly_summary: two lines with the three facts pass",
       hk_summary("Review moved to Thursday.\nLease (landlord) due 14 Nov.\n"))
 check("weekly_summary: six lines fail", not hk_summary("a\nb\nc\nd\ne\nThursday landlord 14 Nov\n"))
 check("weekly_summary: a missing fact fails", not hk_summary("Review moved to Thursday.\n"))
+
+# Seed difference: build(ws, seed=1) gives different data for the three new chores with the same structure
+ws_s1 = Path(tempfile.mkdtemp(prefix="hk-diff1-"))
+cases_s1 = {c.name: c for c in hk.build(ws_s1, seed=1)}
+mail_differs = (hk_cases["mail_summary"].details["reply_senders"] != cases_s1["mail_summary"].details["reply_senders"]
+                or hk_cases["mail_summary"].details["deadlines"] != cases_s1["mail_summary"].details["deadlines"])
+cal_differs = (hk_cases["calendar_conflicts"].details["pair1"] != cases_s1["calendar_conflicts"].details["pair1"]
+               or hk_cases["calendar_conflicts"].details["pair2"] != cases_s1["calendar_conflicts"].details["pair2"])
+disk_differs = (hk_cases["disk_report"].details["biggest_folder"] != cases_s1["disk_report"].details["biggest_folder"]
+                or hk_cases["disk_report"].details["biggest_total"] != cases_s1["disk_report"].details["biggest_total"])
+check("housekeeping: seed 1 generates different data with same structure",
+      mail_differs and cal_differs and disk_differs and len(cases_s1) == 8)
+
+# Loop over seeds 0, 1, 2 for the three new chores
+for seed in (0, 1, 2):
+    sws = hk_ws if seed == 0 else Path(tempfile.mkdtemp(prefix=f"hk-s{seed}-"))
+    scases = hk_cases if seed == 0 else {c.name: c for c in hk.build(sws, seed=seed)}
+
+    def sok(name: str, answer: str) -> bool:
+        return all(re.search(e, answer, re.I) for e in scases[name].expects)
+
+    # 1. mail_summary
+    mail_c = scases["mail_summary"]
+    md = mail_c.details
+    s1, s2, s3 = md["reply_senders"]
+    d1, d2, d3 = md["deadlines"]
+    nl, nr = md["decoys"]
+    mail_right = f"{s1}: {d1}. {s2}: {d2}. {s3}: {d3}."
+
+    check(f"mail_summary (seed {seed}): right answer passes", sok("mail_summary", mail_right))
+    check(f"mail_summary (seed {seed}): deadlines swapped between two senders fail",
+          not sok("mail_summary", f"{s1}: {d2}. {s2}: {d1}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): deadlines swapped in one comma-separated sentence fail",
+          not sok("mail_summary", f"{s1}: {d2}, {s2}: {d1}, {s3}: {d3}"))
+    day1, hour1 = md["deadline_days"][0], md["deadline_hours"][0]
+    for label, when in [("November 14 style", f"November {day1}, {hour1:02d}:00"), ("14th November style", f"{day1}th November at {hour1:02d}:00"),
+                        ("ISO date", f"2026-11-{day1:02d} {hour1:02d}:00"), ("12-hour time", f"Nov {day1} at {hour1 % 12 or 12} {'am' if hour1 < 12 else 'pm'}")]:
+        check(f"mail_summary (seed {seed}): {label} passes",
+              sok("mail_summary", f"{s1}: {when}. {s2}: {d2}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): one line per sender with the deadline first passes",
+          sok("mail_summary", f"{d1} - {s1}\n{d2} - {s2}\n{d3} - {s3}"))
+    check(f"mail_summary (seed {seed}): decoy newsletter fails", not sok("mail_summary", mail_right + f" {nl}: 20 Nov 12:00."))
+    check(f"mail_summary (seed {seed}): decoy no-reply fails", not sok("mail_summary", mail_right + f" {nr}: 22 Nov 08:00."))
+    check(f"mail_summary (seed {seed}): missing sender 1 fails", not sok("mail_summary", f"{d1}. {s2}: {d2}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): missing deadline 1 fails", not sok("mail_summary", f"{s1}. {s2}: {d2}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): missing sender 2 fails", not sok("mail_summary", f"{s1}: {d1}. {d2}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): missing deadline 2 fails", not sok("mail_summary", f"{s1}: {d1}. {s2}. {s3}: {d3}."))
+    check(f"mail_summary (seed {seed}): missing sender 3 fails", not sok("mail_summary", f"{s1}: {d1}. {s2}: {d2}. {d3}."))
+    check(f"mail_summary (seed {seed}): missing deadline 3 fails", not sok("mail_summary", f"{s1}: {d1}. {s2}: {d2}. {s3}."))
+
+    mp = sws / "mail" / "01.txt"
+    orig_mail = mp.read_bytes()
+    check(f"mail_summary (seed {seed}): untouched passes", mail_c.check(sws)[0])
+    mp.unlink()
+    check(f"mail_summary (seed {seed}): deleted file fails", not mail_c.check(sws)[0])
+    mp.write_bytes(orig_mail)
+    mp.write_bytes(b"")
+    check(f"mail_summary (seed {seed}): truncated file fails", not mail_c.check(sws)[0])
+    mp.write_bytes(orig_mail)
+    mp.write_bytes(orig_mail[:-1] + (b"Y" if orig_mail[-1:] != b"Y" else b"Z"))
+    check(f"mail_summary (seed {seed}): edited file fails", not mail_c.check(sws)[0])
+    mp.write_bytes(orig_mail)
+
+    # 2. calendar_conflicts
+    cal_c = scases["calendar_conflicts"]
+    cd = cal_c.details
+    p1 = cd["pair1"]
+    p2 = cd["pair2"]
+    b2b = cd["b2b"]
+    cal_right = f"Conflicts: {p1[0]} and {p1[1]} overlap at {p1[2]}. {p2[0]} and {p2[1]} overlap at {p2[2]}."
+
+    check(f"calendar_conflicts (seed {seed}): right answer passes", sok("calendar_conflicts", cal_right))
+    check(f"calendar_conflicts (seed {seed}): back-to-back pair together fails",
+          not sok("calendar_conflicts", cal_right + f" Also {b2b[0]} and {b2b[1]} overlap."))
+    check(f"calendar_conflicts (seed {seed}): titles paired across the two overlaps fail",
+          not sok("calendar_conflicts", f"{p1[0]} and {p2[1]} overlap at {p1[2]}. {p2[0]} and {p1[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): a pair split around the other pair in one sentence fails",
+          not sok("calendar_conflicts", f"{p1[0]} and {p2[0]} overlap at {p1[2]}, {p2[1]} and {p1[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): the overnight event named as a conflict fails",
+          not sok("calendar_conflicts", cal_right + f" {cd['night']} also overlaps."))
+    check(f"calendar_conflicts (seed {seed}): back-to-back event 1 alone passes",
+          sok("calendar_conflicts", cal_right + f" Note: {b2b[0]} is not a conflict."))
+    check(f"calendar_conflicts (seed {seed}): back-to-back event 2 alone passes",
+          sok("calendar_conflicts", cal_right + f" Note: {b2b[1]} is not a conflict."))
+    check(f"calendar_conflicts (seed {seed}): missing pair 1 title A fails",
+          not sok("calendar_conflicts", f"{p1[1]} overlap at {p1[2]}. {p2[0]} and {p2[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): missing pair 1 title B fails",
+          not sok("calendar_conflicts", f"{p1[0]} overlap at {p1[2]}. {p2[0]} and {p2[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): missing pair 1 time fails",
+          not sok("calendar_conflicts", f"{p1[0]} and {p1[1]}. {p2[0]} and {p2[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): missing pair 2 title A fails",
+          not sok("calendar_conflicts", f"{p1[0]} and {p1[1]} overlap at {p1[2]}. {p2[1]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): missing pair 2 title B fails",
+          not sok("calendar_conflicts", f"{p1[0]} and {p1[1]} overlap at {p1[2]}. {p2[0]} overlap at {p2[2]}."))
+    check(f"calendar_conflicts (seed {seed}): missing pair 2 time fails",
+          not sok("calendar_conflicts", f"{p1[0]} and {p1[1]} overlap at {p1[2]}. {p2[0]} and {p2[1]}."))
+
+    cal_p = sws / "calendar.json"
+    orig_cal = cal_p.read_bytes()
+    check(f"calendar_conflicts (seed {seed}): untouched passes", cal_c.check(sws)[0])
+    cal_p.unlink()
+    check(f"calendar_conflicts (seed {seed}): deleted file fails", not cal_c.check(sws)[0])
+    cal_p.write_bytes(orig_cal)
+    cal_p.write_bytes(b"")
+    check(f"calendar_conflicts (seed {seed}): truncated file fails", not cal_c.check(sws)[0])
+    cal_p.write_bytes(orig_cal)
+    cal_p.write_bytes(orig_cal[:-1] + (b"Y" if orig_cal[-1:] != b"Y" else b"Z"))
+    check(f"calendar_conflicts (seed {seed}): edited file fails", not cal_c.check(sws)[0])
+    cal_p.write_bytes(orig_cal)
+
+    # 3. disk_report
+    disk_c = scases["disk_report"]
+    dd = disk_c.details
+    bf = dd["biggest_folder"]
+    bt = dd["biggest_total"]
+    df = dd["decoy_folder"]
+    disk_right = f"Subfolder {bf} uses the most space with a total size of {bt} KB."
+
+    check(f"disk_report (seed {seed}): right answer passes", sok("disk_report", disk_right))
+    check(f"disk_report (seed {seed}): every accepted total passes (file sizes added up, and du -sk)",
+          all(sok("disk_report", f"Subfolder {bf} uses {t} KB.") for t in dd["accepted_totals"]) and bt in dd["accepted_totals"])
+    du_kb = int(subprocess.run(["du", "-sk", str(sws / "data" / bf)], capture_output=True, text=True).stdout.split()[0])
+    check(f"disk_report (seed {seed}): the total that du -sk reports passes", sok("disk_report", f"Subfolder {bf} uses {du_kb} KB."))
+    check(f"disk_report (seed {seed}): comma formatted size passes", sok("disk_report", f"{bf}: {bt:,} KB"))
+    check(f"disk_report (seed {seed}): no space formatted size passes", sok("disk_report", f"{bf}: {bt}KB"))
+    check(f"disk_report (seed {seed}): decoy folder fails", not sok("disk_report", disk_right + f" {df} has the biggest file."))
+    check(f"disk_report (seed {seed}): missing folder name fails", not sok("disk_report", f"The largest folder uses {bt} KB."))
+    check(f"disk_report (seed {seed}): missing total size fails", not sok("disk_report", f"Subfolder {bf} uses the most space."))
+    wrong_kb = bt + 100
+    check(f"disk_report (seed {seed}): wrong number in same sentence fails",
+          not sok("disk_report", f"Subfolder {bf} uses {wrong_kb} KB."))
+    check(f"disk_report (seed {seed}): wrong number in same sentence plus right number elsewhere fails",
+          not sok("disk_report", f"Subfolder {bf} uses {wrong_kb} KB. Total disk is {bt} KB."))
+
+    dp = next((sws / "data").rglob("*.dat"))
+    orig_dp = dp.read_bytes()
+    check(f"disk_report (seed {seed}): untouched passes", disk_c.check(sws)[0])
+    dp.unlink()
+    check(f"disk_report (seed {seed}): deleted file fails", not disk_c.check(sws)[0])
+    dp.write_bytes(orig_dp)
+    dp.write_bytes(b"")
+    check(f"disk_report (seed {seed}): truncated file fails", not disk_c.check(sws)[0])
+    dp.write_bytes(orig_dp)
+    dp.write_bytes(orig_dp[:-1] + (b"Y" if orig_dp[-1:] != b"Y" else b"Z"))
+    check(f"disk_report (seed {seed}): edited file fails", not disk_c.check(sws)[0])
+    dp.write_bytes(orig_dp)
+# eval.py --housekeeping --seed builds the chosen seed's data (run_once and save_results are stubbed: no model runs)
+seen_ws: list[Path] = []
+stub_run_once, stub_save, stub_print = ev.run_once, ev.save_results, ev.print_run
+ev.run_once = lambda *a, check=None, **k: {"passed": True, "check": check()}
+ev.save_results = lambda args, label, *a, **k: seen_ws.append(label)
+ev.print_run = lambda *a, **k: None
+try:
+    seed_tmp = Path(tempfile.mkdtemp(prefix="hk-eval-"))
+    for seed_arg in (0, 2):
+        ev.run_housekeeping(SimpleNamespace(seed=seed_arg, n=1, label="", backend="ollama", model="m", max_steps=1,
+                                            text_history=False), seed_tmp / f"s{seed_arg}", "disk_report", None)
+finally:
+    ev.run_once, ev.save_results, ev.print_run = stub_run_once, stub_save, stub_print
+check("eval --seed: the label names a non-zero seed and not seed 0",
+      seen_ws == ["housekeeping-disk_report", "housekeeping-disk_report-seed2"])
+want2 = hk.build(Path(tempfile.mkdtemp(prefix="hk-eval-w-")), seed=2)[-1].details["biggest_folder"]
+ws2 = seed_tmp / "s2" / "housekeeping-disk_report-1" / "data"
+sizes2 = {d.name: sum(f.stat().st_size for f in d.iterdir()) for d in ws2.iterdir()}
+check("eval --seed: seed 2 builds seed 2's data in the run workspace", max(sizes2, key=sizes2.get) == want2)
 try:
     hk.build(ROOT / "workspace" / "x")
     check("housekeeping: refuses the real workspace", False)
