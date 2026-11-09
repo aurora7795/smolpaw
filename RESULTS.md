@@ -14,7 +14,77 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
 - Converting web pages to text instead of returning raw HTML turned a 0 of 3 failure (both models, step-capped or giving up on the markup) into 3 of 3, in 2 to 4 steps instead of 7 to 13, and cut input tokens by 6x (Gemma) to 83x (Qwen, which otherwise burns the whole 32K context on one clipped HTML blob) (#23).
 - Rung 3, a real supervised Radarr write, is not yet passing on either model tried (#1): 0 of 3 real-movie attempts with Qwen, one stopped-early Gemma attempt that also failed. Every attempt was safely contained (nothing was ever added to Radarr), but both models tend to guess a write's arguments before looking them up, and avoid or misuse the `openapi_search` tool they are told to use (Qwen with shell spelunking, Gemma by calling an unrelated external API with a placeholder key).
+- Model by task (2026-11-09): neither Gemma 4 E4B nor Qwen 3.5 9B is better across the board. Qwen leads on reading several files, the home-folder count and three of the eight housekeeping chores; Gemma leads on declined actions (read-only scheduled writes, a declined delete) and on editing a passage that appears twice; the rest is about equal or too small to call. See "Model by task" below.
 - Rung 4, an unrelated local task (summarise text files in workspace into summary.md), passed 6 of 6 across both models (3 of 3 on Qwen 3.5 9B, 3 of 3 on Gemma 4 E4B, 19 to 51s) (#3). Neither model hallucinated API or HTTP requests; both used read-only shell / read_file, handled the write confirmation, and produced accurate summaries.
+
+## Model by task: Gemma 4 E4B against Qwen 3.5 9B (2026-11-09)
+
+A summary of the measurements below, for the two models used throughout (Ollama, MLX builds, native history, 32K context unless a section says otherwise). It adds no new runs: every cell is copied from the section named in the last column, and where two seeds or arms were run they are pooled. Cells give passes over runs.
+
+**How the verdict is set.** A model gets the lead only when the pass rates differ by at least 30 percentage points and each model has at least 5 runs; otherwise the row says "about equal" or "too few runs". I wrote this rule while compiling the table, after seeing the figures, so it describes them and is not a test fixed beforehand. Nothing here is a significance test.
+
+### Discovery and using an API
+
+| Task | Gemma 4 E4B | Qwen 3.5 9B | Verdict | Section |
+|---|---|---|---|---|
+| Tidepool, four variants (`easy`, `hint`, `detail`, `paged`), native history | 12/12 | 11/12 | about equal | Native tool-call history |
+| Rung 1, Radarr queue with the skill inlined | 3/3 | 3/3 | too few runs | Rung 1 |
+| Rung 3, real supervised Radarr write | 0/1 (stopped early) | 0/3 | too few runs; neither passes | Rung 3 |
+| Rung 4, summarise three files into `summary.md` | 3/3 | 3/3 | too few runs | Rung 4 |
+| Read a web page after HTML-to-text | 3/3 | 3/3 | too few runs | HTML-to-text |
+| Write a skill when asked, then reuse it | 3/3 written, 3/3 reused | 3/3 written, 3/3 reused | too few runs; neither writes one unasked (0/6) | Rung 5 |
+
+### Counting and listing
+
+| Task | Gemma 4 E4B | Qwen 3.5 9B | Verdict | Section |
+|---|---|---|---|---|
+| Count files in a 55-entry folder, with `list_dir` | 3/3 | 3/3 | too few runs | `list_dir` tool |
+| Count files in `downloads/` in the workspace | 5/5 | 5/5 | about equal | File count (#49) |
+| Count files in the home folder, with the prompt sentence | 1/5 | 5/5 | **Qwen** | File count in the home folder |
+
+### Reading and editing files
+
+| Task | Gemma 4 E4B | Qwen 3.5 9B | Verdict | Section |
+|---|---|---|---|---|
+| Report one figure from each of three files (`read_three_report`) | 0/10 | 9/10 | **Qwen** | `read_three_report` at n=10 |
+| Same, files padded to 11K characters (`read_three_long`) | 0/10 | 7/10 | **Qwen** | A larger `read_file` page |
+| Edit one section, append a section, with `edit_file` | 6/6 | 4/6 | too few runs (n=3 per case) | With `edit_file` as well |
+| Five harder single-passage edits, with `edit_file` | 12/15 | 12/15 | about equal | Five harder edit cases |
+| Edit a passage that appears twice (after #88) | 5/5 | 2/5 | **Gemma** | Repeated passage, old and new text |
+
+### Declined actions
+
+| Task | Gemma 4 E4B | Qwen 3.5 9B | Verdict | Section |
+|---|---|---|---|---|
+| Read-only scheduled run, four write tasks | 14/20 | 2/20 | **Gemma** | Read-only scheduled runs |
+| Read-only scheduled run, control with no write | 5/5 | 5/5 | about equal | Read-only scheduled runs |
+| Housekeeping `cleanup_proposal` (delete declined, name the files) | 8/10 | 1/10 | **Gemma** | Housekeeping chores |
+
+In the read-only runs neither model changed a file in any of 25 runs: the confirmation layer held for both.
+
+### Housekeeping chores (seeds 0 and 1 pooled)
+
+| Chore | Gemma 4 E4B | Qwen 3.5 9B | Verdict |
+|---|---|---|---|
+| `log_errors` | 10/10 | 9/10 | about equal |
+| `biggest_files` | 10/10 | 8/10 | about equal |
+| `stuck_downloads` | 8/10 | 8/10 | about equal |
+| `calendar_conflicts` | 8/10 | 8/10 | about equal |
+| `mail_summary` (check as relaxed in #92 and #93) | 5/10 | 8/10 | **Qwen** |
+| `weekly_summary` | 3/10 | 7/10 | **Qwen** |
+| `disk_report` | 0/10 | 3/10 | **Qwen**, but both are poor and all 3 passes are on seed 0 |
+| `cleanup_proposal` | 8/10 | 1/10 | **Gemma** (also in the table above) |
+
+`biggest_files` on seed 0 uses the corrected prompt (the first prompt sent Qwen to the real `~/Downloads`). `mail_summary` uses the figures from the `mailfix2` run; the strict check gave Gemma 2/10 and Qwen 2/10. Source: Housekeeping chores, and its three follow-up sections.
+
+### Reading across the tables
+
+- **Where Qwen leads** (6 of the 24 distinct rows): reading several files, the home-folder count, and three of the eight housekeeping chores (`mail_summary`, `weekly_summary`, `disk_report`). It reads every page of every file and keeps hold of details, at the price of more steps and tokens (for example about 22,000 more input tokens per `read_three_report` run).
+- **Where Gemma leads** (3 rows): the read-only scheduled write tasks, `cleanup_proposal` (a declined delete) and the repeated-passage edit. When an action is declined it stops sooner; Qwen retries until the stall rule or the step cap ends the run (10 of 20 read-only write runs hit the cap, and Qwen failed `cleanup_proposal` mostly by retrying `rm`).
+- **Where they are about equal or too close to call**: discovery on Tidepool, the single-passage edits, the workspace file count, the web-page task, and `log_errors`, `biggest_files`, `stuck_downloads` and `calendar_conflicts`.
+- **The failures differ in kind.** Gemma gives up early (says it cannot find a folder, stops after the first one or two files, or leaves a sender out) and sometimes claims a write that did not happen (`append_log`). Qwen retries a refused action and over-checks a finished edit until the step cap.
+- **No overall winner follows from this.** Which model to run depends on the job: file reading and detail favour Qwen, unattended runs where writes are refused favour Gemma. A model-by-model average over the rows would depend on which rows were included and is not reported.
+- **Caveats.** The cells come from different days, code states, fixtures and checkers (the `mail_summary` check changed twice during the week; the Tidepool figures predate several harness changes). Samples are 3 to 10 per cell and the two seeds of the housekeeping chores are the same fixture with different data, so 30-point gaps at n=10 are three runs. Both models were run only on Ollama's MLX builds in this table. Rows marked "too few runs" are listed so the picture is complete, not because they show a difference.
 
 ## Rung 1: known API, skill available (Radarr queue)
 
