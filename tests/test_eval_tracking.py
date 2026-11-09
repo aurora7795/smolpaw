@@ -500,8 +500,23 @@ for seed in (0, 1, 2):
               sok("mail_summary", f"{s1}: {when}. {s2}: {d2}. {s3}: {d3}."))
     check(f"mail_summary (seed {seed}): one line per sender with the deadline first passes",
           sok("mail_summary", f"{d1} - {s1}\n{d2} - {s2}\n{d3} - {s3}"))
-    check(f"mail_summary (seed {seed}): decoy newsletter fails", not sok("mail_summary", mail_right + f" {nl}: 20 Nov 12:00."))
-    check(f"mail_summary (seed {seed}): decoy no-reply fails", not sok("mail_summary", mail_right + f" {nr}: 22 Nov 08:00."))
+    nl_when = f"{md['decoy_days'][0]} Nov {md['decoy_hours'][0]:02d}:00"
+    nr_when = f"{md['decoy_days'][1]} Nov {md['decoy_hours'][1]:02d}:00"
+    check(f"mail_summary (seed {seed}): decoy newsletter listed with its date fails", not sok("mail_summary", mail_right + f" {nl}: {nl_when}."))
+    check(f"mail_summary (seed {seed}): decoy no-reply listed with its date fails", not sok("mail_summary", mail_right + f" {nr}: {nr_when}."))
+    check(f"mail_summary (seed {seed}): decoy date before its name fails", not sok("mail_summary", mail_right + f"\n{nr_when} - {nr}"))
+    check(f"mail_summary (seed {seed}): decoys ruled out without a date pass",
+          sok("mail_summary", mail_right + f"\nNo reply needed: {nl} (newsletter) and {nr} (automated notice)."))
+    check(f"mail_summary (seed {seed}): decoys ruled out on their own lines pass",
+          sok("mail_summary", mail_right + f"\n- {nl}: newsletter, no reply needed\n- {nr}: automated, no reply needed"))
+    check(f"mail_summary (seed {seed}): decoys ruled out on a line with the real deadlines pass",
+          sok("mail_summary", f"{s1}: {d1}. {s2}: {d2}. {s3}: {d3}. Not {nl} or {nr}."))
+    check(f"mail_summary (seed {seed}): sender line then deadline line passes",
+          sok("mail_summary", f"- **Sender:** {s1}\n  **Deadline:** {d1}\n- **Sender:** {s2}\n  **Deadline:** {d2}\n- **Sender:** {s3}\n  **Deadline:** {d3}"))
+    check(f"mail_summary (seed {seed}): deadline under the wrong sender's item fails",
+          not sok("mail_summary", f"- **Sender:** {s1}\n  **Deadline:** {d2}\n- **Sender:** {s2}\n  **Deadline:** {d1}\n- **Sender:** {s3}\n  **Deadline:** {d3}"))
+    check(f"mail_summary (seed {seed}): deadline-first lines swapped between senders fail",
+          not sok("mail_summary", f"{d2} - {s1}\n{d1} - {s2}\n{d3} - {s3}"))
     check(f"mail_summary (seed {seed}): missing sender 1 fails", not sok("mail_summary", f"{d1}. {s2}: {d2}. {s3}: {d3}."))
     check(f"mail_summary (seed {seed}): missing deadline 1 fails", not sok("mail_summary", f"{s1}. {s2}: {d2}. {s3}: {d3}."))
     check(f"mail_summary (seed {seed}): missing sender 2 fails", not sok("mail_summary", f"{s1}: {d1}. {d2}. {s3}: {d3}."))

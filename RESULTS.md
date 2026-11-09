@@ -822,3 +822,19 @@ Five chores a person might hand to a local agent, each with its own generated fi
 - **Old chores on a second seed.** Gemma's `weekly_summary` went from 3/5 to 0/5: four of its five seed-1 summaries had six lines against a limit of five, the fifth lacked the 14 Nov deadline. Qwen's `cleanup_proposal` went from 1/5 to 0/5: all five ended in `Agent interrupted` after a declined delete. `biggest_files`, `log_errors` and `stuck_downloads` held up or improved (Qwen `stuck_downloads` 3/5 to 5/5). With n=5 and one other seed, a change of one or two runs is noise; the 0/5 results on `weekly_summary` (Gemma) and `disk_report` are not.
 - **Caveats.** One session, one machine, n=5 per cell, two fixture seeds, two models. `disk_report` and `cleanup_proposal` depend on how these runs decline shell commands (as a scheduled run does); a harness that let `du` run would measure something else. The log's `check` field holds the integrity message of the file check when the files were intact, so a failing run can show "files intact"; the failure is then in the answer.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --ctx 32768 --housekeeping mail_summary --seed 0 --n 5 --label base` (also `calendar_conflicts` and `disk_report`), then `... --housekeeping all --seed 1 --n 5 --label base`, and the same with `qwen3.5:9b`.
+
+### `mail_summary` with the decoy rule relaxed (2026-11-09)
+
+The strict decoy rule and the same-line sender/deadline pairing were changed (#92): a decoy now fails only when its own date or time shares a line with its name (an answer that merely rules it out passes), and a sender line followed by a deadline line pairs as well as one line does. The rule was set from the earlier failures, before this run; no pass threshold was set. Same settings as above (Ollama, 32K context, native history, step cap 12, n=5 per cell, stall rule on, label `mailfix`). Logs: `logs/eval-20261109-*-housekeeping-mail_summary-*mailfix.json`.
+
+| | Strict check (2026-11-05) | Relaxed check |
+|---|---|---|
+| Qwen 3.5 9B, seed 0 | 0/5 | 4/5 |
+| Qwen 3.5 9B, seed 1 | 2/5 | 5/5 |
+| Gemma 4 E4B, seed 0 | 0/5 | 2/5 |
+| Gemma 4 E4B, seed 1 | 2/5 | 3/5 |
+
+- **Of the 6 failures, 2 are the check's.** Qwen seed 0 run 2 and Gemma seed 0 run 5 named all three senders with the right deadlines, plus the lunch message as a fourth that needs a reply, and failed only because the pairing stops at a full stop ("...the attached contract. Deadline: 12 Nov at 10:00", or a file name like `mail/07.txt` after the name); an offline re-score without that exclusion passes both. Filed as #93; not fixed in this run, since changing the check after seeing the result would need another run. The other 4 are the model's: Gemma said it could not find or access the mail folder (2 runs, seed 0 and seed 1), Gemma seed 0 run 2 hit the step cap after asking the user and searching the web, and Gemma seed 1 run 1 left out the third sender. Qwen had no failure of its own.
+- **Against the hand re-score in the section above** (Qwen 2/5 and 5/5, Gemma 0/5 and 3/5), the new figures are the same or better for Qwen seed 0 (4 against 2, run-to-run difference with n=5) and Gemma seed 0 (2 against 0).
+- **Caveats.** One session, one machine, n=5 per cell, two seeds. Gemma's "cannot find a mail folder" failure (2 of 10 here, 3 of 5 on seed 0 in the strict run) is the model's, not the check's.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --ctx 32768 --housekeeping mail_summary --seed 0 --n 5 --label mailfix` (also `--seed 1`, and the same with `gemma4:e4b`).
