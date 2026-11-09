@@ -231,6 +231,14 @@ def _mail(ws: Path, rng: random.Random) -> Case:
                 return False, f"mail/{name} was modified"
         return True, "mail files intact"
 
+    def date_re(d: int) -> str:
+        ordinal = r"(?:st|nd|rd|th)?"
+        # a day number never counts when it is really the hour of a time ("Nov 14:00")
+        return rf"(?:(?<![:\d])\b{d}{ordinal}\b\s*(?:of\s+)?Nov(?:ember)?|Nov(?:ember)?\.?\s*{d}{ordinal}\b(?![:\d])|\b2026-11-{d:02d}\b)"
+
+    def time_re(h: int) -> str:
+        return rf"(?:{h:02d}:00|{h % 12 or 12}(?::00)?\s*{'am' if h < 12 else 'pm'})"
+
     expects = []
     deadlines = []
     for i in range(3):
@@ -240,18 +248,19 @@ def _mail(ws: Path, rng: random.Random) -> Case:
         gap = rf"(?:(?!{others})[^\n.;]){{0,150}}"  # same sentence, and no other sender's name in between
         d = deadline_days[i]
         h = deadline_hours[i]
-        h12 = h % 12 or 12
-        ampm = "am" if h < 12 else "pm"
-        ordinal = r"(?:st|nd|rd|th)?"
-        date_re = rf"(?:\b{d}{ordinal}\b\s*(?:of\s+)?Nov(?:ember)?|Nov(?:ember)?\.?\s*{d}{ordinal}\b|\b2026-11-{d:02d}\b)"
-        time_re = rf"(?:{h:02d}:00|{h12}(?::00)?\s*{ampm})"
         deadlines.append(f"{d} Nov {h:02d}:00")
-        when_re = rf"(?:{date_re}[^\n]{{0,40}}?{time_re}|{time_re}[^\n]{{0,40}}?{date_re})"
+        when_re = rf"(?:{date_re(d)}[^\n]{{0,40}}?{time_re(h)}|{time_re(h)}[^\n]{{0,40}}?{date_re(d)})"
+        # a sender line without digits, then the deadline on the next line ("Sender: X" / "Deadline: ...")
+        next_line = rf"{name_re}[^\n\d]{{0,150}}\n{gap}{when_re}"
         # the sender and their own deadline together, in either order: a deadline swapped between senders must fail
-        expects.append(rf"(?i)(?:{name_re}{gap}{when_re}|{when_re}{gap}{name_re})")
+        expects.append(rf"(?i)(?:{name_re}{gap}{when_re}|{when_re}{gap}{name_re}|{next_line})")
 
+    # a decoy fails only when its own date or time shares a line with its name (presented as needing a reply);
+    # an answer that merely rules it out passes (#92). The decoys' days and hours never match a real deadline.
     decoys = [nl_sender, nr_sender]
-    expects.append(_none_of(decoys))
+    for decoy, day, hour in ((nl_sender, nl_day, nl_hour), (nr_sender, nr_day, nr_hour)):
+        own = rf"(?:{date_re(day)}|{time_re(hour)})"
+        expects.append(rf"(?is)^(?!.*(?:{re.escape(decoy)}[^\n]*{own}|{own}[^\n]*{re.escape(decoy)}))")
 
     prompt = "Which messages in the mail folder need a reply and by when? Name the sender and deadline for each."
     details = {
@@ -260,6 +269,8 @@ def _mail(ws: Path, rng: random.Random) -> Case:
         "deadline_hours": deadline_hours,
         "deadlines": deadlines,
         "decoys": decoys,
+        "decoy_days": [nl_day, nr_day],
+        "decoy_hours": [nl_hour, nr_hour],
     }
     return Case("mail_summary", prompt, expects, check_mail, details=details)
 

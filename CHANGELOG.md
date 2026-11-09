@@ -13,6 +13,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 - RESULTS.md: Granite 4.2 8B sanity check on Tidepool `easy` (n=3, native and text history). First call 4,927 tokens; native tool calls with 0 parse errors; 2 of 3 passed in each cell, the third failing both times with a Metal out-of-memory in LM Studio at 32768 context. No code change.
 
 ### Fixed
+- `mail_summary` no longer fails answers that correctly rule the decoys out (#92): a decoy sender fails only when its own date or time is on the same line as its name, and a sender line followed by a deadline line now pairs (the pairing already worked within one line). Day numbers no longer match the hour of a time ("Nov 14" inside "13 Nov 14:00"). Tests cover ruled-out decoys, listed decoys in both orders, two-line items and swapped deadlines, on three seeds. Re-measured on seeds 0 and 1: Qwen 4/5 and 5/5 (was 0/5 and 2/5), Gemma 2/5 and 3/5 (was 0/5 and 2/5); two remaining rejections come from a full stop between name and deadline (#93). RESULTS.md.
 - The `--counting` and `--counting-home` check accepts a correct bare "12" or "10" (#49): in that fixture no other count is either number, and a 13 or 15 called files or items, or a 10 or 12 counting folders, still fails. Qwen's saved answers re-score from 1/5 to 5/5 on `--counting` and, on the home-folder arms, 0/5, 2/5, 0/5, 1/5 to 2/5, 4/5, 3/5, 5/5; Gemma's 1 of its 5 prompt-sentence answers now passes. New `tests/rescore_counting.py` re-applies the check to saved logs; RESULTS.md notes both figures.
 
 ### Changed
