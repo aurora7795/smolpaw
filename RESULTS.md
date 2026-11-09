@@ -838,3 +838,20 @@ The strict decoy rule and the same-line sender/deadline pairing were changed (#9
 - **Against the hand re-score in the section above** (Qwen 2/5 and 5/5, Gemma 0/5 and 3/5), the new figures are the same or better for Qwen seed 0 (4 against 2, run-to-run difference with n=5) and Gemma seed 0 (2 against 0).
 - **Caveats.** One session, one machine, n=5 per cell, two seeds. Gemma's "cannot find a mail folder" failure (2 of 10 here, 3 of 5 on seed 0 in the strict run) is the model's, not the check's.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --ctx 32768 --housekeeping mail_summary --seed 0 --n 5 --label mailfix` (also `--seed 1`, and the same with `gemma4:e4b`).
+
+### `mail_summary` with a sender and deadline across full stops (2026-11-09)
+
+The check was changed again (#93): a sender's name may be followed by its deadline across full stops ("...the attached contract. Deadline: 12 Nov") or a file name; the deadline-first order and the swapped-deadline tests are unchanged. This was changed after seeing the previous run's answers, so the four cells were rerun rather than re-scored (label `mailfix2`; same settings, n=5 per cell, no pass threshold). Logs: `logs/eval-20261109-*-housekeeping-mail_summary-*mailfix2.json`.
+
+| | Strict check (2026-11-05) | Decoy rule relaxed (#92) | Full stops allowed (#93) |
+|---|---|---|---|
+| Qwen 3.5 9B, seed 0 | 0/5 | 4/5 | 5/5 |
+| Qwen 3.5 9B, seed 1 | 2/5 | 5/5 | 3/5 |
+| Gemma 4 E4B, seed 0 | 0/5 | 2/5 | 3/5 |
+| Gemma 4 E4B, seed 1 | 2/5 | 3/5 | 2/5 |
+
+- **The two columns on the right differ by run-to-run variation, not by the check.** Seed 1 went down for both models (Qwen 5/5 to 3/5, Gemma 3/5 to 2/5) while the check only got more lenient; the same models gave different answers. Pooled, 13 of 20 against 14 of 20. Treat any difference of one or two runs at n=5 as noise.
+- **Of the 7 failures, none is the check's alone.** Qwen's two both hit the step cap (13 steps): one wrote all three right senders and deadlines and rules out the two decoys without a date, so it passes the check and fails on the cap; the other put a chatter sender in the third place. Gemma's five: one named a chatter sender and left out David Stone, one said it could not find the mail folder, two gave only two of the three senders, and one hit the cap with all three right senders (its check result is also a rejection, see below).
+- **One rejection remains, but it did not change a result.** Gemma seed 1 run 2 wrote each item as three lines (sender, "Action needed", deadline); the pairing only accepts the deadline on the line after the sender, so the check rejects it. The run also hit the cap, so the count is the same either way. Filed as #94.
+- **Caveats.** One session, one machine, n=5 per cell, two seeds, two models; the step-cap rule fails a run that has written the right answer.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --ctx 32768 --housekeeping mail_summary --seed 0 --n 5 --label mailfix2` (also `--seed 1`, and the same with `gemma4:e4b`).
