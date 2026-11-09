@@ -515,6 +515,14 @@ for seed in (0, 1, 2):
           sok("mail_summary", f"- **Sender:** {s1}\n  **Deadline:** {d1}\n- **Sender:** {s2}\n  **Deadline:** {d2}\n- **Sender:** {s3}\n  **Deadline:** {d3}"))
     check(f"mail_summary (seed {seed}): deadline under the wrong sender's item fails",
           not sok("mail_summary", f"- **Sender:** {s1}\n  **Deadline:** {d2}\n- **Sender:** {s2}\n  **Deadline:** {d1}\n- **Sender:** {s3}\n  **Deadline:** {d3}"))
+    check(f"mail_summary (seed {seed}): a full stop between a sender and their deadline passes",
+          sok("mail_summary", f"1. {s1}: asks for a review of the contract. Deadline: {d1}.\n2. {s2}: needs the estimates. Deadline: {d2}.\n3. {s3}: wants a head count. Deadline: {d3}."))
+    check(f"mail_summary (seed {seed}): a file name after the sender passes",
+          sok("mail_summary", f"1. **{s1}** (from mail/07.txt) - Reply by {d1}\n2. **{s2}** (from mail/04.txt) - Reply by {d2}\n3. **{s3}** (from mail/05.txt) - Reply by {d3}"))
+    check(f"mail_summary (seed {seed}): deadlines swapped across full stops fail",
+          not sok("mail_summary", f"1. {s1}: asks for a review. Deadline: {d2}.\n2. {s2}: needs the estimates. Deadline: {d1}.\n3. {s3}: wants a head count. Deadline: {d3}."))
+    check(f"mail_summary (seed {seed}): deadlines swapped across full stops in one paragraph fail",
+          not sok("mail_summary", f"{s1} asks for a review. It is due {d2}. {s2} needs the estimates. It is due {d1}. {s3} wants a head count. It is due {d3}."))
     check(f"mail_summary (seed {seed}): deadline-first lines swapped between senders fail",
           not sok("mail_summary", f"{d2} - {s1}\n{d1} - {s2}\n{d3} - {s3}"))
     check(f"mail_summary (seed {seed}): missing sender 1 fails", not sok("mail_summary", f"{d1}. {s2}: {d2}. {s3}: {d3}."))

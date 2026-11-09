@@ -246,6 +246,9 @@ def _mail(ws: Path, rng: random.Random) -> Case:
         name_re = rf"\b{re.escape(first)}(?:\s+{re.escape(last)})?\b"
         others = "|".join(rf"\b{re.escape(reply_senders[j].split()[0])}\b" for j in range(3) if j != i)
         gap = rf"(?:(?!{others})[^\n.;]){{0,150}}"  # same sentence, and no other sender's name in between
+        # a name then its deadline may cross full stops ("X: asks for a review. Deadline: ..." or a file name), as long
+        # as no other sender's name or line break comes between; the deadline-first order keeps the strict gap (#93)
+        fwd_gap = rf"(?:(?!{others})[^\n;]){{0,150}}"
         d = deadline_days[i]
         h = deadline_hours[i]
         deadlines.append(f"{d} Nov {h:02d}:00")
@@ -253,7 +256,7 @@ def _mail(ws: Path, rng: random.Random) -> Case:
         # a sender line without digits, then the deadline on the next line ("Sender: X" / "Deadline: ...")
         next_line = rf"{name_re}[^\n\d]{{0,150}}\n{gap}{when_re}"
         # the sender and their own deadline together, in either order: a deadline swapped between senders must fail
-        expects.append(rf"(?i)(?:{name_re}{gap}{when_re}|{when_re}{gap}{name_re}|{next_line})")
+        expects.append(rf"(?i)(?:{name_re}{fwd_gap}{when_re}|{when_re}{gap}{name_re}|{next_line})")
 
     # a decoy fails only when its own date or time shares a line with its name (presented as needing a reply);
     # an answer that merely rules it out passes (#92). The decoys' days and hours never match a real deadline.
