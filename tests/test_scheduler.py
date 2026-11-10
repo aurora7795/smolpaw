@@ -95,7 +95,7 @@ def make(agent: FakeAgent | None = None,
 
 
 def next_model(sess: web.Session) -> None:
-    sess.model = f"m{next(models)}"  # log files are named to the second: one model name per run keeps them apart
+    sess.model = sess.default_model = f"m{next(models)}"  # log files are named to the second: one model name per run keeps them apart
 
 
 def wait_idle(sess: web.Session) -> None:
