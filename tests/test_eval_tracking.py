@@ -653,5 +653,11 @@ try:
 except ValueError:
     check("housekeeping: refuses the real workspace", True)
 
+import agent as agent_mod
+capped = agent_mod.build_agent("m", "tool", 3, "generic", "ollama", True, 512)
+uncapped = agent_mod.build_agent("m", "tool", 3, "generic", "ollama", True)
+check("build_agent: max_tokens reaches the model's request kwargs", capped.model.kwargs.get("max_tokens") == 512)
+check("build_agent: no max_tokens by default", "max_tokens" not in uncapped.model.kwargs)
+
 print(f"\n{check_failed} failed")
 sys.exit(1 if check_failed else 0)

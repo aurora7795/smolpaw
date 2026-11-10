@@ -246,6 +246,9 @@ def safe_name(model: str) -> str:
     return re.sub(r"[/:]", "_", model)
 
 
+MAX_TOKENS: int | None = None  # set from --max-tokens; None leaves replies uncapped
+
+
 def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backend: str = "lmstudio",
              native_history: bool = True, check: Callable[[], tuple[bool, str]] | None = None) -> dict:
     g.ACTIONS.clear()
@@ -253,7 +256,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     prompts: list[str] = []
     confirm = g.CONFIRM
     g.CONFIRM = lambda desc: (prompts.append("\n".join(desc.splitlines()[:2])[:240]), confirm(desc))[1]  # first line plus a shell command
-    agent = build_agent(model, "tool", max_steps, "generic", backend, native_history)
+    agent = build_agent(model, "tool", max_steps, "generic", backend, native_history, MAX_TOKENS)
     t0 = time.time()
     buf = io.StringIO()
     error = ""
@@ -322,7 +325,7 @@ def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[s
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
                                "history": "text" if args.text_history else "native", "without_tool": args.without_tool,
-                               "loaded_context": ctx, "prompt": prompt, "expect": expects,
+                               "loaded_context": ctx, "max_tokens": args.max_tokens, "prompt": prompt, "expect": expects,
                                "runs": results}, indent=2))
     print(f"  saved {out.relative_to(ROOT)}")
 
@@ -388,6 +391,7 @@ def run_readonly(args, tmp: Path, case_name: str, ctx: int | None) -> None:
 
 
 def main() -> None:
+    global MAX_TOKENS
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
     ap.add_argument("--model", required=True)
@@ -395,6 +399,8 @@ def main() -> None:
     ap.add_argument("--expect", action="append", default=[], help="regex the answer must match (repeatable)")
     ap.add_argument("--n", type=int, default=3)
     ap.add_argument("--max-steps", type=int, default=12)
+    ap.add_argument("--max-tokens", type=int, default=None,
+                    help="cap on tokens in one model reply (default: none); ends a looping reply, recorded in the log")
     ap.add_argument("--ctx", type=int, default=16384,
                     help="context to load with (LM Studio); on Ollama, the context to expect from the server")
     ap.add_argument("--no-load", "--no-lms", dest="no_load", action="store_true",
@@ -432,6 +438,7 @@ def main() -> None:
                     help="send earlier tool calls as smolagents' text, not native tool_calls "
                          "(for comparison, #14)")
     args = ap.parse_args()
+    MAX_TOKENS = args.max_tokens
 
     load_env()
     tmp = Path(tempfile.mkdtemp())
