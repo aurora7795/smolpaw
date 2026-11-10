@@ -240,12 +240,15 @@ def load_env(path: str = ".env") -> None:
 
 
 def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps: int = MAX_STEPS,
-                toolset: str = "generic", backend: str = "lmstudio", native_history: bool = True):
+                toolset: str = "generic", backend: str = "lmstudio", native_history: bool = True,
+                max_tokens: int | None = None):
     cfg = BACKENDS[backend]
+    extra = {"max_tokens": max_tokens} if max_tokens else {}  # caps one reply, so a looping model ends it
     model = (NativeHistoryModel if native_history else OpenAIServerModel)(
         model_id=model_id or cfg["model"],
         api_base=cfg["url"],
         api_key=cfg["key"],
+        **extra,
     )
     if toolset == "generic":
         generic_tools.apply_search_provider()  # .env is loaded by now; the import-time call could not see it
