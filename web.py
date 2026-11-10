@@ -15,6 +15,8 @@ import math
 import os
 import re
 import secrets
+import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -171,6 +173,40 @@ def _thread_turns(thread: str) -> list[tuple[str, str]]:
     return turns
 
 
+def _thread_choice(thread: str) -> tuple[str | None, str] | None:
+    """Backend and model of a chat's latest run, from its log; the backend is None in logs written before it was recorded."""
+    if not g.LOG_DIR.is_dir():
+        return None
+    for f in sorted(g.LOG_DIR.glob("*.jsonl"), key=lambda f: f.name, reverse=True):
+        start = _log_start(f)
+        if start.get("thread") != thread:
+            continue
+        model = start.get("model")
+        if isinstance(model, str) and model.strip():
+            backend = start.get("backend")
+            return (backend if backend in BACKENDS else None), model
+    return None
+
+
+def release_model(backend: str, model: str) -> None:
+    """Best effort: ask a backend to unload a model, so it does not stay in memory beside the next backend's.
+
+    Neither server unloads the other's model, and switching backend with one still loaded was slow (issue #96).
+    """
+    try:
+        if backend == "ollama":
+            req = urllib.request.Request(BACKENDS[backend]["url"].removesuffix("/v1") + "/api/generate",
+                                         data=json.dumps({"model": model, "keep_alive": 0}).encode(),
+                                         headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10).close()
+        elif backend == "lmstudio":
+            lms = shutil.which("lms") or str(Path.home() / ".lmstudio" / "bin" / "lms")
+            if os.path.exists(lms):
+                subprocess.run([lms, "unload", model], capture_output=True, timeout=30, check=False)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+
+
 def _load_deferred_approvals() -> list[dict]:
     """Deferred actions from past scheduled runs in g.LOG_DIR, oldest first, one per schedule.
 
@@ -236,6 +272,9 @@ class Session:
                  search_provider: str | None = None):
         self.agent, self.model, self.approvals = agent, model, approvals
         self.backend, self.max_steps = backend, max_steps
+        self.default_backend, self.default_model = backend, model  # new chats and scheduled runs; the Settings card changes it
+        self.notice = ""  # why a chat is not on the model it used before (shown above the composer)
+        self._release: list[tuple[str, str]] = []  # (backend, model) left behind by a switch, unloaded before the next run
         if run_summaries is None:
             run_summaries = os.environ.get("SMOLPAW_RUN_SUMMARIES", "1").lower() not in ("0", "false", "no", "off")
         self.run_summaries = run_summaries
@@ -276,11 +315,46 @@ class Session:
             self._run_id += 1
             self.thread, self.history = None, []
             self.prompt = self.answer = self.outcome = self.error = ""
+            self.notice = ""
+            self._use(self.default_backend, self.default_model)  # a new chat starts on the default model
             return True
 
-    def start(self, prompt: str, thread: str | None = None, schedule: str | None = None) -> bool:
+    def _use(self, backend: str, model: str) -> bool:
+        """Point the session at a backend and model without changing the default; False (nothing changed) if the
+        agent cannot be built. Call with the lock held."""
+        if (backend, model) == (self.backend, self.model):
+            return True
+        try:
+            agent = build_agent(model, "tool", self.max_steps, "generic", backend)
+        except Exception:  # noqa: BLE001 - the caller falls back to the default
+            return False
+        if backend != self.backend:
+            self._release.append((self.backend, self.model))
+        self.agent, self.backend, self.model = agent, backend, model
+        return True
+
+    def _restore_choice(self, thread: str) -> tuple[tuple[str, str] | None, str]:
+        """The backend and model a chat used last, and a notice. The choice is None when the chat did not record
+        one or the model is no longer installed there; the caller then uses the default and shows the notice."""
+        choice = _thread_choice(thread)
+        if not choice:
+            return None, ""
+        backend, model = choice
+        backend = backend or self.default_backend
+        listed = list_models(backend)  # empty when the server is unreachable: then it cannot be told, try it
+        if listed and model not in listed:
+            return None, f"{model} is not installed on {backend}; using {self.default_model}."
+        return (backend, model), ""
+
+    def start(self, prompt: str, thread: str | None = None, schedule: str | None = None,
+              backend: str | None = None, model: str | None = None) -> bool:
         """Begin a run; False if one is already running. `schedule` (a schedule id) makes it an unattended,
-        read-only run in its own thread."""
+        read-only run in its own thread on the default model. `backend` and `model` pick the model for this chat
+        from now on; without them a chat continued from Recents gets the model it last used, a running chat keeps
+        its model and a new chat gets the default."""
+        restored, note = None, ""
+        if thread and not schedule and not model and thread != self.thread:  # file and network reads, kept off the lock
+            restored, note = self._restore_choice(thread)
         with self._lock:
             if self.status == "running":
                 return False
@@ -288,11 +362,26 @@ class Session:
                 self.thread, self.history = None, []
                 self.prompt = self.answer = self.outcome = self.error = ""
                 self._scheduled_chat = bool(schedule)
-            if thread and thread != self.thread:  # continue a chat picked from Recents
+            from_recents = bool(thread and thread != self.thread)
+            if from_recents:  # continue a chat picked from Recents
                 self.thread, self.history = thread, _thread_turns(thread)
                 self.prompt = self.answer = self.outcome = self.error = ""
             elif self.prompt and self.answer and not self.error:
                 self.history.append((self.prompt, self.answer))
+            self.notice = note
+            if schedule:
+                target = (self.default_backend, self.default_model)
+            elif model:
+                target = (backend, model)
+            elif from_recents:
+                target = restored or (self.default_backend, self.default_model)
+            elif self.thread:
+                target = (self.backend, self.model)
+            else:
+                target = (self.default_backend, self.default_model)
+            default = (self.default_backend, self.default_model)
+            if not self._use(*target):  # cannot build it: the default, else stay where we are
+                self.notice = f"Could not switch to {target[1]}; using {default[1] if self._use(*default) else self.model}."
             if not self.thread:
                 self.thread = f"{datetime.now():%Y%m%d-%H%M%S-%f}"
             context = build_context(self.history)
@@ -350,8 +439,14 @@ class Session:
             g.CONFIRM, g.ASK = confirm_later, lambda question: NO_ANSWER
         exc_type = ""
         try:
+            with self._lock:
+                left, self._release = self._release, []
+                backend = self.backend
+            for old in left:
+                if old[0] != backend:
+                    release_model(*old)
             self.answer, self.outcome = run_request(self.agent, self.model, "generic", prompt, thread, context,
-                                                    schedule)
+                                                    schedule, backend=backend)
             if not g.ACTIONS:  # nothing to report; the Activity feed already shows the run (the terminal keeps its line)
                 self.outcome = ""
         except Exception as exc:  # noqa: BLE001 - shown on the page, as the CLI prints it
@@ -459,20 +554,22 @@ class Session:
                   run_summaries: bool | None = None,
                   schedule_timeout: float | None = None,
                   search_provider: str | None = None) -> bool:
-        """Switch backend, model, step limit, prompt timeout, run summaries, schedule timeout, and search provider between requests; refused while one runs."""
+        """Switch the default backend and model (a chat on another model stays on it), step limit, prompt timeout, run summaries, schedule timeout, and search provider between requests; refused while one runs."""
         with self._lock:
             if self.status == "running":
                 return False
             provider_changed = search_provider is not None and search_provider != self.search_provider
-            rebuild = ((backend, model, max_steps) != (self.backend, self.model, self.max_steps)
-                       or provider_changed)
+            # a chat on its own model stays there; only one on the old default moves to the new default
+            live = (backend, model) if (self.backend, self.model) == (self.default_backend, self.default_model) \
+                else (self.backend, self.model)
+            rebuild = ((*live, max_steps) != (self.backend, self.model, self.max_steps) or provider_changed)
             if rebuild:
                 saved_agent = self.agent
                 saved_env = os.environ.get("SMOLPAW_SEARCH_PROVIDER")
                 if provider_changed:
                     os.environ["SMOLPAW_SEARCH_PROVIDER"] = search_provider
                 try:
-                    self.agent = build_agent(model, "tool", max_steps, "generic", backend)
+                    self.agent = build_agent(live[1], "tool", max_steps, "generic", live[0])
                 except Exception:
                     if provider_changed:
                         if saved_env is not None:
@@ -482,9 +579,12 @@ class Session:
                         g.apply_search_provider()
                     self.agent = saved_agent
                     return False
-                self.backend, self.model, self.max_steps = backend, model, max_steps
+                if live[0] != self.backend:
+                    self._release.append((self.backend, self.model))
+                self.backend, self.model, self.max_steps = *live, max_steps
                 if provider_changed:
                     self.search_provider = search_provider
+            self.default_backend, self.default_model = backend, model
             self._run_id += 1
             self.approvals.timeout = timeout
             if run_summaries is not None:
@@ -516,13 +616,15 @@ def _current_search_provider(session: Session | None) -> str:
 
 
 def list_models(backend: str) -> list[str]:
-    """Model ids the backend's server lists (both expose the OpenAI-style /models); empty if unreachable."""
+    """Chat model ids the backend's server lists (both expose the OpenAI-style /models, LM Studio's including
+    downloaded models that are not loaded); embedding models are left out; empty if unreachable."""
     try:
         req = urllib.request.Request(BACKENDS[backend]["url"] + "/models",
                                      headers={"Authorization": f"Bearer {BACKENDS[backend]['key']}"})
         with urllib.request.urlopen(req, timeout=3) as r:
             data = json.loads(r.read(1_000_000))
-        return sorted(str(m["id"]) for m in data.get("data", []) if isinstance(m, dict) and "id" in m)
+        ids = (str(m["id"]) for m in data.get("data", []) if isinstance(m, dict) and "id" in m)
+        return sorted(i for i in ids if "embed" not in i.lower())  # embedding models cannot chat
     except (OSError, ValueError, KeyError, AttributeError):
         return []
 
@@ -711,7 +813,9 @@ def _run_detail(path: Path) -> dict | None:
         return None
     final = next((e for e in entries if e.get("kind") == "final"), None)
     actions = "\n  ".join(str(a) for a in (final or {}).get("actions", []))
+    backend, model = start.get("backend"), start.get("model")
     return {"prompt": g._redact(str(start.get("prompt", ""))),
+            "backend": backend if backend in BACKENDS else "", "model": g._redact(model) if isinstance(model, str) else "",
             "answer": g._redact(str(final.get("answer", ""))) if final else "",
             "outcome": f"[Harness says]\n  {g._redact(actions)}" if final and actions else "",
             "finished": final is not None}
@@ -840,6 +944,7 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                         "url_configured": bool(os.environ.get("SMOLPAW_SEARCH_URL", "").strip()),
                     },
                     **({"backends": sorted(BACKENDS), "backend": s.backend, "model": s.model,
+                        "default_backend": s.default_backend, "default_model": s.default_model, "notice": s.notice,
                         "max_steps": s.max_steps, "timeout": approvals.timeout,
                         "run_summaries": s.run_summaries,
                         "schedule_timeout": s.schedule_timeout,
@@ -914,7 +1019,13 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 thread = body.get("thread")
                 if thread is not None and not (isinstance(thread, str) and re.fullmatch(r"[\w.-]{1,64}", thread)):
                     return self._send(400, {"error": "bad thread"})
-                ok = session.start(prompt, thread)
+                backend, model = body.get("backend"), body.get("model")
+                if backend is not None or model is not None:
+                    if (backend not in BACKENDS or not isinstance(model, str) or not model.strip()
+                            or len(model) > 200):
+                        return self._send(400, {"error": "bad model"})
+                    model = model.strip()
+                ok = session.start(prompt, thread, backend=backend, model=model)
                 return self._send(200 if ok else 409, {"ok": ok})
             if path == "/api/new_thread" and session:
                 ok = session.new_thread()
@@ -1142,6 +1253,8 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 .composer textarea { border:0; background:transparent; min-height:44px; max-height:200px; resize:none; padding:6px; outline:none; }
 .composer .row { margin-top:4px; align-items:center; justify-content:flex-end; }
 .composer .row .meta { margin:0 auto 0 6px; font-size:13px; }
+.composer select { flex:0 1 auto; min-width:0; max-width:60%; width:auto; margin:0 auto 0 4px; padding:6px 10px; border-radius:14px; font-size:13px; }
+.composer .notice { margin:0 6px 4px; font-size:13px; color:var(--no); }
 .composer button { flex:none; padding:8px 20px; border-radius:18px; }
 #newchat { margin:0 0 4px; flex:none; }
 .recents { margin-top:10px; }
@@ -1220,8 +1333,8 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 </div>
 <details class="card" id="setcard" data-views="settings"><summary>Settings</summary>
   <div class="filesec" id="setform" hidden>
-    <h3>Backend</h3><select id="sbackend"></select>
-    <h3>Model</h3><input id="smodel" list="smodels" autocomplete="off"><datalist id="smodels"></datalist>
+    <h3>Default backend</h3><select id="sbackend"></select>
+    <h3>Default model (new chats and scheduled runs)</h3><input id="smodel" list="smodels" autocomplete="off"><datalist id="smodels"></datalist>
     <h3>Step limit</h3><input id="ssteps" type="number" min="1" max="50">
     <h3>Prompt timeout (seconds, 0 waits forever)</h3><input id="stimeout" type="number" min="0" max="3600">
     <h3>Scheduled-run time limit (seconds, 0 disables)</h3><input id="sschedtimeout" type="number" min="0" max="86400">
@@ -1244,7 +1357,8 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   <div id="askbox" hidden><textarea id="reply" placeholder="Your answer"></textarea>
     <div class="row"><button id="send">Send answer</button></div></div></div>
 <div class="composer" id="runcard" data-views="chat" hidden><textarea id="prompt" rows="1" placeholder="What should the agent do?"></textarea>
-  <div class="row"><div class="meta" id="working" hidden></div><button class="ghost" id="stop">Stop</button><button id="run">Run</button></div></div>
+  <div class="meta notice" id="notice" hidden></div>
+  <div class="row"><select id="cmodel" title="Model for this chat"></select><div class="meta" id="working" hidden></div><button class="ghost" id="stop">Stop</button><button id="run">Run</button></div></div>
 </div></main><script>
 const token = new URLSearchParams(location.search).get("t") || "";
 const $ = id => document.getElementById(id);
@@ -1273,8 +1387,12 @@ $("prompt").addEventListener("input", fitPrompt);
 $("run").onclick = async () => {
   const p = $("prompt").value.trim();
   if (!p) return;
-  const r = await api("/api/run", selectedThread ? {prompt: p, thread: selectedThread} : {prompt: p});
+  const body = {prompt: p};
+  if (selectedThread) body.thread = selectedThread;
+  if (chosen) { body.backend = chosen.backend; body.model = chosen.model; }
+  const r = await api("/api/run", body);
   if (!r || !r.ok) { refresh(); return; }
+  chosen = null; viewed = null;
   $("prompt").value = ""; fitPrompt(); selectedRunId = null; selectedThread = ""; historyKey = null;
   $("livebtn").hidden = true; renderRuns(); refresh();
 };
@@ -1340,6 +1458,47 @@ async function loadModels() {
     $("smsg").textContent = models.length ? "" : "Could not list models from this server; type an id.";
   } catch (e) {}
 }
+const BACKEND_LABELS = {lmstudio: "LM Studio", ollama: "Ollama"};
+let chosen = null, viewed = null, choiceLists = {}, shownChoice = "";
+function choiceValue(c) { return c.backend + "|" + c.model; }
+function renderChoices() {
+  const sel = $("cmodel");
+  while (sel.firstChild) sel.removeChild(sel.firstChild);
+  for (const b of Object.keys(choiceLists)) {
+    const g = document.createElement("optgroup"); g.label = BACKEND_LABELS[b] || b;
+    const list = choiceLists[b];
+    if (!list) { const o = document.createElement("option"); o.disabled = true; o.textContent = "(unreachable)"; g.appendChild(o); }
+    else for (const m of list) { const o = document.createElement("option"); o.value = b + "|" + m; o.textContent = m; g.appendChild(o); }
+    sel.appendChild(g);
+  }
+  setChoice(shownChoice);
+}
+function setChoice(value) {
+  const sel = $("cmodel");
+  if (!value) return;
+  shownChoice = value;
+  if (![...sel.options].some(o => o.value === value)) {
+    const i = value.indexOf("|");
+    let g = [...sel.getElementsByTagName("optgroup")].find(x => x.label === (BACKEND_LABELS[value.slice(0, i)] || value.slice(0, i)));
+    if (!g) { g = document.createElement("optgroup"); g.label = value.slice(0, i); sel.appendChild(g); }
+    const o = document.createElement("option"); o.value = value; o.textContent = value.slice(i + 1); g.appendChild(o);
+  }
+  if (sel.value !== value) sel.value = value;
+}
+async function loadChoices(backends) {
+  const lists = {};
+  await Promise.all(backends.map(async b => {
+    try { const m = await api("/api/models?backend=" + encodeURIComponent(b)); lists[b] = m.length ? m : null; }
+    catch (e) { lists[b] = null; }
+  }));
+  choiceLists = {}; for (const b of backends) choiceLists[b] = lists[b];
+  renderChoices();
+}
+$("cmodel").onchange = () => {
+  const v = $("cmodel").value, i = v.indexOf("|");
+  chosen = {backend: v.slice(0, i), model: v.slice(i + 1)}; shownChoice = v;
+};
+window.addEventListener("focus", () => { if (Object.keys(choiceLists).length) loadChoices(Object.keys(choiceLists)); });
 function fillSettings(s) {
   if (setLoaded) return;
   setLoaded = true;
@@ -1347,7 +1506,7 @@ function fillSettings(s) {
   for (const b of s.backends || [s.backend]) {
     const o = document.createElement("option"); o.value = o.textContent = b; sel.appendChild(o);
   }
-  sel.value = s.backend; $("smodel").value = s.model;
+  sel.value = s.default_backend || s.backend; $("smodel").value = s.default_model || s.model;
   $("ssteps").value = s.max_steps; $("stimeout").value = s.timeout;
   $("sschedtimeout").value = s.schedule_timeout;
   if (s.search) {
@@ -1373,6 +1532,7 @@ $("sapply").onclick = async () => {
       run_summaries: $("ssummaries").checked,
       search_provider: $("ssearchprovider").value})});
   $("smsg").textContent = r.ok ? "Applied." : r.status === 409 ? "A request is running; try again when it finishes." : "Invalid settings.";
+  loadChoices(Object.keys(choiceLists));
   refresh();
 };
 let lastSig = null, selectedThread = "", historyKey = null, selectedRunId = null, lastRunId = null, runsKey = null, runsData = [];
@@ -1717,6 +1877,7 @@ async function selectRun(r) {
     renderHistory(ok.map(d => ({prompt: d.prompt, answer: d.finished ? d.answer : "(this run did not finish)", outcome: d.outcome})));
     historyKey = null;
     const last = ok[ok.length - 1] || {};
+    chosen = null; viewed = last.model ? {backend: last.backend, model: last.model} : null;
     $("feed").textContent = (last.feed || []).join("\\n") || "(empty run log)";
     $("actsummary").textContent = r.summary;
     $("livebtn").hidden = false;
@@ -1725,7 +1886,7 @@ async function selectRun(r) {
   } catch (e) {}
 }
 function showLive() {
-  selectedRunId = null; selectedThread = ""; historyKey = null;
+  selectedRunId = null; selectedThread = ""; historyKey = null; chosen = null; viewed = null;
   $("livebtn").hidden = true;
   renderRuns();
   refresh();
@@ -1762,6 +1923,13 @@ async function refresh() {
   $("setform").hidden = !s.can_run;
   if (s.can_run) fillSettings(s);
   if (s.search) { searchUrlConfigured = !!s.search.url_configured; updateSearchHint(); }
+  if (s.can_run) {
+    if (!Object.keys(choiceLists).length) { choiceLists = {}; for (const b of s.backends || [s.backend]) choiceLists[b] = null; loadChoices(s.backends || [s.backend]); }
+    const c = chosen || (viewing && viewed ? {backend: viewed.backend || s.backend, model: viewed.model} : {backend: s.backend, model: s.model});
+    setChoice(choiceValue(c));
+  }
+  $("cmodel").disabled = s.status === "running";
+  $("notice").hidden = !s.notice; $("notice").textContent = s.notice || "";
   $("sapply").disabled = s.status === "running";
   $("run").disabled = s.status === "running"; $("stop").disabled = s.status !== "running";
   $("working").hidden = s.status !== "running";
