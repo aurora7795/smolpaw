@@ -1268,7 +1268,7 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 .approvalitem { padding:6px 0; border-bottom:1px solid var(--line); }
 .approvalitem:last-child { border-bottom:0; }
 #schedulescard { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; font-size:13px; }
-#schedulescard h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px; }
+#schedulescard[open] > summary { margin-bottom:6px; }
 .scheduleitem { padding:6px 0; border-bottom:1px solid var(--line); }
 .scheduleitem:last-child { border-bottom:0; }
 .approvalprompt { font-weight:500; margin:4px 0; overflow-wrap:anywhere; }
@@ -1306,8 +1306,8 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <div id="approvalslist"></div>
     <div class="meta" id="dismissmsg" style="margin-top:6px"></div>
   </div>
-  <div class="card" id="schedulescard" hidden>
-    <h2>Schedules</h2>
+  <details class="card" id="schedulescard" hidden>
+    <summary>Schedules</summary>
     <div class="meta" id="scheduleserror" style="color:var(--no);margin-bottom:6px" hidden></div>
     <div class="meta" id="schedmsg" style="color:var(--no);margin-bottom:6px" hidden></div>
     <div id="schedform" style="margin-bottom:10px" hidden>
@@ -1317,7 +1317,7 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     </div>
     <div id="scheduleslist"></div>
     <div class="meta" id="schedulesloaderr" style="color:var(--no);margin-top:6px" hidden>Could not load schedules</div>
-  </div>
+  </details>
   <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
 <main><div id="content">
