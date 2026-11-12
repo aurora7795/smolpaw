@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+- The Schedules card in the web sidebar is a collapsed heading (a `<details>` like Settings), opened on click, instead of always being on display.
+
 ### Added
 - Per-chat models in the web page ([#96](https://github.com/aurora7795/smolpaw/issues/96)). A model dropdown beside the Run button lists the chat models on LM Studio and Ollama, grouped by backend (embedding models left out, an unreachable server shown as such). Each chat remembers its backend and model: picking it from Recents restores them (a model that is gone falls back to the default, with a note above the box), and the model can be changed from the next message on. `/api/run` takes optional `backend` and `model`; `/api/state` reports `default_backend`, `default_model` and `notice`. The run log's start entry now records the backend. Switching to the other backend first asks the old one to unload the model it was using (`ollama` keep-alive 0, `lms unload`), best effort. `tests/test_chat_models.py` covers it.
 - `tests/eval.py --max-tokens N` (and an optional `max_tokens` argument to `build_agent`): caps the tokens in one model reply so a model that loops ends the reply instead of hanging the run. Off by default, so existing runs are unchanged; the value is recorded in the run log. Needed because Granite 4.2 8B on Ollama kept generating past 8,000 tokens in one reply. Test in `tests/test_eval_tracking.py`.
