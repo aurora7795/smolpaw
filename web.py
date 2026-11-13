@@ -2013,8 +2013,8 @@ async function refresh() {
     const hk = (s.thread || "") + "|" + (s.turns || []).length;
     if (hk !== historyKey) { historyKey = hk; renderHistory(s.turns || []); }
   } else { $("userbubble").hidden = true; }
-  $("result").hidden = viewing || (!done && !s.prompt);
-  $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || (s.prompt ? "working on: " + s.prompt : ""));
+  $("result").hidden = viewing || !done;
+  $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || "");
   $("outcome").textContent = s.outcome || "";
   $("outcard").hidden = viewing || !(done && s.tool_output);
   if (s.tool_output) { $("outlabel").textContent = "Output of " + s.tool_output.label; $("outtext").textContent = s.tool_output.text; }

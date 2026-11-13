@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Changed
+- The web page no longer shows a "working on: <your request>" line under your message while a run is going (it repeated the request, and left an empty Copy button). The reply area appears when there is an answer or an error; progress is still the "Pawing..." line by the Run button.
 - Schedules is its own page in the web UI, like Settings: a **Schedules** item in the sidebar (phone drawer included) opens it as a card with the add form and the list, instead of a box inside the sidebar. The item shows only when there are schedules or runs can be started, as the box did before.
 - Sidebar items in the web page share one style: Chat, Settings and Schedules are the same size and weight with no borders, and only the active or open one is highlighted. The white focus outline that stayed on the last tapped item is gone (keyboard focus still shows).
 - Phone layout of the web page: the sidebar (New chat, Chat/Settings, Schedules, approvals, Recents) is a slide-in drawer behind a hamburger button in a slim top bar, with a "+" button for a new chat beside it, so the chat and the message box fill the screen. The drawer closes when you pick a chat, a view or New chat, tap outside it or press Escape; a red dot on the button shows when something needs approval. Settings is now its own view on phones, as it already was on wide screens. Wide screens are unchanged.
