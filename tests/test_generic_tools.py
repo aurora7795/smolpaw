@@ -2665,8 +2665,8 @@ check("new renderSchedules function contains no innerHTML", "innerHTML" not in s
 
 # 14. served page schedules card contains write controls and edit control (#80)
 idx_sched_card = page_html.index('id="schedulescard"')
-idx_recents = page_html.index('class="recents"')
-sched_card_html = page_html[idx_sched_card:idx_recents]
+idx_set_card = page_html.index('id="setcard"')  # the card sits just before the Settings card
+sched_card_html = page_html[idx_sched_card:idx_set_card]
 check("served page schedules card contains add/enable/delete controls and edit control",
       "button" in sched_card_html
       and "input" in sched_card_html

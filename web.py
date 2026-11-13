@@ -1233,6 +1233,7 @@ select, input:not([type="checkbox"]) { width:100%; font:inherit; padding:8px; bo
                 background:var(--bg); color:var(--ink); }
 input[type="checkbox"] { width:auto; cursor:pointer; }
 [hidden] { display:none !important; }
+#schedulescard[open] > summary { margin-bottom:8px; }
 #topbar { position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:10px; padding:8px 12px;
           background:var(--bg); border-bottom:1px solid var(--line); }
 #topbar .title { flex:1; font-weight:700; font-size:18px; }
@@ -1250,9 +1251,10 @@ body.menu-open aside { transform:none; visibility:visible; }
 .nav:hover { background:var(--bg); color:var(--ink); }
 .nav.on { background:var(--bg); color:var(--accent); }
 [data-views] { display:none; }
-body[data-view=chat] [data-views~=chat], body[data-view=settings] [data-views~=settings] { display:block; }
+body[data-view=chat] [data-views~=chat], body[data-view=settings] [data-views~=settings],
+body[data-view=schedules] [data-views~=schedules] { display:block; }
 body:not([data-view=chat]) #thread { display:none; }
-body[data-view=settings] #dock { background:transparent; }
+body:not([data-view=chat]) #dock { background:transparent; }
 main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; max-width:none; width:100%; }
 #content, #dock { width:100%; max-width:760px; margin:0 auto; }
 #content { flex:1; padding-top:16px; }
@@ -1285,10 +1287,6 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 #approvalscard h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px; }
 .approvalitem { padding:6px 0; border-bottom:1px solid var(--line); }
 .approvalitem:last-child { border-bottom:0; }
-#schedulescard { background:transparent; border:0; border-radius:0; padding:0; margin-bottom:0; font-size:13px; }
-#schedulescard > summary { font-size:16px; font-weight:600; text-transform:none; letter-spacing:0; padding:10px 12px; border-radius:8px; }
-#schedulescard > summary:hover, #schedulescard[open] > summary { background:var(--bg); color:var(--ink); }
-#schedulescard > :not(summary) { margin-left:12px; margin-right:12px; }
 .nav:focus:not(:focus-visible) { outline:none; }
 .scheduleitem { padding:6px 0; border-bottom:1px solid var(--line); }
 .scheduleitem:last-child { border-bottom:0; }
@@ -1307,7 +1305,7 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   #runslist { max-height:none; flex:1; }
   main { padding:0 32px; }
   #content { padding-top:24px; }
-  #setcard > summary { display:none; }
+  #setcard > summary, #schedulescard > summary { display:none; }
   .feed pre { font-size:13px; }
 }
 </style></head><body data-view="chat">
@@ -1317,24 +1315,13 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 <aside><h1>SmolPaw</h1>
   <button id="newchat">+ New chat</button>
   <button class="nav on" data-view="chat">Chat</button>
+  <button class="nav" id="schednav" data-view="schedules" hidden>Schedules</button>
   <button class="nav" data-view="settings">Settings</button>
   <div class="card" id="approvalscard" hidden>
     <h2>Needs approval</h2>
     <div id="approvalslist"></div>
     <div class="meta" id="dismissmsg" style="margin-top:6px"></div>
   </div>
-  <details class="card" id="schedulescard" hidden>
-    <summary>Schedules</summary>
-    <div class="meta" id="scheduleserror" style="color:var(--no);margin-bottom:6px" hidden></div>
-    <div class="meta" id="schedmsg" style="color:var(--no);margin-bottom:6px" hidden></div>
-    <div id="schedform" style="margin-bottom:10px" hidden>
-      <textarea id="schedprompt" placeholder="Prompt" rows="2" style="margin-bottom:6px"></textarea>
-      <input id="schedcron" placeholder="Cron expression (e.g. 0 9 * * 1-5)" style="margin-bottom:6px">
-      <div class="row" style="margin-top:0"><button id="schedadd">Add</button></div>
-    </div>
-    <div id="scheduleslist"></div>
-    <div class="meta" id="schedulesloaderr" style="color:var(--no);margin-top:6px" hidden>Could not load schedules</div>
-  </details>
   <div class="recents"><h2>Recents</h2><div id="runslist"><pre>(no runs yet)</pre></div></div>
   <div class="meta" id="meta">connecting...</div></aside>
 <main><div id="content">
@@ -1348,6 +1335,17 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <div class="cardhead"><div class="meta" id="actsummary" style="margin:0"></div><button class="copybtn" id="livebtn" hidden>Current run</button></div>
     <pre id="feed">(nothing yet)</pre></details>
 </div>
+<details class="card" id="schedulescard" data-views="schedules" hidden open><summary>Schedules</summary>
+  <div class="meta" id="scheduleserror" style="color:var(--no);margin-bottom:6px" hidden></div>
+  <div class="meta" id="schedmsg" style="color:var(--no);margin-bottom:6px" hidden></div>
+  <div id="schedform" style="margin-bottom:10px" hidden>
+    <textarea id="schedprompt" placeholder="Prompt" rows="2" style="margin-bottom:6px"></textarea>
+    <input id="schedcron" placeholder="Cron expression (e.g. 0 9 * * 1-5)" style="margin-bottom:6px">
+    <div class="row" style="margin-top:0"><button id="schedadd">Add</button></div>
+  </div>
+  <div id="scheduleslist"></div>
+  <div class="meta" id="schedulesloaderr" style="color:var(--no);margin-top:6px" hidden>Could not load schedules</div>
+</details>
 <details class="card" id="setcard" data-views="settings"><summary>Settings</summary>
   <div class="filesec" id="setform" hidden>
     <h3>Default backend</h3><select id="sbackend"></select>
@@ -1635,9 +1633,12 @@ function renderSchedules() {
   }
   if (!canRun && !schedulesData.length && !schedulesError && !schedulesLoadError) {
     card.hidden = true;
+    $("schednav").hidden = true;
+    if (document.body.dataset.view === "schedules") setView("chat");
     return;
   }
   card.hidden = false;
+  $("schednav").hidden = false;
   for (const s of schedulesData) {
     const item = document.createElement("div");
     item.className = "scheduleitem";
@@ -1993,11 +1994,12 @@ document.querySelector("aside").addEventListener("click", e => {
 function setView(v) {
   document.body.dataset.view = v;
   if (v === "settings") $("setcard").open = true;
+  if (v === "schedules") $("schedulescard").open = true;
   for (const b of document.querySelectorAll(".nav")) b.classList.toggle("on", b.dataset.view === v);
   try { localStorage.setItem("smolpawView", v); } catch (e) {}
 }
 for (const b of document.querySelectorAll(".nav")) b.onclick = () => setView(b.dataset.view);
-try { const v = localStorage.getItem("smolpawView"); if (["chat", "settings"].includes(v)) setView(v); } catch (e) {}
+try { const v = localStorage.getItem("smolpawView"); if (["chat", "settings", "schedules"].includes(v)) setView(v); } catch (e) {}
 wide.onchange = openPanels; openPanels();
 refresh(); setInterval(refresh, 1500);
 </script></body></html>
