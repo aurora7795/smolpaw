@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Changed
+- Phone layout of the web page: the sidebar (New chat, Chat/Settings, Schedules, approvals, Recents) is a slide-in drawer behind a hamburger button in a slim top bar, with a "+" button for a new chat beside it, so the chat and the message box fill the screen. The drawer closes when you pick a chat, a view or New chat, tap outside it or press Escape; a red dot on the button shows when something needs approval. Settings is now its own view on phones, as it already was on wide screens. Wide screens are unchanged.
 - The Schedules card in the web sidebar is a collapsed heading (a `<details>` like Settings), opened on click, instead of always being on display.
 
 ### Added
