@@ -107,7 +107,8 @@ def services() -> dict[str, dict]:
 def _secrets() -> list[str]:
     """Every value to mask in output: service keys named in notes.md, and secrets entered on the web page."""
     values = [os.environ.get(s.get("key_env", ""), "") for s in services().values()]
-    return [v for v in values if len(v) >= 8] + secret_store.values()
+    logins = [os.environ.get(d.get("pass_env", ""), "") for d in devices().values()]
+    return [v for v in values if len(v) >= 8] + [v for v in logins if len(v) >= secret_store.MIN_MASK] + secret_store.values()
 
 
 def _redact(text: str) -> str:
@@ -437,6 +438,93 @@ def run_shell(command: str) -> str:
     _log("shell", command=command, read_only=bool(argv), exit=r.returncode, output=out[:LOG_OUT])
     result = _clip(_redact(out))
     _show(f"$ {command}", result)
+    return result
+
+
+# --- ssh devices ------------------------------------------------------------------
+
+DEVICE_LINE = re.compile(r"^- (\w+): ssh (?!-)([A-Za-z0-9._-]+)@(?!-)([A-Za-z0-9._:-]+)((?: \| \w+=\S+)*)\s*$")
+SSH_TIMEOUT = 60
+
+
+def devices() -> dict[str, dict]:
+    """Parse notes.md lines like `- router: ssh admin@192.168.1.1 | pass_env=ROUTER_PASS | port=22`.
+
+    pass_env names the environment variable that holds the password (left out: log in with a key). The user
+    and host are restricted to plain name characters and cannot start with "-", so a line cannot smuggle in an ssh option.
+    """
+    found = {}
+    if not NOTES.exists():
+        return found
+    for line in NOTES.read_text().splitlines():
+        m = DEVICE_LINE.match(line)
+        if not m:
+            continue
+        opts = dict(kv.split("=", 1) for kv in m.group(4).split(" | ") if kv)
+        dev = {"user": m.group(2), "host": m.group(3)}
+        if re.fullmatch(r"[A-Z][A-Z0-9_]*", opts.get("pass_env", "")):
+            dev["pass_env"] = opts["pass_env"]
+        if re.fullmatch(r"\d{1,5}", opts.get("port", "")) and 0 < int(opts["port"]) < 65536:
+            dev["port"] = opts["port"]
+        found[m.group(1)] = dev
+    return found
+
+
+def apply_devices() -> bool:
+    """Offer ssh_run only when notes.md lists a device, so a setup without one sends the model nothing extra."""
+    has = bool(devices())
+    if has and ssh_run not in GENERIC_TOOLS:
+        GENERIC_TOOLS.append(ssh_run)
+    elif not has and ssh_run in GENERIC_TOOLS:
+        GENERIC_TOOLS.remove(ssh_run)
+    return has
+
+
+@tool
+@_remember
+def ssh_run(device: str, command: str) -> str:
+    """Run a command on a device listed in notes.md over ssh, logged in with its saved login. Asks the user first.
+
+    Args:
+        device: The device name from notes.md, e.g. "router".
+        command: The command to run on the device, e.g. "uptime".
+    """
+    known = devices()
+    dev = known.get(device)
+    if dev is None:
+        return f"ERROR: unknown device {device!r}. Devices in notes.md: {', '.join(known) or 'none'}."
+    if not isinstance(command, str) or not command.strip() or len(command) > 2000 or "\0" in command:
+        return "ERROR: command must be 1 to 2000 characters."
+    pass_env = dev.get("pass_env")
+    password = os.environ.get(pass_env, "") if pass_env else ""
+    if pass_env and not password:
+        return f"ERROR: {pass_env} is not set. Ask the user to save it under Settings > Secrets (or in .env); never ask for the value."
+    if pass_env and not shutil.which("sshpass"):
+        return "ERROR: sshpass is not installed, so a password login cannot run. Tell the user."
+    where = f"{dev['user']}@{dev['host']}"
+    # Every command asks, whatever it is: what runs on the device is opaque from here.
+    if not _approved(f"Run on {device} ({where}) over ssh:\n  {command}"):
+        return DECLINED
+    # argv, never a shell: only the remote side interprets `command`. The password reaches sshpass through the
+    # child's environment, so it is on no command line and in no prompt or log.
+    argv = (["sshpass", "-e"] if pass_env else []) + [
+        "ssh", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new", "-o", "NumberOfPasswordPrompts=1",
+        *(["-o", "BatchMode=yes"] if not pass_env else []), *(["-p", dev["port"]] if "port" in dev else []),
+        where, command]
+    env = {**os.environ, **({"SSHPASS": password} if pass_env else {})}
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=SSH_TIMEOUT, env=env, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        ACTIONS.append(f"ssh timed out, outcome unknown: {device}: {command}")
+        return f"ERROR: no result after {SSH_TIMEOUT}s. If the command changes anything, its outcome is unknown."
+    except OSError as exc:
+        ACTIONS.append(f"ssh could not run, outcome unknown: {device}: {command}")
+        return f"ERROR: could not run ssh ({exc})."
+    ACTIONS.append(f"ssh {device} exit {r.returncode}: {command}")
+    out = f"exit code {r.returncode}\n{r.stdout}{('[stderr] ' + r.stderr) if r.stderr else ''}"
+    _log("ssh", device=device, command=command, exit=r.returncode, output=out[:LOG_OUT])
+    result = _clip(_redact(out))
+    _show(f"ssh {device}: {command}", result)
     return result
 
 

@@ -39,6 +39,8 @@ def check(name: str, cond: bool) -> None:
 check.failed = 0
 
 env = secret_store.PATH
+for name in ("ROUTER_PASS", "ROUTER_USER", "QUOTE_PASS", "WEB_SECRET", "RESTART_PASS", "OKNAME"):
+    os.environ.pop(name, None)  # importing agent loaded the real .env, which may already define some of these
 PW = "santiago-7"
 
 # --- the store -------------------------------------------------------------------
