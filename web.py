@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 
 import generic_tools as g
 import schedules
+import secret_store
 from agent import BACKENDS, MAX_STEPS, build_agent, load_env, run_request
 from scheduler import Scheduler
 from smolagents.models import ChatMessage, MessageRole
@@ -972,6 +973,8 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, list_models(backend))
             if path == "/api/files":
                 return self._send(200, _files_payload())
+            if path == "/api/secrets":
+                return self._send(200, {"names": secret_store.names()})  # names only, never values
             if path == "/api/runs":
                 return self._send(200, _list_runs())
             if path == "/api/schedules":
@@ -1064,6 +1067,12 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
             if path == "/api/stop" and session:
                 session.stop()
                 return self._send(200, {"ok": True})
+            if path == "/api/secret_set":
+                err = secret_store.set_secret(body.get("name"), body.get("value"))
+                return self._send(400 if err else 200, {"error": err} if err else {"ok": True, "names": secret_store.names()})
+            if path == "/api/secret_delete":
+                ok = secret_store.delete_secret(body.get("name"))
+                return self._send(200 if ok else 404, {"ok": ok, "names": secret_store.names()})
             if path == "/api/dismiss_approval" and session:
                 aid = body.get("id")
                 if not isinstance(aid, str) or not aid or len(aid) > 200 or "/" in aid or "\\" in aid or ".." in aid:
@@ -1359,6 +1368,15 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <div class="row"><button id="sapply">Apply</button></div>
     <div class="meta" id="smsg"></div>
   </div>
+  <div class="filesec" id="secretsec">
+    <h2>Secrets</h2>
+    <div class="meta">Saved to .env on this Mac and used by name: a service key in notes.md (key_env=NAME) or <code>$NAME</code> in a shell command. The agent never sees the value, and it is masked in output and logs. Sent over this page's connection as typed.</div>
+    <div id="secretlist"></div>
+    <input id="secname" placeholder="NAME, e.g. ROUTER_PASS" autocomplete="off" autocapitalize="characters" spellcheck="false" style="margin-top:8px">
+    <input id="secvalue" type="password" placeholder="Value" autocomplete="new-password" spellcheck="false" style="margin-top:6px">
+    <div class="row"><button id="secsave">Save secret</button></div>
+    <div class="meta" id="secmsg"></div>
+  </div>
   <div class="filesec">
     <h2>Files (read-only)</h2>
     <details class="sub"><summary>Notes (notes.md)</summary><pre id="fnotes">(empty)</pre></details>
@@ -1537,7 +1555,43 @@ function fillSettings(s) {
 }
 $("ssearchprovider").onchange = updateSearchHint;
 $("sbackend").onchange = () => { $("smodel").value = ""; loadModels(); };
-$("setcard").ontoggle = () => { if ($("setcard").open) { loadModels(); loadFiles(); } };
+function renderSecrets(names) {
+  const list = $("secretlist");
+  while (list.firstChild) list.removeChild(list.firstChild);
+  if (!names.length) { const m = document.createElement("div"); m.className = "meta"; m.textContent = "(none saved)"; list.appendChild(m); return; }
+  for (const n of names) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.alignItems = "center";
+    const label = document.createElement("div");
+    label.style.flex = "1";
+    label.style.fontFamily = "ui-monospace, Menlo, monospace";
+    label.textContent = n;
+    const del = document.createElement("button");
+    del.className = "ghost";
+    del.style.flex = "none";
+    del.textContent = "Delete";
+    del.onclick = async () => {
+      if (del.textContent !== "Sure?") { del.textContent = "Sure?"; setTimeout(() => { del.textContent = "Delete"; }, 3000); return; }
+      const res = await api("/api/secret_delete", {name: n});
+      renderSecrets(res.names || []);
+    };
+    row.appendChild(label);
+    row.appendChild(del);
+    list.appendChild(row);
+  }
+}
+async function loadSecrets() {
+  try { renderSecrets((await api("/api/secrets")).names || []); } catch (e) {}
+}
+$("secsave").onclick = async () => {
+  const msg = $("secmsg");
+  const res = await api("/api/secret_set", {name: $("secname").value.trim(), value: $("secvalue").value});
+  $("secvalue").value = "";  // the value never stays in the page
+  if (res.ok) { $("secname").value = ""; msg.style.color = ""; msg.textContent = "Saved."; renderSecrets(res.names || []); }
+  else { msg.style.color = "var(--no)"; msg.textContent = res.error || "Could not save."; }
+};
+$("setcard").ontoggle = () => { if ($("setcard").open) { loadModels(); loadFiles(); loadSecrets(); } };
 $("sapply").onclick = async () => {
   const r = await fetch("/api/settings", {method: "POST", cache: "no-store",
     headers: {"X-Token": token, "Content-Type": "application/json"},
