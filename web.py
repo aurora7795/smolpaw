@@ -1285,8 +1285,11 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 #approvalscard h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 6px; }
 .approvalitem { padding:6px 0; border-bottom:1px solid var(--line); }
 .approvalitem:last-child { border-bottom:0; }
-#schedulescard { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; font-size:13px; }
-#schedulescard[open] > summary { margin-bottom:6px; }
+#schedulescard { background:transparent; border:0; border-radius:0; padding:0; margin-bottom:0; font-size:13px; }
+#schedulescard > summary { font-size:16px; font-weight:600; text-transform:none; letter-spacing:0; padding:10px 12px; border-radius:8px; }
+#schedulescard > summary:hover, #schedulescard[open] > summary { background:var(--bg); color:var(--ink); }
+#schedulescard > :not(summary) { margin-left:12px; margin-right:12px; }
+.nav:focus:not(:focus-visible) { outline:none; }
 .scheduleitem { padding:6px 0; border-bottom:1px solid var(--line); }
 .scheduleitem:last-child { border-bottom:0; }
 .approvalprompt { font-weight:500; margin:4px 0; overflow-wrap:anywhere; }
