@@ -31,6 +31,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qsl, urlparse
 
 import requests
+import secret_store
 from smolagents import tool
 
 # _remember wraps tools; smolagents only warns about this for its remote executor, which we do not use.
@@ -104,13 +105,17 @@ def services() -> dict[str, dict]:
 
 
 def _secrets() -> list[str]:
+    """Every value to mask in output: service keys named in notes.md, and secrets entered on the web page."""
     values = [os.environ.get(s.get("key_env", ""), "") for s in services().values()]
-    return [v for v in values if len(v) >= 8]
+    return [v for v in values if len(v) >= 8] + secret_store.values()
 
 
 def _redact(text: str) -> str:
-    for secret in _secrets():
+    for secret in sorted(set(_secrets()), key=len, reverse=True):  # longest first: a short one must not split a long one
         text = text.replace(secret, "[REDACTED]")
+        escaped = json.dumps(secret)[1:-1]  # how it reads inside a JSON run-log line
+        if escaped != secret:
+            text = text.replace(escaped, "[REDACTED]")
     return text
 
 
