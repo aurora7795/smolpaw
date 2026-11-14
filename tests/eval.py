@@ -499,6 +499,10 @@ def main() -> None:
     ap.add_argument("--add-skill", action="append", default=[], metavar="FILE",
                     help="copy this skill file into the run's isolated skills folder (repeatable); every run uses a copy of "
                          "the repo's skills/ in a temp folder, so a candidate skill never touches the real one (#103)")
+    ap.add_argument("--radarr-spec", action="store_true",
+                    help="with --fake-radarr: name the fake server's own OpenAPI spec in notes.md (#114)")
+    ap.add_argument("--no-write-hints", action="store_true",
+                    help="turn off the write hints in openapi_search (#112), for the comparison run")
     ap.add_argument("--no-id-guard", action="store_true",
                     help="turn the unseen-id guard off (#102), for the comparison run")
     ap.add_argument("--without-tool", action="append", default=[],
@@ -514,6 +518,7 @@ def main() -> None:
     args = ap.parse_args()
     MAX_TOKENS = args.max_tokens
     g.UNSEEN_ID_GUARD = not args.no_id_guard
+    g.WRITE_HINTS = not args.no_write_hints
 
     load_env()
     tmp = Path(tempfile.mkdtemp())
@@ -535,7 +540,8 @@ def main() -> None:
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
         url = f"http://127.0.0.1:{port}"
-        (tmp / "notes.md").write_text(f"# notes\n\n- radarr: {url}\n  Movie manager. No API key needed.\n")
+        spec_line = f"  OpenAPI spec: {url}/api/v3/openapi.json\n" if args.radarr_spec else ""
+        (tmp / "notes.md").write_text(f"# notes\n\n- radarr: {url}\n  Movie manager. No API key needed.\n{spec_line}")
         expects = expects or []
     elif args.notes_file:
         (tmp / "notes.md").write_text(Path(args.notes_file).read_text())

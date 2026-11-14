@@ -4,7 +4,9 @@ quality profile and root folder whose ids are not the ones Radarr usually has. N
 Run: .venv/bin/python tests/fake_radarr.py [port]
 
   GET  /api                               {"current": "v3"}, as a real Radarr answers
+  GET  /api/v3/openapi.json               its own OpenAPI spec: the routes below, with the movie body fields (#114)
   GET  /api/v3/movie/lookup?term=<text>   films whose title contains the text: title, year, tmdbId
+  GET  /api/v3/movie/lookup/tmdb?tmdbId=  the film with that id (a list of one)
   GET  /api/v3/qualityprofile             [{"id": 4, "name": "HD-1080p"}, ...]
   GET  /api/v3/rootfolder                 [{"id": 2, "path": "/media/films"}]
   GET  /api/v3/movie                      films added so far
@@ -35,6 +37,31 @@ FILMS = [
 ]
 PROFILES = [{"id": 4, "name": "HD-1080p"}, {"id": 6, "name": "Ultra-HD"}, {"id": 9, "name": "SD"}]
 ROOTS = [{"id": 2, "path": "/media/films"}]
+
+def _get(summary: str, tag: str) -> dict:
+    return {"get": {"tags": [tag], "summary": summary, "responses": {"200": {"description": "OK"}}}}
+
+
+SPEC = {
+    "openapi": "3.0.4",
+    "info": {"title": "Fake Radarr", "version": "3.0.0"},
+    "paths": {
+        "/api/v3/movie": {
+            **_get("List the movies added so far", "Movie"),
+            "post": {"tags": ["Movie"], "summary": "Add a movie",
+                     "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/MovieResource"}}}},
+                     "responses": {"201": {"description": "Created"}}},
+        },
+        "/api/v3/movie/lookup": _get("Search films by title (term)", "MovieLookup"),
+        "/api/v3/movie/lookup/tmdb": _get("Look a film up by tmdbId", "MovieLookup"),
+        "/api/v3/qualityprofile": _get("List quality profiles", "QualityProfile"),
+        "/api/v3/rootfolder": _get("List root folders", "RootFolder"),
+    },
+    "components": {"schemas": {"MovieResource": {"type": "object", "properties": {
+        "title": {"type": "string"}, "year": {"type": "integer"}, "tmdbId": {"type": "integer"},
+        "qualityProfileId": {"type": "integer"}, "rootFolderPath": {"type": "string"}, "monitored": {"type": "boolean"},
+    }}}},
+}
 ADDED: list[dict] = []
 ATTEMPTS: list[dict] = []  # {"tmdbId", "qualityProfileId", "status", "problems": [...]}
 
@@ -72,7 +99,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
         path = url.path.rstrip("/")
-        if path == "/api":
+        if path == "/api/v3/openapi.json":
+            self._send(200, SPEC)
+        elif path == "/api/v3/movie/lookup/tmdb":
+            wanted = parse_qs(url.query).get("tmdbId", [""])[0]
+            self._send(200, [f for f in FILMS if str(f["tmdbId"]) == wanted])
+        elif path == "/api":
             self._send(200, {"current": "v3", "deprecated": []})
         elif path == "/api/v3/movie/lookup":
             term = parse_qs(url.query).get("term", [""])[0].lower().strip()

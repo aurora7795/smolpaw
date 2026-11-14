@@ -211,6 +211,7 @@ SHOWN_OUTPUT: tuple[str, str] | None = None  # (label, text) of the latest shell
 LAST_RESULT = ""  # most recent tool output, shown by the harness if the agent hits the step cap
 
 
+WRITE_HINTS = True  # off only for the eval's comparison run (tests/eval.py --no-write-hints)
 UNSEEN_ID_GUARD = True  # off only for the eval's comparison run (tests/eval.py --no-id-guard)
 SEEN_TOKENS: set[str] = set()  # words and numbers the model has been shown or told this request (guards write ids)
 _SEEN_LOCK = threading.Lock()
@@ -1061,6 +1062,32 @@ def web_search(query: str) -> str:
 _SPECS: dict[str, dict] = {}
 
 
+def _write_hints(spec: dict, method: str, path: str, op: dict) -> str:
+    """For a POST/PUT/PATCH endpoint: its id-like and path-like body fields, each beside the GET endpoint that lists the values.
+
+    Specs rarely mark these required, and a small model that sees only "POST /movie" writes guessed ids (#112).
+    Only fields whose name matches an endpoint in the same spec are shown, one endpoint each."""
+    schema = ((op.get("requestBody") or {}).get("content") or {}).get("application/json", {}).get("schema") or {}
+    if "$ref" in schema:
+        schema = (spec.get("components", {}).get("schemas", {})).get(schema["$ref"].rsplit("/", 1)[-1], {})
+    gets = [p for p, ops in spec["paths"].items() if "get" in ops and "{" not in p]
+    lines = []
+    for field in (schema.get("properties") or {}):
+        stem = re.sub(r"(Ids?|_ids?|Path)$", "", str(field))
+        if stem == field or len(stem) < 3:  # not an id- or path-like name, or nothing left to match on
+            continue
+        names = {stem.lower(), stem.lower() + "s", stem.lower() + "es"}  # list endpoints are often plural
+        found = sorted((g for g in gets if g.rstrip("/").rsplit("/", 1)[-1].lower().replace("-", "").replace("_", "") in names), key=len)
+        if not found:
+            continue
+        target = found[0]
+        for word in ("/lookup/", "/search/"):  # /movie/lookup/tmdb takes the id; /movie/lookup takes a title
+            if word in target:
+                target = target[:target.index(word) + len(word) - 1]
+        lines.append(f"{field} <- GET {target}")
+    return ("\n    Fill from a GET, not from memory: " + "; ".join(lines[:8])) if lines else ""
+
+
 @tool
 @_remember
 def openapi_search(spec_url: str, keyword: str = "") -> str:
@@ -1101,7 +1128,10 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
                 continue
             text = " ".join([path, op.get("summary", ""), " ".join(op.get("tags", []))]).lower()
             if kw in text:
-                hits.append(f"{method.upper()} {path}  {op.get('summary', '')}".rstrip())
+                hint = ""
+                if WRITE_HINTS and method.lower() in ("post", "put", "patch") and sum("Fill from a GET" in h for h in hits) < 3:  # a few, so the list stays short
+                    hint = _write_hints(spec, method, path, op)
+                hits.append(f"{method.upper()} {path}  {op.get('summary', '')}".rstrip() + hint)
     _log("openapi_search", spec_url=spec_url, keyword=keyword, result=f"{len(hits)} hits")
     return "\n".join(hits[:20]) + (f"\n... {len(hits) - 20} more" if len(hits) > 20 else "") or "No matching endpoints."
 

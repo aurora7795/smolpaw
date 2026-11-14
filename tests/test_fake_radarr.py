@@ -38,6 +38,12 @@ try:
             time.sleep(0.1)
     post = lambda body: requests.post(f"{url}/api/v3/movie", json=body, timeout=5)  # noqa: E731
     check("GET /api names the version, as Radarr does", requests.get(f"{url}/api").json()["current"] == "v3")
+    spec = requests.get(f"{url}/api/v3/openapi.json").json()
+    check("it serves its own OpenAPI spec", spec["openapi"].startswith("3") and "/api/v3/movie/lookup" in spec["paths"])
+    check("every GET route in the spec answers 200 and every other route 404s",
+          all(requests.get(f"{url}{p}", timeout=5).status_code == 200 for p, ops in spec["paths"].items() if "get" in ops)
+          and requests.get(f"{url}/api/v3/nothing").status_code == 404)
+    check("lookup by tmdbId returns that film", [f["title"] for f in requests.get(f"{url}/api/v3/movie/lookup/tmdb", params={"tmdbId": 17431}).json()] == ["Moon"])
     lookup = requests.get(f"{url}/api/v3/movie/lookup", params={"term": "primer"}).json()
     check("lookup matches on part of a title", [f["title"] for f in lookup] == ["Primer", "Primer Fever"])
     check("a lookup with no term returns nothing", requests.get(f"{url}/api/v3/movie/lookup").json() == [])
