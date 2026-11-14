@@ -1,6 +1,6 @@
 # SmolPaw — Plan and Status
 
-Last updated 2026-11-09. Measured results are in [RESULTS.md](RESULTS.md).
+Last updated 2026-11-14. Measured results are in [RESULTS.md](RESULTS.md).
 
 ## Goal
 
@@ -194,6 +194,15 @@ Tracked as GitHub issues:
 39. Save a finished run as a skill, from a button on the web page, reviewed in the skill editor before saving: [#99](https://github.com/aurora7795/smolpaw/issues/99). Not a prompt or tool change, so no merge gate.
 40. First contact with an unknown device or service: probe read-only, then save a short note: [#100](https://github.com/aurora7795/smolpaw/issues/100). A prompt or tool change, so it needs the merge gate; motivated by the ssh tool picking `netstat` for a device count on a router it knew nothing about.
 41. Nudge the agent to try another approach when the output did not answer the question: [#101](https://github.com/aurora7795/smolpaw/issues/101). Needs the merge gate and a loop count; sequenced after #100, which may remove most of these give-ups.
+
+42. Backlog from a review of the project against SmallCode, effGen and the lighter claw harnesses (2026-11-14), sorted by what the evidence says matters most. None is built; each is an evaluation or has a stated pass criterion, and the merge gate applies to prompt and tool changes.
+    - Write reliability (the biggest gap, [#1](https://github.com/aurora7795/smolpaw/issues/1)): block writes whose ids were not seen in tool output this run ([#102](https://github.com/aurora7795/smolpaw/issues/102); a pre-flight check in the confirmation layer, so it needs the owner's OK and a test; zero prompt cost); a generic lookup-then-write skill ([#103](https://github.com/aurora7795/smolpaw/issues/103)). Measure both against a fake Radarr add endpoint first, so no real service is written to.
+    - Long files: `write_file` over a long existing file ([#104](https://github.com/aurora7795/smolpaw/issues/104); the clipped-view write-back is the main failure in RESULTS.md); clipped tool output with no way to fetch the rest ([#105](https://github.com/aurora7795/smolpaw/issues/105)).
+    - Prompt budget: shorter tool descriptions and instructions ([#106](https://github.com/aurora7795/smolpaw/issues/106)); a suite check that fails when the first call outgrows the budget ([#110](https://github.com/aurora7795/smolpaw/issues/110)). Old tool results between steps stay under [#73](https://github.com/aurora7795/smolpaw/issues/73), with the rule that anything cut leaves a marker.
+    - Parsing and retries: a tolerant parser for malformed and text-form tool calls ([#107](https://github.com/aurora7795/smolpaw/issues/107), see also [#14](https://github.com/aurora7795/smolpaw/issues/14)); adaptive retry is a mechanism to compare under [#101](https://github.com/aurora7795/smolpaw/issues/101).
+    - Model routing stays under [#22](https://github.com/aurora7795/smolpaw/issues/22); the model-by-task table is already in RESULTS.md, but most cells are 3 to 10 runs, so a gap needs checking against noise first.
+    - Safety and evidence: adversarial tests for key leakage and prompt injection across every tool ([#108](https://github.com/aurora7795/smolpaw/issues/108)); a second and third real service before claiming generality ([#109](https://github.com/aurora7795/smolpaw/issues/109)); first-call prompt of nanobot, ZeroClaw, SmallCode and smolagents measured the same way as PicoClaw ([#18](https://github.com/aurora7795/smolpaw/issues/18), widened), with their figures marked unverified in the meantime.
+    - Risks to keep in view: prompt creep past 5K without a measured gain; moving safety into the prompt to save code (it stays in Python); one invented API plus one real service is thin evidence for "general"; SmallCode's and effGen's benchmark numbers are their own and stay quoted as claims.
 
 Not planned: pointing OpenClaw itself at a local model. Its prompt (about 24K tokens plus a 20K reserve) would not fit comfortably in the contexts we can run on 16GB, so little would be learned for the risk of editing its config.
 
