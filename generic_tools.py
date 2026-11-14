@@ -1066,7 +1066,7 @@ def _write_hints(spec: dict, method: str, path: str, op: dict) -> str:
     """For a POST/PUT/PATCH endpoint: its id-like and path-like body fields, each beside the GET endpoint that lists the values.
 
     Specs rarely mark these required, and a small model that sees only "POST /movie" writes guessed ids (#112).
-    Only fields whose name matches an endpoint in the same spec are shown, one endpoint each."""
+    Only fields whose name matches an endpoint in the same spec are shown, one endpoint each, with its first query parameter."""
     schema = ((op.get("requestBody") or {}).get("content") or {}).get("application/json", {}).get("schema") or {}
     if "$ref" in schema:
         schema = (spec.get("components", {}).get("schemas", {})).get(schema["$ref"].rsplit("/", 1)[-1], {})
@@ -1084,7 +1084,8 @@ def _write_hints(spec: dict, method: str, path: str, op: dict) -> str:
         for word in ("/lookup/", "/search/"):  # /movie/lookup/tmdb takes the id; /movie/lookup takes a title
             if word in target:
                 target = target[:target.index(word) + len(word) - 1]
-        lines.append(f"{field} <- GET {target}")
+        params = [x.get("name") for x in (spec["paths"][target]["get"].get("parameters") or []) if isinstance(x, dict) and x.get("in") == "query"]
+        lines.append(f"{field} <- GET {target}" + (f"?{params[0]}=" if params and params[0] else ""))  # the parameter a lookup takes (term, not q)
     return ("\n    Fill from a GET, not from memory: " + "; ".join(lines[:8])) if lines else ""
 
 

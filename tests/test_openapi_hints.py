@@ -74,6 +74,13 @@ g.WRITE_HINTS = False
 check("the switch turns the hints off", "Fill from a GET" not in search(spec(props)))
 g.WRITE_HINTS = True
 
+withparam = spec({"colourSchemeId": {}})
+withparam["paths"]["/api/colourschemes"]["get"]["parameters"] = [{"name": "term", "in": "query"}, {"name": "limit", "in": "query"}]
+check("the first query parameter of the GET is shown", "colourSchemeId <- GET /api/colourschemes?term=" in search(withparam))
+header = spec({"colourSchemeId": {}})
+header["paths"]["/api/colourschemes"]["get"]["parameters"] = [{"name": "X-Key", "in": "header"}]
+check("a header or path parameter is not shown", "colourSchemeId <- GET /api/colourschemes\n" in search(header) + "\n")
+
 # end to end: the fake Radarr's own spec, served over HTTP
 port = ev.free_port()
 url = f"http://127.0.0.1:{port}"
@@ -88,7 +95,7 @@ try:
             time.sleep(0.1)
     out = g.openapi_search(f"{url}/api/v3/openapi.json", "movie")
     check("the fake Radarr's spec names the lookup, profile and folder endpoints beside the add",
-          "tmdbId <- GET /api/v3/movie/lookup" in out and "qualityProfileId <- GET /api/v3/qualityprofile" in out
+          "tmdbId <- GET /api/v3/movie/lookup?term=" in out and "qualityProfileId <- GET /api/v3/qualityprofile" in out
           and "rootFolderPath <- GET /api/v3/rootfolder" in out)
 finally:
     srv.terminate()

@@ -38,8 +38,11 @@ FILMS = [
 PROFILES = [{"id": 4, "name": "HD-1080p"}, {"id": 6, "name": "Ultra-HD"}, {"id": 9, "name": "SD"}]
 ROOTS = [{"id": 2, "path": "/media/films"}]
 
-def _get(summary: str, tag: str) -> dict:
-    return {"get": {"tags": [tag], "summary": summary, "responses": {"200": {"description": "OK"}}}}
+def _get(summary: str, tag: str, query: str = "") -> dict:
+    op = {"tags": [tag], "summary": summary, "responses": {"200": {"description": "OK"}}}
+    if query:
+        op["parameters"] = [{"name": query, "in": "query", "schema": {"type": "string"}}]
+    return {"get": op}
 
 
 SPEC = {
@@ -52,8 +55,8 @@ SPEC = {
                      "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/MovieResource"}}}},
                      "responses": {"201": {"description": "Created"}}},
         },
-        "/api/v3/movie/lookup": _get("Search films by title (term)", "MovieLookup"),
-        "/api/v3/movie/lookup/tmdb": _get("Look a film up by tmdbId", "MovieLookup"),
+        "/api/v3/movie/lookup": _get("Search films by title", "MovieLookup", "term"),
+        "/api/v3/movie/lookup/tmdb": _get("Look a film up by tmdbId", "MovieLookup", "tmdbId"),
         "/api/v3/qualityprofile": _get("List quality profiles", "QualityProfile"),
         "/api/v3/rootfolder": _get("List root folders", "RootFolder"),
     },
