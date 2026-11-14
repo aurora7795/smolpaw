@@ -1488,7 +1488,7 @@ g.MEMORY = tmp / "missing-memory.md"
 res_missing = http.get(f"{base}/api/files", headers=hdr, timeout=5)
 check("missing files return 200 not 500", res_missing.status_code == 200)
 check("missing files return empty strings and empty list",
-      res_missing.json() == {"notes": "", "skills": [], "memory": ""})
+      res_missing.json() == {"notes": "", "skills": [], "memory": "", "restorable": []})
 
 # 4. secret value from key_env comes back [REDACTED]
 sec_notes = tmp / "sec-notes.md"

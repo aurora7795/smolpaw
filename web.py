@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import generic_tools as g
+import file_edit
 import schedules
 import secret_store
 from agent import BACKENDS, MAX_STEPS, build_agent, load_env, run_request
@@ -843,10 +844,13 @@ def _files_payload() -> dict:
                         continue
     except OSError:
         pass
+    restorable = (["memory"] if file_edit.can_restore("memory") else []) + [
+        f"skill:{x['name']}" for x in skills if file_edit.can_restore("skill", x["name"])]
     return {
         "notes": read_safe(g.NOTES),
         "skills": skills,
         "memory": read_safe(g.MEMORY),
+        "restorable": restorable,
     }
 
 
@@ -973,6 +977,13 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
                 return self._send(200, list_models(backend))
             if path == "/api/files":
                 return self._send(200, _files_payload())
+            if path == "/api/file_text":
+                q = parse_qs(urlparse(self.path).query)
+                kind, name = q.get("kind", [""])[0], q.get("name", [""])[0]
+                text, err = file_edit.read(kind, name)
+                if err:
+                    return self._send(404, {"error": err})
+                return self._send(200, {"text": text, "restorable": file_edit.can_restore(kind, name)})
             if path == "/api/secrets":
                 return self._send(200, {"names": secret_store.names()})  # names only, never values
             if path == "/api/runs":
@@ -1067,6 +1078,15 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
             if path == "/api/stop" and session:
                 session.stop()
                 return self._send(200, {"ok": True})
+            if path in ("/api/file_save", "/api/skill_delete", "/api/file_restore"):
+                if session and session.status == "running":  # a run reads these files; wait for it, as Settings does
+                    return self._send(409, {"error": "a run is active; try again when it finishes"})
+                if path == "/api/file_save":
+                    err, masked = file_edit.save(body.get("kind"), body.get("name"), body.get("text"))
+                    return self._send(400 if err else 200, {"error": err} if err else {"ok": True, "masked": masked})
+                err = (file_edit.delete_skill(body.get("name")) if path == "/api/skill_delete"
+                       else file_edit.restore(body.get("kind"), body.get("name")))
+                return self._send(400 if err else 200, {"error": err} if err else {"ok": True})
             if path == "/api/secret_set":
                 err = secret_store.set_secret(body.get("name"), body.get("value"))
                 return self._send(400 if err else 200, {"error": err} if err else {"ok": True, "names": secret_store.names()})
@@ -1378,10 +1398,13 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
     <div class="meta" id="secmsg"></div>
   </div>
   <div class="filesec">
-    <h2>Files (read-only)</h2>
-    <details class="sub"><summary>Notes (notes.md)</summary><pre id="fnotes">(empty)</pre></details>
-    <details class="sub"><summary>Skills (skills/)</summary><div id="fskills"><pre>(none)</pre></div></details>
-    <details class="sub"><summary>Memory (memory.md)</summary><pre id="fmemory">(empty)</pre></details>
+    <h2>Files</h2>
+    <div class="meta" id="fmsg" hidden></div>
+    <details class="sub"><summary>Notes (notes.md, read-only)</summary><pre id="fnotes">(empty)</pre></details>
+    <details class="sub"><summary>Skills (skills/)</summary><div id="fskills"><pre>(none)</pre></div>
+      <div id="fskillnew"></div></details>
+    <details class="sub"><summary>Memory (memory.md)</summary><pre id="fmemory">(empty)</pre>
+      <div id="fmemoryact"></div></details>
   </div></details>
 </div>
 <div id="dock">
@@ -1450,27 +1473,132 @@ $("copy").onclick = async () => {
     flash("Copied!");
   } catch (e) { flash("Copy failed"); }
 };
+let editingFile = false, filesKey = "";
+function clearNode(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+function fileMsg(text, bad, undo) {
+  const m = $("fmsg");
+  clearNode(m);
+  m.hidden = !text;
+  m.style.color = bad ? "var(--no)" : "";
+  m.appendChild(document.createTextNode(text || ""));
+  if (undo) {
+    const b = document.createElement("button");
+    b.className = "copybtn"; b.textContent = "Undo"; b.style.marginLeft = "8px";
+    b.onclick = async () => { const r = await api("/api/file_restore", undo); fileMsg(r.error || "Restored.", !!r.error); filesKey = ""; loadFiles(); };
+    m.appendChild(b);
+  }
+}
+function actionButton(label, fn, cls) {
+  const b = document.createElement("button");
+  b.className = cls || "ghost"; b.style.flex = "none"; b.textContent = label; b.onclick = fn;
+  return b;
+}
+function closeEditor() { editingFile = false; filesKey = ""; loadFiles(); }
+async function openEditor(box, kind, name, isNew) {
+  if (editingFile) return;
+  let text = "", restorable = false;
+  if (!isNew) {
+    const res = await api("/api/file_text?kind=" + kind + (name ? "&name=" + encodeURIComponent(name) : ""));
+    if (res.error) { fileMsg(res.error, true); return; }
+    text = res.text; restorable = !!res.restorable;
+  }
+  editingFile = true;
+  fileMsg("");
+  if (kind === "memory") $("fmemory").hidden = true;  // the editor shows the text
+  clearNode(box);
+  let nameInput = null;
+  if (isNew) {
+    nameInput = document.createElement("input");
+    nameInput.placeholder = "skill-name (lowercase letters, digits, - and _)";
+    nameInput.autocomplete = "off"; nameInput.autocapitalize = "none"; nameInput.spellcheck = false;
+    nameInput.style.marginBottom = "6px";
+    box.appendChild(nameInput);
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.spellcheck = false;
+  ta.style.minHeight = "180px"; ta.style.fontFamily = "ui-monospace, Menlo, monospace"; ta.style.fontSize = "13px";
+  box.appendChild(ta);
+  const row = document.createElement("div");
+  row.className = "row";
+  const msg = document.createElement("div");
+  msg.className = "meta"; msg.style.marginTop = "6px";
+  const save = actionButton("Save", async () => {
+    const body = {kind, name: isNew ? nameInput.value.trim() : name, text: ta.value};
+    const r = await api("/api/file_save", body);
+    if (r.error) { msg.style.color = "var(--no)"; msg.textContent = r.error; return; }
+    const note = r.masked ? "Saved. A secret in the text was masked." : "Saved.";
+    editingFile = false; filesKey = ""; await loadFiles(); fileMsg(note);
+  }, "");
+  save.style.flex = "1";
+  row.appendChild(save);
+  row.appendChild(actionButton("Cancel", closeEditor));
+  box.appendChild(row);
+  const row2 = document.createElement("div");
+  row2.className = "row";
+  if (restorable) {
+    row2.appendChild(actionButton("Restore previous", async () => {
+      const r = await api("/api/file_restore", {kind, name});
+      if (r.error) { msg.style.color = "var(--no)"; msg.textContent = r.error; return; }
+      editingFile = false; filesKey = ""; await loadFiles(); fileMsg("Restored the previous version.");
+    }));
+  }
+  if (kind === "skill" && !isNew) {
+    const del = actionButton("Delete", async () => {
+      if (del.textContent !== "Sure?") { del.textContent = "Sure?"; setTimeout(() => { del.textContent = "Delete"; }, 3000); return; }
+      const r = await api("/api/skill_delete", {name});
+      if (r.error) { msg.style.color = "var(--no)"; msg.textContent = r.error; return; }
+      editingFile = false; filesKey = ""; await loadFiles(); fileMsg("Deleted " + name + ".", false, {kind: "skill", name});
+    });
+    del.style.color = "var(--no)";
+    row2.appendChild(del);
+  }
+  if (row2.firstChild) box.appendChild(row2);
+  box.appendChild(msg);
+}
 async function loadFiles() {
+  if (editingFile) return;
   try {
     const data = await api("/api/files");
+    const key = JSON.stringify(data);
+    if (key === filesKey) return;
+    filesKey = key;
     $("fnotes").textContent = data.notes || "(empty)";
     $("fmemory").textContent = data.memory || "(empty)";
+    $("fmemory").hidden = false;
+    const memBox = $("fmemoryact");
+    clearNode(memBox);
+    const memRow = document.createElement("div");
+    memRow.className = "row";
+    memRow.appendChild(actionButton("Edit", () => openEditor(memBox, "memory", "", false)));
+    memBox.appendChild(memRow);
     const skillsDiv = $("fskills");
-    while (skillsDiv.firstChild) skillsDiv.removeChild(skillsDiv.firstChild);
+    clearNode(skillsDiv);
     if (!data.skills || !data.skills.length) {
       const p = document.createElement("pre");
       p.textContent = "(none)";
       skillsDiv.appendChild(p);
     } else {
       for (const s of data.skills) {
+        const box = document.createElement("div");
         const title = document.createElement("h3");
         title.textContent = s.name;
         const pre = document.createElement("pre");
         pre.textContent = s.text || "(empty)";
-        skillsDiv.appendChild(title);
-        skillsDiv.appendChild(pre);
+        const row = document.createElement("div");
+        row.className = "row";
+        row.appendChild(actionButton("Edit", () => openEditor(box, "skill", s.name, false)));
+        box.appendChild(title);
+        box.appendChild(pre);
+        box.appendChild(row);
+        skillsDiv.appendChild(box);
       }
     }
+    const newBox = $("fskillnew");
+    clearNode(newBox);
+    const newRow = document.createElement("div");
+    newRow.className = "row";
+    newRow.appendChild(actionButton("New skill", () => openEditor(newBox, "skill", "", true)));
+    newBox.appendChild(newRow);
   } catch (e) {}
 }
 let setLoaded = false;
