@@ -3,6 +3,7 @@ A fake Radarr for the unseen-id eval (#102): real film titles with TMDB-style id
 quality profile and root folder whose ids are not the ones Radarr usually has. Nothing real is touched.
 Run: .venv/bin/python tests/fake_radarr.py [port]
 
+  GET  /api                               {"current": "v3"}, as a real Radarr answers
   GET  /api/v3/movie/lookup?term=<text>   films whose title contains the text: title, year, tmdbId
   GET  /api/v3/qualityprofile             [{"id": 4, "name": "HD-1080p"}, ...]
   GET  /api/v3/rootfolder                 [{"id": 2, "path": "/media/films"}]
@@ -71,7 +72,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
         path = url.path.rstrip("/")
-        if path == "/api/v3/movie/lookup":
+        if path == "/api":
+            self._send(200, {"current": "v3", "deprecated": []})
+        elif path == "/api/v3/movie/lookup":
             term = parse_qs(url.query).get("term", [""])[0].lower().strip()
             self._send(200, [f for f in FILMS if term and term in f["title"].lower()])
         elif path == "/api/v3/qualityprofile":
