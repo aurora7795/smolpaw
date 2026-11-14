@@ -356,6 +356,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
 def print_run(i: int, r: dict) -> None:
     flag = "PASS" if r["passed"] else "FAIL"
     cap = " CAP" if r["hit_cap"] else ""
+    cap += f" STALL({r['stalled']})" if r.get("stalled") else ""
     print(f"  run {i}: {flag}{cap} {r['wall_s']}s steps={r['steps']} parse_err={r['parse_errors']} "
           f"tokens_in={r['input_tokens']} id_refusals={r.get('id_refusals', 0)} tools={'>'.join(r['tools'])}")
     print(f"         {r['check'] + ' | ' if r['check'] else ''}{r['answer'][:160]!r}"
@@ -364,7 +365,8 @@ def print_run(i: int, r: dict) -> None:
 
 def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[str], results: list[dict]) -> None:
     n = len(results)
-    print(f"  => {sum(r['passed'] for r in results)}/{n} passed | "
+    stalled = sum(bool(r.get("stalled")) for r in results)
+    print(f"  => {sum(r['passed'] for r in results)}/{n} passed, {stalled} stalled | "
           f"mean {sum(r['wall_s'] for r in results) / n:.0f}s, "
           f"{sum(r['steps'] for r in results) / n:.1f} steps, "
           f"{sum(r['input_tokens'] for r in results) / n:.0f} input tokens")
