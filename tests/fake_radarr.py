@@ -46,8 +46,9 @@ def validate(body: object) -> list[str]:
     for field in ("title", "tmdbId", "qualityProfileId", "rootFolderPath"):
         if body.get(field) in (None, ""):
             problems.append(f"missing:{field}")
-    if "missing:tmdbId" not in problems and not any(f["tmdbId"] == body["tmdbId"] and f["title"] == body.get("title")
-                                                    for f in FILMS):
+    # the id is wrong if no film has it, or (when a title is sent) it belongs to another title; no title is "missing", not a wrong id
+    if "missing:tmdbId" not in problems and not any(
+            f["tmdbId"] == body["tmdbId"] and (not body.get("title") or f["title"] == body["title"]) for f in FILMS):
         problems.append("tmdbId")
     if "missing:qualityProfileId" not in problems and not any(p["id"] == body["qualityProfileId"] for p in PROFILES):
         problems.append("profile")
