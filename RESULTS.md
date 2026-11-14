@@ -1022,3 +1022,13 @@ Passes of 6:
 - **The spec in notes matters on its own for Qwen** (D: 3 of 6 against 0), not for Gemma (0 of 6).
 - **Caveats.** One machine, n=6 per cell, six cells per model, a fixture where every route the hints point to exists on the server, a single task shape (add a film), context at 32768 rather than 16384. The unseen-id guard (on in every cell) refused 6 writes in all 72 runs: 4 in Qwen's cell D, 1 in Gemma's D and 1 in Gemma's B; none in the cells with the second-iteration hints. Cell D's 3 of 6 for Qwen may owe something to it; the hint cells' gains do not. Tidepool was not rechecked: it has no OpenAPI spec, so `openapi_search` does not apply.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --fake-radarr --n 6 --label hints-B2-on-param`; add `--radarr-spec` for the spec-in-notes cells and `--no-write-hints` for the off cells. Offline tests: `tests/test_openapi_hints.py`, `tests/test_fake_radarr.py`.
+
+## Does the stall stop cost passes? (#115, 2026-11-14)
+
+- **Question.** In the Qwen 3.5 9B cell with the public spec and write hints (B2), 5 of 6 runs were stall-stopped and none passed. Was the stop cutting off a discovery that was still progressing?
+- **Criterion, posted on #115 before the run.** The stop costs passes if the same cell with the stop off (`SMOLPAW_STALL_REPEATS=0`) passes at least 2 more than the 0 of 6 with it on.
+- **Result.** With the stop off: 1 of 6 passed (0 of 6 with it on). Five runs hit the 13-step cap instead, using 71K to 90K input tokens each against 45K for the one pass. Criterion not met, so the stop is not what holds Qwen back here.
+- **Offline read of the stopped runs' traces.** Of the 5 stalled runs, 4 repeated `openapi_search` or spec-fetch calls that returned results already seen, and 1 repeated 404s on guessed URLs. Two (runs 1 and 5) had already done the lookup before stalling, so they were close but did not reach the POST.
+- **Change.** `tests/eval.py` now prints `STALL(<reason>)` on the run line and counts stalled runs in the cell summary.
+- **Caveats.** n=6 per cell, one machine, one fixture; 1 against 0 is within noise.
+- Reproduce: `SMOLPAW_STALL_REPEATS=0 .venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --fake-radarr --n 6 --label hints-B2-nostop`.
