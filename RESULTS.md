@@ -966,3 +966,19 @@ Criterion stated on the issue before any run: with the guard on, no POST with a 
 - **Read variants**: 12 of 12 passed with the guard on, against 11 of 12 on `detail` earlier and 12 of 12 on `paged`. GETs are never blocked, so no change was expected; this confirms it on a small sample.
 - **Caveats.** One machine, n=3 per cell, Ollama with the context at 32768 rather than 16384 (the app's setting). Guard-off was not rerun on the read variants.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --tidepool book --n 3 --label book-guard-on` (add `--no-id-guard` for the off cell; also `gemma4:e4b`), and `--tidepool detail` or `paged` for the read checks. Offline tests: `tests/test_unseen_ids.py`, `tests/test_book_fixture.py`.
+
+### Second evaluation: a fake Radarr with real titles (#102, 2026-11-14)
+
+Fixture `tests/fake_radarr.py`: real film titles with TMDB-style ids (meant to be the real ones, not checked against TMDB), quality profiles 4, 6 and 9 (no default 1) and one root folder. Task: "Add the movie <Primer, Moon or Arrival> to Radarr." (two runs of each per cell, so n=6), Ollama, 32K context, scripted approval of the add. Pass: the server holds exactly that film. Criterion stated on #102 before the runs: the guard works if guard-on sends no POST with a wrong `tmdbId` and guard-off sends at least one; otherwise the result is inconclusive.
+
+| | Guard on | Guard off |
+|---|---|---|
+| Qwen 3.5 9B | 0/6 | 0/6 |
+| Gemma 4 E4B | 0/6 | 0/6 |
+
+- **Inconclusive again.** Nothing passed, the guard fired 0 times, and no run sent a POST with a wrong `tmdbId`. The first tally showed one such POST (Gemma, guard off); it was my fixture mislabelling a body that had the right id but no `title`, which the check now calls a missing field (checked against that run's tool arguments; the saved log text still carries the old count).
+- **Why nothing passed has little to do with ids.** In none of the 24 runs did a model call `/api/v3/movie/lookup` or `/rootfolder`. Qwen spent its 13 steps on `openapi_search` against Radarr's public spec on GitHub (not the fake server) and shell and page fetches, ending at the step cap or an agent error in all 12 runs. Gemma took its TMDB ids from `web_search`, sometimes quoting them correctly (17431 for Moon), then asked the user for the profile or root folder instead of calling `/qualityprofile` or `/rootfolder`, or gave up saying it lacked them. This is the rung 3 pattern in RESULTS (avoiding or misusing `openapi_search`), reproduced on a fake server.
+- **Of 18 POSTs that reached the server** (Qwen 5, Gemma 13), all 18 were refused for a missing field, mostly `title` or `qualityProfileId`; one of them also sent a guessed root folder (`/media/movies`). The guard checks ids, not paths, so a guessed `rootFolderPath` would pass it.
+- **Fixture caveat.** The fake serves no OpenAPI spec of its own, so `openapi_search` only reaches the public Radarr one and cannot confirm this server's routes. A real Radarr serves its own; adding one would make this closer to rung 3.
+- **What it means for #102.** For these two models the bottleneck is finding the lookup and profile endpoints, not guessing ids, so the guard has had nothing to act on in 36 runs across both fixtures. It stays as a safety net; the lookup-then-write skill ([#103](https://github.com/aurora7795/smolpaw/issues/103)) addresses the measured failure more directly.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --fake-radarr --n 6 --label fake-radarr-guard-on` (add `--no-id-guard` for the off cell; also `gemma4:e4b`). Offline test: `tests/test_fake_radarr.py`.
