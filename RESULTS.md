@@ -925,3 +925,23 @@ The check was changed again (#93): a sender's name may be followed by its deadli
 - **One rejection remains, but it did not change a result.** Gemma seed 1 run 2 wrote each item as three lines (sender, "Action needed", deadline); the pairing only accepts the deadline on the line after the sender, so the check rejects it. The run also hit the cap, so the count is the same either way. Filed as #94.
 - **Caveats.** One session, one machine, n=5 per cell, two seeds, two models; the step-cap rule fails a run that has written the right answer.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --ctx 32768 --housekeeping mail_summary --seed 0 --n 5 --label mailfix2` (also `--seed 1`, and the same with `gemma4:e4b`).
+
+## First contact with an unknown device (#100, 2026-11-14)
+
+Question: does one sentence in `ssh_run`'s description ("If you do not know what the device runs, start with `uname -a`, then `help`, before guessing commands") help a small model operate a device it has no notes on?
+
+Fixture (`tests/probe_fixture.py`, run with `--probe`): an invented box, `reef`, behind a fake `ssh` on PATH. It has none of the usual commands (`netstat`, `arp`, `ip`, `cat` all answer "not found"); its own `clients` command lists the 7 connected devices, and only `help` reveals it. The task is "How many devices are connected to the reef box right now?" A pass needs the answer 7 (or "seven") and the box's `clients` command to have really run (read from the harness's action list), so a lucky guess does not count. Each `ssh_run` command is approved by script; nothing else is. Isolated notes, workspace and PATH; nothing real is contacted.
+
+Pass criterion, stated before the run: n=5 per model per condition; keep the line if neither model loses 2 or more passes out of 5 and at least one gains 3 or more.
+
+| | Without the line | With the line |
+|---|---|---|
+| Qwen 3.5 9B | 0/10 (12 to 13 steps, every run capped) | 5/5 (4.6 steps, 22 s mean) |
+| Gemma 4 E4B | 0/10 (gave up after 4 commands) | 2/5 (8.8 steps) |
+
+- **Rule applied before seeing the result**, as above: Qwen gained 5, Gemma gained 2 and lost nothing, so the line stays. The baseline has two runs of 5 per model because the first launch ran unseen while a second was started; both are in `logs/`.
+- **Cost:** the `ssh_run` schema goes from 124 to 150 tokens (`tests/tool_schema_tokens.py`, Qwen 3.5 9B), and only when `notes.md` lists a device.
+- **Without the line**, both models guessed network commands and never asked the box what it could do. Qwen ran 12 commands, some web searches and HTTP calls among them, and hit the step cap every time. Gemma stopped after 4 and said the commands were not installed.
+- **With the line**, all 5 Qwen runs ran `uname -a` and `help` and then `clients`. In 3 of Gemma's 5 runs it ran `help`, saw `clients` listed, and then ran the whole help line as one command ("clients list connected devices"), which fails: a reading error of the small model, not a missing hint.
+- **Caveats.** One machine, one invented device, n=5, Ollama with the context at 32768 rather than the usual 16384 (the app's setting). The fixture's box has a `help` command, as the wording assumes; a device without one (a typical Linux router has no `help` program) would need `uname -a` to carry it, which this fixture does not test. Only the probe half of #100 is built; saving what was learned as a note is not.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --probe --n 5 --label probe-line` (also `gemma4:e4b`); the no-line condition is the same command on the commit before the wording change.
