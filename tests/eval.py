@@ -24,6 +24,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -495,6 +496,9 @@ def main() -> None:
                     help="first-contact case: an invented device the model knows nothing about (#100)")
     ap.add_argument("--fake-radarr", action="store_true",
                     help="serve tests/fake_radarr.py and ask the agent to add a movie (cycles Primer, Moon, Arrival) (#102)")
+    ap.add_argument("--add-skill", action="append", default=[], metavar="FILE",
+                    help="copy this skill file into the run's isolated skills folder (repeatable); every run uses a copy of "
+                         "the repo's skills/ in a temp folder, so a candidate skill never touches the real one (#103)")
     ap.add_argument("--no-id-guard", action="store_true",
                     help="turn the unseen-id guard off (#102), for the comparison run")
     ap.add_argument("--without-tool", action="append", default=[],
@@ -562,6 +566,11 @@ def main() -> None:
         ap.error("--prompt is required unless --tidepool, --listing, --counting, --counting-home, --tracking, --housekeeping or --readonly is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
+    g.SKILLS = tmp / "skills"
+    shutil.copytree(ROOT / "skills", g.SKILLS)
+    for skill in args.add_skill:
+        shutil.copy(skill, g.SKILLS / Path(skill).name)
+    print(f"skills in this run: {', '.join(sorted(p.stem for p in g.SKILLS.glob('*.md')))}")
     web_server, web_info = None, {}
     if args.confirm == "web":
         import web  # noqa: PLC0415 - only needed for this mode

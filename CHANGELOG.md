@@ -5,10 +5,14 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- `tests/eval.py --add-skill FILE` and an isolated copy of `skills/` for every eval run, so a candidate skill never touches the real folder; `tests/candidates/lookup-then-write.md`, a generic lookup-then-write skill that was evaluated and not adopted (0 of 24 runs passed with or without it, see RESULTS.md) (#103).
 - Unseen-id guard for writes ([#102](https://github.com/aurora7795/smolpaw/issues/102)): a non-GET `http_request` carrying an id that nothing this request showed the model (its request, earlier turns, `notes.md`, skills, tool output, `ask_user` answers) is refused with `ERROR:` and a hint to look it up, before the `[y/N]` prompt and with no network call. Python-side, no prompt tokens; tests in `tests/test_unseen_ids.py`. Measured on a booking task: it never fired, because the models already looked ids up (see RESULTS.md); a fixture that tempts recall is still needed.
 - `tests/fake_radarr.py` and `tests/eval.py --fake-radarr`: a fake Radarr with real film titles, scored on the server's state, for the unseen-id guard (#102). 0 of 24 runs passed and the guard never fired; see RESULTS.md. `tests/test_fake_radarr.py`.
 - `tests/fake_api.py` `book` variant, `tests/eval.py --tidepool book` and `--no-id-guard`: a booking task scored on the server's state, with the guard switchable for comparison; `tests/test_book_fixture.py` (#102).
 - `tests/eval.py --probe` and `tests/probe_fixture.py`: a first-contact eval against an invented device behind a fake `ssh`, with its own test (#100).
+
+### Fixed
+- The unseen-id guard (#102) taught itself the ids it refused: its refusal text named them, every tool result counts as seen, so an identical retry of the write went through. The refusal now names the id fields, not the values; a test sends the same write twice. Found in an eval run where Gemma resent a refused POST unchanged. The earlier #102 evaluations never triggered a refusal, so they are unaffected.
 
 ### Changed
 - `ssh_run`'s description now says to start with `uname -a`, then `help`, when the model does not know what a device runs (#100). On an invented device whose usual commands are missing, Qwen 3.5 9B went from 0 of 10 to 5 of 5 and Gemma 4 E4B from 0 of 10 to 2 of 5 (see RESULTS.md). Costs 26 prompt tokens, measured, and only when `notes.md` lists a device.

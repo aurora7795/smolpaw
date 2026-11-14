@@ -74,7 +74,7 @@ def fresh(*texts: str) -> None:
 # a guessed id is refused: no prompt, no network call
 fresh("add a movie")
 r = g.http_request("POST", f"{BASE}/movie", '{"title": "Alpha", "tmdbId": 603}')
-check("a guessed tmdbId is refused", r.startswith("ERROR") and "603" in r and "Look them up first" in r)
+check("a guessed tmdbId is refused", r.startswith("ERROR") and "tmdbId" in r and "603" not in r and "Look them up first" in r)
 check("a refused write neither asks nor sends", not asked and not hits)
 
 # looking it up first makes the same write go through to the prompt
@@ -107,21 +107,29 @@ check("0, -1 and an empty id are placeholders, not guesses", g.http_request("POS
 check("fields that are not ids are never checked", g.http_request("POST", f"{BASE}/x", '{"title": "999", "year": 2001, "monitored": true}') == g.DECLINED)
 check("a true or false value under an id key is ignored", g.http_request("POST", f"{BASE}/x", '{"hasId": true, "myId": false}') == g.DECLINED)
 r = g.http_request("POST", f"{BASE}/x", '{"movie": {"files": [{"movieFileId": 424242}]}}')
-check("nested ids are found", r.startswith("ERROR") and "424242" in r)
+check("nested ids are found", r.startswith("ERROR") and "movieFileId" in r)
 r = g.http_request("POST", f"{BASE}/x", '{"tagIds": [31, 32]}')
-check("every id in a list is checked and all unseen ones are named", r.startswith("ERROR") and "31" in r and "32" in r)
+check("every id in a list is checked and the field is named", r.startswith("ERROR") and "tagIds" in r)
 r = g.http_request("PUT", f"{BASE}/movie/777", '{"title": "A"}')
-check("a numeric path segment on a PUT is checked", r.startswith("ERROR") and "777" in r)
+check("a numeric path segment on a PUT is checked", r.startswith("ERROR") and "path" in r)
 r = g.http_request("DELETE", f"{BASE}/movie/778")
-check("a DELETE of an unseen id is refused", r.startswith("ERROR") and "778" in r and not hits)
+check("a DELETE of an unseen id is refused", r.startswith("ERROR") and "path" in r and not hits)
 r = g.http_request("POST", f"{BASE}/x?seriesId=779", '{"a": 1}')
-check("an id in the query string is checked", r.startswith("ERROR") and "779" in r)
+check("an id in the query string is checked", r.startswith("ERROR") and "seriesId" in r)
 check("a GET is never blocked", g.http_request("GET", f"{BASE}/movie/780").startswith("HTTP 200") and hits == [("GET", "/movie/780")])
 
 # the model sees only the clipped text, so ids past the clip were not seen
 fresh("go")
 g.http_request("GET", f"{BASE}/big")
 check("an id beyond the 4,000 character clip was not seen", g.http_request("POST", f"{BASE}/x", '{"movieId": 98765}').startswith("ERROR"))
+
+# the refusal text must not teach the guard the ids it refused (an identical retry is refused again)
+fresh("add a movie")
+body = '{"title": "Alpha", "tmdbId": 603, "qualityProfileId": 1}'
+first = g.http_request("POST", f"{BASE}/movie", body)
+second = g.http_request("POST", f"{BASE}/movie", body)
+check("an identical retry of a refused write is refused again", first.startswith("ERROR") and second == first and not asked and not hits)
+check("the refusal names the fields, not the values", "tmdbId" in first and "qualityProfileId" in first and "603" not in first)
 
 # a new request starts clean
 fresh("go")
@@ -137,7 +145,7 @@ g.start_log("test-model", "go")
 check("start_log seeds notes.md", g.http_request("POST", f"{BASE}/x", '{"qualityProfileId": 8}') == g.DECLINED)
 g.http_request("POST", f"{BASE}/x", '{"qualityProfileId": 12345}')
 log = next(g.LOG_DIR.glob("*.jsonl")).read_text() if g.LOG_DIR.exists() else ""
-check("a refusal is logged with the ids", '"kind": "unseen_id"' in log and "12345" in log)
+check("a refusal is logged with the id fields", '"kind": "unseen_id"' in log and "qualityProfileId" in log)
 
 srv.shutdown()
 logs_after = {(p.name, p.stat().st_size) for p in real_logs.iterdir()} if real_logs.exists() else set()

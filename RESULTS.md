@@ -982,3 +982,21 @@ Fixture `tests/fake_radarr.py`: real film titles with TMDB-style ids (meant to b
 - **Fixture caveat.** The fake serves no OpenAPI spec of its own, so `openapi_search` only reaches the public Radarr one and cannot confirm this server's routes. A real Radarr serves its own; adding one would make this closer to rung 3.
 - **What it means for #102.** For these two models the bottleneck is finding the lookup and profile endpoints, not guessing ids, so the guard has had nothing to act on in 36 runs across both fixtures. It stays as a safety net; the lookup-then-write skill ([#103](https://github.com/aurora7795/smolpaw/issues/103)) addresses the measured failure more directly.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --fake-radarr --n 6 --label fake-radarr-guard-on` (add `--no-id-guard` for the off cell; also `gemma4:e4b`). Offline test: `tests/test_fake_radarr.py`.
+
+## A generic lookup-then-write skill (#103, 2026-11-14)
+
+Candidate: `tests/candidates/lookup-then-write.md` (581 characters): find the write endpoint, find the thing by name with a GET, GET every list the write needs, then write using only values read. Task and fixture as in the second #102 evaluation (fake Radarr, Primer, Moon and Arrival twice each, n=6 per cell, Ollama at 32K context, unseen-id guard on in both arms; `tests/eval.py --fake-radarr`, with `--add-skill tests/candidates/lookup-then-write.md` for the skill arm; each run uses an isolated copy of `skills/`).
+
+Gate stated on #103 before the runs: the skill is adopted if neither model gets worse beyond noise and at least one clearly improves (at least 3 more passes of 6 than its own baseline; worse means at least 2 fewer). Applied before seeing any result.
+
+| | Baseline | With the skill |
+|---|---|---|
+| Qwen 3.5 9B, first pass | 0/6 | 0/6 |
+| Gemma 4 E4B, first pass | 0/6 | 0/6 |
+| Qwen 3.5 9B, rerun after a guard fix | 0/6 | 0/6 |
+| Gemma 4 E4B, rerun after a guard fix | 0/6 | 0/6 |
+
+- **Not adopted.** Nothing passed in 24 runs, so no model improved. The skill stays in `tests/candidates/`, not `skills/`; the Tidepool recheck and the prompt-cost measurement were not run, because the gate had already failed.
+- **The skill did not change what the models did.** In all 24 runs (both passes, both arms) no model called `/api/v3/movie/lookup` or `/api/v3/rootfolder`, with the skill inlined or without it. Gemma still asked the user for the profile or folder, or guessed one; Qwen still spent its steps on `openapi_search` against the public Radarr spec and ended at the cap or an agent error. A written order of steps does not reach these models at this size, whatever its wording.
+- **A bug in the guard showed up in the first pass.** Its refusal message listed the refused ids and every tool result counts as seen, so an identical retry of the write passed; Gemma resent one unchanged and it reached the server. The refusal now names the id fields, not the values (test: the same write twice). The rerun is the second row pair above; the first pass is kept for the record. The guard refused 1 write in each baseline cell of the rerun (Qwen, Gemma) and none with the skill.
+- **Caveats.** One machine, n=6 per cell, fixture without a spec of its own (`openapi_search` reaches only the public Radarr one), context at 32768 rather than 16384 (the app's setting). A 0/6 against 0/6 cannot show a small effect; it shows there was no large one.

@@ -236,30 +236,32 @@ def _is_id_key(key: str) -> bool:
     return key == "id" or key.endswith(("Id", "ID", "_id", "Ids", "_ids"))
 
 
-def _id_values(obj: Any, under_id_key: bool = False) -> list[str]:
-    """Scalar values under id-like keys of parsed JSON (a bare 0, -1 or empty string is a 'new item' placeholder)."""
-    found: list[str] = []
+def _id_values(obj: Any, under_id_key: str = "") -> list[tuple[str, str]]:
+    """(field name, value) for scalars under id-like keys of parsed JSON (a bare 0, -1 or empty string is a 'new item' placeholder)."""
+    found: list[tuple[str, str]] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
-            found += _id_values(v, under_id_key or _is_id_key(str(k)))
+            found += _id_values(v, str(k) if _is_id_key(str(k)) else under_id_key)
     elif isinstance(obj, list):
         for v in obj:
             found += _id_values(v, under_id_key)
     elif under_id_key and isinstance(obj, (int, str)) and not isinstance(obj, bool):
         text = str(obj).strip()
         if text and text not in ("0", "-1"):
-            found.append(text)
+            found.append((under_id_key, text))
     return found
 
 
 def _unseen_ids(url: str, data: Any) -> list[str]:
-    """Ids a write carries (body id fields, id query parameters, numeric path segments) that no tool output or user text showed."""
+    """Field names of ids a write carries (body id fields, id query parameters, numeric path segments) that no tool output or user text showed.
+
+    Names, not values: the refusal text is itself a tool result, and a value in it would count as seen on the retry."""
     parts = urlparse(url)
     ids = _id_values(data)
-    ids += [v.strip() for k, v in parse_qsl(parts.query) if _is_id_key(k) and v.strip() not in ("", "0", "-1")]
-    ids += [seg for seg in parts.path.split("/") if seg.isdigit() and seg not in ("0",)]
+    ids += [(k, v.strip()) for k, v in parse_qsl(parts.query) if _is_id_key(k) and v.strip() not in ("", "0", "-1")]
+    ids += [("an id in the URL path", seg) for seg in parts.path.split("/") if seg.isdigit() and seg != "0"]
     with _SEEN_LOCK:
-        return sorted({i for i in ids if i.lower() not in SEEN_TOKENS})
+        return sorted({name for name, value in ids if value.lower() not in SEEN_TOKENS})
 
 
 def _remember(fn):
@@ -793,7 +795,7 @@ def http_request(method: str, url: str, body: str = "") -> str:
         unseen = _unseen_ids(url, data) if UNSEEN_ID_GUARD else []
         if unseen:
             problem = (
-                f"the id(s) {', '.join(unseen)} in this {method} were not in your request, the notes or any tool output "
+                f"the id field(s) {', '.join(unseen)} in this {method} were not in your request, the notes or any tool output "
                 "this run, so they may be guessed. Look them up first (a GET that returns them), then send the write."
             )
             _log("unseen_id", method=method, url=url, ids=unseen)

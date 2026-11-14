@@ -37,6 +37,7 @@ try:
         except requests.RequestException:
             time.sleep(0.1)
     post = lambda body: requests.post(f"{url}/api/v3/movie", json=body, timeout=5)  # noqa: E731
+    check("GET /api names the version, as Radarr does", requests.get(f"{url}/api").json()["current"] == "v3")
     lookup = requests.get(f"{url}/api/v3/movie/lookup", params={"term": "primer"}).json()
     check("lookup matches on part of a title", [f["title"] for f in lookup] == ["Primer", "Primer Fever"])
     check("a lookup with no term returns nothing", requests.get(f"{url}/api/v3/movie/lookup").json() == [])
