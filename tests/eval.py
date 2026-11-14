@@ -41,7 +41,7 @@ import generic_tools as g  # noqa: E402
 from agent import BACKENDS, NO_ANSWER, build_agent, load_env, step_trace  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
-from tests import housekeeping_fixture, readonly_fixture, tracking_fixture  # noqa: E402
+from tests import housekeeping_fixture, probe_fixture, readonly_fixture, tracking_fixture  # noqa: E402
 
 LMS = Path.home() / ".lmstudio/bin/lms"
 OLLAMA = BACKENDS["ollama"]["url"].removesuffix("/v1")
@@ -390,6 +390,23 @@ def run_readonly(args, tmp: Path, case_name: str, ctx: int | None) -> None:
     save_results(args, label, ctx, prompt, expects, results)
 
 
+def run_probe(args, tmp: Path, ctx: int | None) -> None:
+    """Run the first-contact case n times against the invented `reef` device (#100)."""
+    label = "probe" + (f"-{args.label}" if args.label else "")
+    print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
+    case = probe_fixture.build(tmp / "probe")
+    g.NOTES = tmp / "probe" / "notes.md"
+    g.CONFIRM = probe_fixture.confirm
+    g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
+    results = []
+    for i in range(1, args.n + 1):
+        r = run_once(args.model, case.prompt, case.expects, args.max_steps, args.backend, not args.text_history,
+                     check=lambda: probe_fixture.check(list(g.ACTIONS)))
+        results.append(r)
+        print_run(i, r)
+    save_results(args, label, ctx, case.prompt, case.expects, results)
+
+
 def main() -> None:
     global MAX_TOKENS
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -427,6 +444,8 @@ def main() -> None:
                     help="scheduled-run read-only task from tests/readonly_fixture.py in a fresh isolated workspace per "
                          "run: every confirmation is declined, passing on the files left unchanged, an answer that says "
                          "what could not be done and no retrying (#60): " + "|".join([*READONLY_CASES, "all"]))
+    ap.add_argument("--probe", action="store_true",
+                    help="first-contact case: an invented device the model knows nothing about (#100)")
     ap.add_argument("--without-tool", action="append", default=[],
                     help="drop a generic tool by name for this run, to compare (for example list_dir)")
     ap.add_argument("--label", default="")
@@ -478,7 +497,7 @@ def main() -> None:
         prompt = prompt or COUNTING_HOME_PROMPT
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
-    if not prompt and not args.tracking and not args.readonly and not args.housekeeping:
+    if not prompt and not args.tracking and not args.readonly and not args.housekeeping and not args.probe:
         ap.error("--prompt is required unless --tidepool, --listing, --counting, --counting-home, --tracking, --housekeeping or --readonly is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
@@ -514,6 +533,9 @@ def main() -> None:
         if args.housekeeping:
             for case_name in housekeeping_fixture.HOUSEKEEPING_CASES if args.housekeeping == "all" else [args.housekeeping]:
                 run_housekeeping(args, tmp, case_name, ctx)
+            return
+        if args.probe:
+            run_probe(args, tmp, ctx)
             return
         if args.readonly:
             for case_name in READONLY_CASES if args.readonly == "all" else [args.readonly]:

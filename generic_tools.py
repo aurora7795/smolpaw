@@ -484,6 +484,7 @@ def apply_devices() -> bool:
 @_remember
 def ssh_run(device: str, command: str) -> str:
     """Run a command on a device listed in notes.md over ssh, logged in with its saved login. Asks the user first.
+    If you do not know what the device runs, start with "uname -a", then "help", before guessing commands.
 
     Args:
         device: The device name from notes.md, e.g. "router".
