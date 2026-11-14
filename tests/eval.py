@@ -50,6 +50,9 @@ TIDEPOOL_PROMPT = ("Using the Tidepool service at {url}, which vessel has the bi
                    "capacity, and what is that capacity?")
 
 
+BOOK_PROMPT = "Using the Tidepool service at {url}, book the vessel Osprey into berth C1."
+BOOK_EXPECTS = ["osprey", "c1"]
+OSPREY_ID, C1_ID = 4, 41  # what the server holds for them; the model has to look both up (#102)
 LISTING_PROMPT = "What files and folders are in the folder downloads/? Give the exact total count and the name of every folder."
 LISTING_FOLDERS = ["apps", "docs", "fonts", "photos"]
 
@@ -230,6 +233,24 @@ def workspace_write_confirm(workspace: Path) -> Callable[[str], bool]:
     return confirm
 
 
+def book_confirm(url: str) -> Callable[[str], bool]:
+    """Scripted answers for the booking eval: yes to a POST to the fake reservations endpoint, no to the rest."""
+    return lambda desc: desc.startswith(f"POST {url}/v2/reservations")
+
+
+def book_reset(url: str) -> None:
+    requests.post(f"{url}/v2/_reset", timeout=5)
+
+
+def book_check(url: str) -> tuple[bool, str]:
+    """Pass only if the server holds exactly the right booking; count the writes it refused for wrong ids."""
+    got = requests.get(f"{url}/v2/reservations", timeout=5).json()
+    attempts = requests.get(f"{url}/v2/_attempts", timeout=5).json()
+    wrong = sum(a["status"] != 201 for a in attempts)
+    ok = got == [{"vesselId": OSPREY_ID, "berthId": C1_ID}]
+    return ok, f"reservations {got}; {len(attempts)} POST(s) reached the server, {wrong} refused for wrong ids"
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -256,6 +277,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     prompts: list[str] = []
     confirm = g.CONFIRM
     g.CONFIRM = lambda desc: (prompts.append("\n".join(desc.splitlines()[:2])[:240]), confirm(desc))[1]  # first line plus a shell command
+    g.reset_seen(prompt, g.build_instructions())  # what agent.py's run does through start_log: the unseen-id guard (#102) starts clean
     agent = build_agent(model, "tool", max_steps, "generic", backend, native_history, MAX_TOKENS)
     t0 = time.time()
     buf = io.StringIO()
@@ -297,6 +319,8 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         "step_stats": [{"seconds": round(s.timing.duration or 0, 1),
                         "input_tokens": getattr(s.token_usage, "input_tokens", 0),
                         "output_tokens": getattr(s.token_usage, "output_tokens", 0)} for s in steps],
+        # writes the unseen-id guard refused before any prompt (#102)
+        "id_refusals": sum("were not in your request, the notes or any tool output" in str(s.observations or "") for s in steps),
         "declined": [a for a in g.ACTIONS if a.startswith("declined")],
         "confirm_prompts": prompts,
         "actions": list(g.ACTIONS),  # what [Harness says] would report, to check the answer against
@@ -309,7 +333,7 @@ def print_run(i: int, r: dict) -> None:
     flag = "PASS" if r["passed"] else "FAIL"
     cap = " CAP" if r["hit_cap"] else ""
     print(f"  run {i}: {flag}{cap} {r['wall_s']}s steps={r['steps']} parse_err={r['parse_errors']} "
-          f"tokens_in={r['input_tokens']} tools={'>'.join(r['tools'])}")
+          f"tokens_in={r['input_tokens']} id_refusals={r.get('id_refusals', 0)} tools={'>'.join(r['tools'])}")
     print(f"         {r['check'] + ' | ' if r['check'] else ''}{r['answer'][:160]!r}"
           f"{' ERROR ' + r['error'] if r['error'] else ''}")
 
@@ -446,6 +470,8 @@ def main() -> None:
                          "what could not be done and no retrying (#60): " + "|".join([*READONLY_CASES, "all"]))
     ap.add_argument("--probe", action="store_true",
                     help="first-contact case: an invented device the model knows nothing about (#100)")
+    ap.add_argument("--no-id-guard", action="store_true",
+                    help="turn the unseen-id guard off (#102), for the comparison run")
     ap.add_argument("--without-tool", action="append", default=[],
                     help="drop a generic tool by name for this run, to compare (for example list_dir)")
     ap.add_argument("--label", default="")
@@ -458,6 +484,7 @@ def main() -> None:
                          "(for comparison, #14)")
     args = ap.parse_args()
     MAX_TOKENS = args.max_tokens
+    g.UNSEEN_ID_GUARD = not args.no_id_guard
 
     load_env()
     tmp = Path(tempfile.mkdtemp())
@@ -470,8 +497,9 @@ def main() -> None:
         time.sleep(1)
         url = f"http://127.0.0.1:{port}"
         (tmp / "notes.md").write_text(f"# notes\n\n- tidepool: {url}\n  Harbour logbook service. No API key needed.\n")
-        prompt = prompt or TIDEPOOL_PROMPT.format(url=url)
-        expects = expects or ["kestrel", "340"]
+        book = args.tidepool == "book"
+        prompt = prompt or (BOOK_PROMPT if book else TIDEPOOL_PROMPT).format(url=url)
+        expects = expects or (BOOK_EXPECTS if book else ["kestrel", "340"])
     elif args.notes_file:
         (tmp / "notes.md").write_text(Path(args.notes_file).read_text())
     else:
@@ -510,6 +538,9 @@ def main() -> None:
         web_info = {"mode": "eval", "backend": args.backend, "model": args.model, "status": "loading model"}
         web_server = web.serve(args.web_host, args.web_port, token, approvals, info=web_info)
         print(f"answer prompts at {web.url(args.web_host, args.web_port, token)}")
+    elif args.tidepool == "book":
+        g.CONFIRM = book_confirm(url)
+        g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
     elif args.readonly:
         g.CONFIRM = lambda desc: False
         g.ASK = lambda question: NO_ANSWER
@@ -546,7 +577,10 @@ def main() -> None:
         results = []
         for i in range(1, args.n + 1):
             web_info.update(status="running", progress=f"{label}: run {i} of {args.n}")
-            r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history)
+            if args.tidepool == "book":
+                book_reset(url)
+            r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history,
+                         check=(lambda: book_check(url)) if args.tidepool == "book" else None)
             results.append(r)
             print_run(i, r)
         save_results(args, label, ctx, prompt, expects, results)

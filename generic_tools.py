@@ -211,6 +211,7 @@ SHOWN_OUTPUT: tuple[str, str] | None = None  # (label, text) of the latest shell
 LAST_RESULT = ""  # most recent tool output, shown by the harness if the agent hits the step cap
 
 
+UNSEEN_ID_GUARD = True  # off only for the eval's comparison run (tests/eval.py --no-id-guard)
 SEEN_TOKENS: set[str] = set()  # words and numbers the model has been shown or told this request (guards write ids)
 _SEEN_LOCK = threading.Lock()
 _TOKEN = re.compile(r"[A-Za-z0-9]+(?:[_.-][A-Za-z0-9]+)*")
@@ -789,7 +790,7 @@ def http_request(method: str, url: str, body: str = "") -> str:
     except ValueError:
         return "ERROR: body must be valid JSON text."
     if method != "GET":
-        unseen = _unseen_ids(url, data)
+        unseen = _unseen_ids(url, data) if UNSEEN_ID_GUARD else []
         if unseen:
             problem = (
                 f"the id(s) {', '.join(unseen)} in this {method} were not in your request, the notes or any tool output "
