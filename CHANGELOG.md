@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- Unseen-id guard for writes ([#102](https://github.com/aurora7795/smolpaw/issues/102)): a non-GET `http_request` carrying an id that nothing this request showed the model (its request, earlier turns, `notes.md`, skills, tool output, `ask_user` answers) is refused with `ERROR:` and a hint to look it up, before the `[y/N]` prompt and with no network call. Python-side, no prompt tokens; tests in `tests/test_unseen_ids.py`. Not yet measured against models (see #102).
 - `tests/eval.py --probe` and `tests/probe_fixture.py`: a first-contact eval against an invented device behind a fake `ssh`, with its own test (#100).
 
 ### Changed

@@ -274,7 +274,7 @@ def run_request(agent, model: str, toolset: str, user_input: str, thread: str | 
     generic_tools.ACTIONS.clear()
     generic_tools.LAST_RESULT = ""
     if toolset == "generic":
-        print(f"[log] {generic_tools.start_log(model, user_input, thread, schedule, backend)}", file=log_stream)
+        print(f"[log] {generic_tools.start_log(model, user_input, thread, schedule, backend, context)}", file=log_stream)
     agent.stall_reason = None
     try:
         response = agent.run(context + user_input)
