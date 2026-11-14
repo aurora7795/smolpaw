@@ -189,10 +189,11 @@ def _log(kind: str, **fields) -> None:
 
 
 def start_log(model: str, prompt: str, thread: str | None = None, schedule: str | None = None,
-              backend: str | None = None) -> Path:
+              backend: str | None = None, context: str = "") -> Path:
     global _log_file, SHOWN_OUTPUT
     SHOWN_OUTPUT = None
     reset_search_count()
+    reset_seen(prompt, context, build_instructions())
     LOG_DIR.mkdir(exist_ok=True)
     _log_file = LOG_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{model.replace('/', '_')}.jsonl"
     _log("start", model=model, prompt=prompt, **({"thread": thread} if thread else {}),
@@ -210,12 +211,63 @@ SHOWN_OUTPUT: tuple[str, str] | None = None  # (label, text) of the latest shell
 LAST_RESULT = ""  # most recent tool output, shown by the harness if the agent hits the step cap
 
 
+SEEN_TOKENS: set[str] = set()  # words and numbers the model has been shown or told this request (guards write ids)
+_SEEN_LOCK = threading.Lock()
+_TOKEN = re.compile(r"[A-Za-z0-9]+(?:[_.-][A-Za-z0-9]+)*")
+
+
+def note_seen(text: str) -> None:
+    """Remember every word and number in text the model was shown, so a later write can be checked against it."""
+    tokens = {t.lower() for t in _TOKEN.findall(text or "")}
+    with _SEEN_LOCK:
+        SEEN_TOKENS.update(tokens)
+
+
+def reset_seen(*texts: str) -> None:
+    """Start a new request's seen set from what the model was told up front (request, earlier turns, notes, skills)."""
+    with _SEEN_LOCK:
+        SEEN_TOKENS.clear()
+    for text in texts:
+        note_seen(text)
+
+
+def _is_id_key(key: str) -> bool:
+    return key == "id" or key.endswith(("Id", "ID", "_id", "Ids", "_ids"))
+
+
+def _id_values(obj: Any, under_id_key: bool = False) -> list[str]:
+    """Scalar values under id-like keys of parsed JSON (a bare 0, -1 or empty string is a 'new item' placeholder)."""
+    found: list[str] = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            found += _id_values(v, under_id_key or _is_id_key(str(k)))
+    elif isinstance(obj, list):
+        for v in obj:
+            found += _id_values(v, under_id_key)
+    elif under_id_key and isinstance(obj, (int, str)) and not isinstance(obj, bool):
+        text = str(obj).strip()
+        if text and text not in ("0", "-1"):
+            found.append(text)
+    return found
+
+
+def _unseen_ids(url: str, data: Any) -> list[str]:
+    """Ids a write carries (body id fields, id query parameters, numeric path segments) that no tool output or user text showed."""
+    parts = urlparse(url)
+    ids = _id_values(data)
+    ids += [v.strip() for k, v in parse_qsl(parts.query) if _is_id_key(k) and v.strip() not in ("", "0", "-1")]
+    ids += [seg for seg in parts.path.split("/") if seg.isdigit() and seg not in ("0",)]
+    with _SEEN_LOCK:
+        return sorted({i for i in ids if i.lower() not in SEEN_TOKENS})
+
+
 def _remember(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         global LAST_RESULT
         result = fn(*args, **kwargs)
         LAST_RESULT = f"{fn.__name__}: {result}"[:1500]
+        note_seen(str(result))
         return result
     return wrapper
 
@@ -737,6 +789,14 @@ def http_request(method: str, url: str, body: str = "") -> str:
     except ValueError:
         return "ERROR: body must be valid JSON text."
     if method != "GET":
+        unseen = _unseen_ids(url, data)
+        if unseen:
+            problem = (
+                f"the id(s) {', '.join(unseen)} in this {method} were not in your request, the notes or any tool output "
+                "this run, so they may be guessed. Look them up first (a GET that returns them), then send the write."
+            )
+            _log("unseen_id", method=method, url=url, ids=unseen)
+            return _redact(f"ERROR: {problem}")
         preview = f"\n  body: {body[:500]}" if body else ""
         if not _approved(f"{method} {url}{preview}"):
             return DECLINED
@@ -1265,6 +1325,7 @@ def ask_user(question: str) -> str:
     """
     answer = redact_pasted_secrets(ASK(question))
     _log("ask", question=question, answer=answer)
+    note_seen(answer)
     return answer
 
 
@@ -1302,7 +1363,9 @@ def read_skill(name: str) -> str:
         _log("read_skill", name=name, result=f"error ({type(exc).__name__})")
         raise
     _log("read_skill", name=name, result="ok")
-    return _clip(_redact(content))
+    shown = _clip(_redact(content))
+    note_seen(shown)
+    return shown
 
 
 @tool
