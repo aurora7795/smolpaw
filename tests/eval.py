@@ -53,6 +53,8 @@ TIDEPOOL_PROMPT = ("Using the Tidepool service at {url}, which vessel has the bi
 BOOK_PROMPT = "Using the Tidepool service at {url}, book the vessel Osprey into berth C1."
 BOOK_EXPECTS = ["osprey", "c1"]
 OSPREY_ID, C1_ID = 4, 41  # what the server holds for them; the model has to look both up (#102)
+RADARR_MOVIES = {"Primer": 14337, "Moon": 17431, "Arrival": 329865}  # run i adds the i-th, cycling (#102)
+RADARR_PROMPT = "Add the movie {title} to Radarr."
 LISTING_PROMPT = "What files and folders are in the folder downloads/? Give the exact total count and the name of every folder."
 LISTING_FOLDERS = ["apps", "docs", "fonts", "photos"]
 
@@ -250,6 +252,26 @@ def book_check(url: str) -> tuple[bool, str]:
     malformed = sum(a["status"] == 422 for a in attempts)  # right or wrong ids, but a field name or field missing
     ok = got == [{"vesselId": OSPREY_ID, "berthId": C1_ID}]
     return ok, f"reservations {got}; {len(attempts)} POST(s) reached the server, {wrong_id} with a wrong id, {malformed} malformed"
+
+
+def radarr_confirm(url: str) -> Callable[[str], bool]:
+    """Scripted answers for the fake-Radarr eval: yes to adding a movie, no to everything else."""
+    return lambda desc: desc.startswith(f"POST {url}/api/v3/movie")
+
+
+def radarr_reset(url: str) -> None:
+    requests.post(f"{url}/_reset", timeout=5)
+
+
+def radarr_check(url: str, tmdb_id: int) -> tuple[bool, str]:
+    """Pass only if Radarr holds exactly the requested movie; count what the server refused, by cause."""
+    added = requests.get(f"{url}/api/v3/movie", timeout=5).json()
+    attempts = requests.get(f"{url}/_attempts", timeout=5).json()
+    count = lambda tag: sum(tag in a["problems"] for a in attempts)  # noqa: E731
+    ok = [f["tmdbId"] for f in added] == [tmdb_id]
+    return ok, (f"added {[f['tmdbId'] for f in added]}; {len(attempts)} POST(s) reached the server, "
+                f"{count('tmdbId')} with a wrong tmdbId, {count('profile')} wrong profile, {count('folder')} wrong folder, "
+                f"{sum(any(p.startswith('missing') for p in a['problems']) for a in attempts)} with a field missing")
 
 
 def free_port() -> int:
@@ -471,6 +493,8 @@ def main() -> None:
                          "what could not be done and no retrying (#60): " + "|".join([*READONLY_CASES, "all"]))
     ap.add_argument("--probe", action="store_true",
                     help="first-contact case: an invented device the model knows nothing about (#100)")
+    ap.add_argument("--fake-radarr", action="store_true",
+                    help="serve tests/fake_radarr.py and ask the agent to add a movie (cycles Primer, Moon, Arrival) (#102)")
     ap.add_argument("--no-id-guard", action="store_true",
                     help="turn the unseen-id guard off (#102), for the comparison run")
     ap.add_argument("--without-tool", action="append", default=[],
@@ -501,6 +525,14 @@ def main() -> None:
         book = args.tidepool == "book"
         prompt = prompt or (BOOK_PROMPT if book else TIDEPOOL_PROMPT).format(url=url)
         expects = expects or (BOOK_EXPECTS if book else ["kestrel", "340"])
+    elif args.fake_radarr:
+        port = free_port()
+        server = subprocess.Popen([sys.executable, str(ROOT / "tests/fake_radarr.py"), str(port)],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1)
+        url = f"http://127.0.0.1:{port}"
+        (tmp / "notes.md").write_text(f"# notes\n\n- radarr: {url}\n  Movie manager. No API key needed.\n")
+        expects = expects or []
     elif args.notes_file:
         (tmp / "notes.md").write_text(Path(args.notes_file).read_text())
     else:
@@ -526,7 +558,7 @@ def main() -> None:
         prompt = prompt or COUNTING_HOME_PROMPT
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
-    if not prompt and not args.tracking and not args.readonly and not args.housekeeping and not args.probe:
+    if not prompt and not args.tracking and not args.readonly and not args.housekeeping and not args.probe and not args.fake_radarr:
         ap.error("--prompt is required unless --tidepool, --listing, --counting, --counting-home, --tracking, --housekeeping or --readonly is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
@@ -539,6 +571,9 @@ def main() -> None:
         web_info = {"mode": "eval", "backend": args.backend, "model": args.model, "status": "loading model"}
         web_server = web.serve(args.web_host, args.web_port, token, approvals, info=web_info)
         print(f"answer prompts at {web.url(args.web_host, args.web_port, token)}")
+    elif args.fake_radarr:
+        g.CONFIRM = radarr_confirm(url)
+        g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
     elif args.tidepool == "book":
         g.CONFIRM = book_confirm(url)
         g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
@@ -573,11 +608,19 @@ def main() -> None:
             for case_name in READONLY_CASES if args.readonly == "all" else [args.readonly]:
                 run_readonly(args, tmp, case_name, ctx)
             return
-        label = args.label or (f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "counting-home" if args.counting_home else "custom")
+        label = args.label or ("fake-radarr" if args.fake_radarr else f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "counting-home" if args.counting_home else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
         for i in range(1, args.n + 1):
             web_info.update(status="running", progress=f"{label}: run {i} of {args.n}")
+            if args.fake_radarr:
+                title = list(RADARR_MOVIES)[(i - 1) % len(RADARR_MOVIES)]
+                radarr_reset(url)
+                r = run_once(args.model, RADARR_PROMPT.format(title=title), [title.lower()], args.max_steps, args.backend,
+                             not args.text_history, check=lambda t=RADARR_MOVIES[title]: radarr_check(url, t))
+                results.append(r)
+                print_run(i, r)
+                continue
             if args.tidepool == "book":
                 book_reset(url)
             r = run_once(args.model, prompt, expects, args.max_steps, args.backend, not args.text_history,
