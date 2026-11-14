@@ -246,9 +246,10 @@ def book_check(url: str) -> tuple[bool, str]:
     """Pass only if the server holds exactly the right booking; count the writes it refused for wrong ids."""
     got = requests.get(f"{url}/v2/reservations", timeout=5).json()
     attempts = requests.get(f"{url}/v2/_attempts", timeout=5).json()
-    wrong = sum(a["status"] != 201 for a in attempts)
+    wrong_id = sum(a["status"] == 404 for a in attempts)  # an id the server does not have: a guess that missed
+    malformed = sum(a["status"] == 422 for a in attempts)  # right or wrong ids, but a field name or field missing
     ok = got == [{"vesselId": OSPREY_ID, "berthId": C1_ID}]
-    return ok, f"reservations {got}; {len(attempts)} POST(s) reached the server, {wrong} refused for wrong ids"
+    return ok, f"reservations {got}; {len(attempts)} POST(s) reached the server, {wrong_id} with a wrong id, {malformed} malformed"
 
 
 def free_port() -> int:
