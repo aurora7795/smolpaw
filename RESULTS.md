@@ -945,3 +945,24 @@ Pass criterion, stated before the run: n=5 per model per condition; keep the lin
 - **With the line**, all 5 Qwen runs ran `uname -a` and `help` and then `clients`. In 3 of Gemma's 5 runs it ran `help`, saw `clients` listed, and then ran the whole help line as one command ("clients list connected devices"), which fails: a reading error of the small model, not a missing hint.
 - **Caveats.** One machine, one invented device, n=5, Ollama with the context at 32768 rather than the usual 16384 (the app's setting). The fixture's box has a `help` command, as the wording assumes; a device without one (a typical Linux router has no `help` program) would need `uname -a` to carry it, which this fixture does not test. Only the probe half of #100 is built; saving what was learned as a note is not.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --probe --n 5 --label probe-line` (also `gemma4:e4b`); the no-line condition is the same command on the commit before the wording change.
+
+## Unseen-id guard on writes (#102, 2026-11-14)
+
+The guard refuses a non-GET `http_request` whose body, query or path carries an id that nothing this request showed the model. Task: Tidepool `book` variant (`tests/fake_api.py`), "book the vessel Osprey into berth C1"; the vessel list is out of id order, berths have their own ids, and the pass check reads the server's state (exactly one booking, vessel 4 into berth 41), not the answer.
+
+Criterion stated on the issue before any run: with the guard on, no POST with a wrong id reaches the server in any run, and its pass count is not more than one run below the guard-off cell; then the Tidepool `detail` and `paged` read variants, guard on, must not fall below earlier results.
+
+| | Guard on | Guard off |
+|---|---|---|
+| Qwen 3.5 9B, booking | 1/3 | 2/3 |
+| Gemma 4 E4B, booking | 1/3 | 2/3 |
+| Qwen 3.5 9B, `detail` + `paged`, guard on | 6/6 | not rerun |
+| Gemma 4 E4B, `detail` + `paged`, guard on | 6/6 | not rerun |
+
+- **The guard never fired.** `id_refusals` was 0 in all 12 booking runs, and no write with a wrong id reached the server in any of them, guard on or off. Every write that reached the server already used ids 4 and 41, which the models had looked up. The criterion is therefore met only trivially: these runs cannot show that the guard helps.
+- **The booking gap is not an effect of the guard.** The failures were runs that never reached a write (an interrupted run, a step cap, and gave-ups by Gemma after failed discovery). With n=3 the 1/3 against 2/3 is within noise.
+- **The writes the server refused were malformed bodies**, not wrong ids (`{"vessel_id": 4, "berth_id": 41}`, `{"vessel": "Osprey", "berth": "C1"}`): the guard checks ids, not field names. The first run of this eval labelled these "wrong ids" by mistake; the check now counts 404 and 422 separately.
+- **This fixture does not reproduce the rung 3 failure**: there, a model guessed a real movie's `tmdbId` from memory. An invented service has nothing to remember, so models look ids up. A fixture that tempts recall (a fake Radarr serving real titles with their real ids) is the next step; #102 stays open for it.
+- **Read variants**: 12 of 12 passed with the guard on, against 11 of 12 on `detail` earlier and 12 of 12 on `paged`. GETs are never blocked, so no change was expected; this confirms it on a small sample.
+- **Caveats.** One machine, n=3 per cell, Ollama with the context at 32768 rather than 16384 (the app's setting). Guard-off was not rerun on the read variants.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --tidepool book --n 3 --label book-guard-on` (add `--no-id-guard` for the off cell; also `gemma4:e4b`), and `--tidepool detail` or `paged` for the read checks. Offline tests: `tests/test_unseen_ids.py`, `tests/test_book_fixture.py`.

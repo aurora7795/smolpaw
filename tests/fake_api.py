@@ -12,6 +12,10 @@ Variants (harder discovery; the answer to "biggest cargo capacity" is always Kes
   hint    "/" is a 404 whose body points at /v2/docs, which holds the index
   detail  the vessel list has only id and name; hold_tons is only on /v2/vessels/<id>
   paged   /v2/vessels returns 2 items per page with a "next" link; Kestrel is on page 2
+  book    a write: POST /v2/reservations {"vesselId": n, "berthId": n} books a vessel into a berth. Berths carry
+          their own ids (not their codes), the vessel list is not in id order, and wrong ids are refused with
+          a 404 and counted in /v2/_attempts (for the eval, not described anywhere). Osprey is vessel 4 and
+          berth C1 is id 41. GET /v2/reservations lists what was booked; POST /v2/_reset starts over.
 """
 
 import json
@@ -29,11 +33,16 @@ VESSELS = [
     {"id": 5, "name": "Halcyon", "hold_tons": 275, "home_berth": "B1"},
 ]
 BERTHS = [{"code": v["home_berth"], "occupied_by": v["name"]} for v in VESSELS]
+BOOK_BERTHS = [{"id": i, "code": c} for i, c in [(21, "A1"), (22, "A2"), (23, "A3"), (24, "A4"), (31, "B1"),
+                                                  (33, "B3"), (41, "C1"), (42, "C2")]]
+RESERVATIONS: list[dict] = []
+ATTEMPTS: list[dict] = []  # every POST /v2/reservations that arrived, with the status it got
 INDEX = {
     "service": "Tidepool harbour logbook",
     "version": "2",
     "resources": {"vessels": "/v2/vessels", "berths": "/v2/berths"},
 }
+BOOK_INDEX = {**INDEX, "resources": {**INDEX["resources"], "reservations": "/v2/reservations"}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -52,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
             if VARIANT == "hint":
                 self._send(404, {"error": "not found", "docs": "/v2/docs"})
             else:
-                self._send(200, INDEX)
+                self._send(200, BOOK_INDEX if VARIANT == "book" else INDEX)
         elif path == "/v2/docs" and VARIANT == "hint":
             self._send(200, INDEX)
         elif path == "/v2/vessels":
@@ -70,9 +79,41 @@ class Handler(BaseHTTPRequestHandler):
             match = [v for v in VESSELS if v["id"] == int(path.rsplit("/", 1)[1])]
             self._send(200, match[0]) if match else self._send(404, {"error": "no such vessel"})
         elif path == "/v2/berths":
-            self._send(200, BERTHS)
+            self._send(200, BOOK_BERTHS if VARIANT == "book" else BERTHS)
+        elif path == "/v2/reservations" and VARIANT == "book":
+            self._send(200, RESERVATIONS)
+        elif path == "/v2/_attempts" and VARIANT == "book":
+            self._send(200, ATTEMPTS)
         else:
             self._send(404, {"error": "not found"})
+
+    def do_POST(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path.rstrip("/")
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if VARIANT != "book" or path not in ("/v2/reservations", "/v2/_reset"):
+            self._send(404, {"error": "not found"})
+        elif path == "/v2/_reset":
+            RESERVATIONS.clear()
+            ATTEMPTS.clear()
+            self._send(200, {"ok": True})
+        else:
+            try:
+                body = json.loads(raw or b"{}")
+            except ValueError:
+                body = None
+            vessel_id = body.get("vesselId") if isinstance(body, dict) else None
+            berth_id = body.get("berthId") if isinstance(body, dict) else None
+            if vessel_id is None or berth_id is None:
+                status, out = 422, {"error": "vesselId and berthId are required"}
+            elif not any(v["id"] == vessel_id for v in VESSELS):
+                status, out = 404, {"error": "no such vessel"}
+            elif not any(b["id"] == berth_id for b in BOOK_BERTHS):
+                status, out = 404, {"error": "no such berth"}
+            else:
+                status, out = 201, {"vesselId": vessel_id, "berthId": berth_id}
+                RESERVATIONS.append(out)
+            ATTEMPTS.append({"vesselId": vessel_id, "berthId": berth_id, "status": status})
+            self._send(status, out)
 
     def log_message(self, *args) -> None:
         pass
