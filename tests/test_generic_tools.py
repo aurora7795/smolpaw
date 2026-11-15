@@ -1744,6 +1744,8 @@ check("batch mode keeps the same results shortened on the next call",
       _tool_texts("batch", bm2)[0] == first)
 
 # stall detection (#19): the harness stops a run that repeats the same failing call
+import agent as _agent0  # noqa: E402
+_agent0.STALL_NUDGE = False  # these checks cover the stop rules bare; the nudge (#117) is checked further down
 from agent import STALL_WINDOW, check_stall  # noqa: E402
 
 
@@ -1786,6 +1788,7 @@ check("a smolagents-level error counts as a failure too", a.interrupted)
 
 # second stall rule (#77): off by default, replayable on a recorded trace
 import agent as _agent  # noqa: E402
+_agent.STALL_NUDGE = False  # the stop rules below are tested bare; the nudge (#117) has its own checks after them
 from agent import no_progress, repeat_tail, step_trace  # noqa: E402
 
 _bad = lambda i: _step([ToolCall("run_shell", {"cmd": f"c{i}"}, "x")], observations="DECLINED: no")  # noqa: E731
@@ -1814,6 +1817,23 @@ check("repeats limit 2 is the default: a declined action answered the same way t
 a = _FakeAgent([_step([ToolCall("read_file", {"p": f"p{i}"}, "x")], observations=f"text {i}") for i in range(4)])
 check_stall(a.memory.steps[-1], a)
 check("four different successful results are progress", not a.interrupted)
+
+# #117: the first repeat stall is a nudge in the result, the second is the stop
+_agent.STALL_NUDGE = True
+a = _FakeAgent([_bad(i) for i in range(3)])
+check_stall(a.memory.steps[-1], a)
+check("nudge: the first repeat stall does not stop the run", not a.interrupted and a.stall_nudged)
+check("nudge: the last result tells the model it repeated", "repeats an earlier one" in a.memory.steps[-1].observations)
+a.memory.steps.append(_bad(9))
+check_stall(a.memory.steps[-1], a)
+check("nudge: a repeat after the nudge stops the run", a.interrupted and "repeated earlier results" in a.stall_reason)
+a = _FakeAgent([_step([ToolCall("read_file", {"p": "a"}, "x")], observations="ERROR: x") for _ in range(2)])
+_agent.STALL_FAILS, _agent.STALL_REPEATS = 2, 0
+check_stall(a.memory.steps[-1], a)
+check("nudge: the failing-steps rule is not softened", a.interrupted)
+_agent.STALL_FAILS, _agent.STALL_REPEATS = 0, 2
+from generic_tools import DECLINED  # noqa: E402
+check("declined hint (#117): the DECLINED text says not to retry a variation", "variation" in DECLINED)
 
 # run_request() reports a stall as a finished answer, but still lets a real Stop-button interrupt through
 from smolagents.utils import AgentError  # noqa: E402

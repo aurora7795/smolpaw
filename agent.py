@@ -179,12 +179,16 @@ def _is_failure(step: ActionStep) -> bool:
     return text.startswith(("ERROR", "DECLINED")) or bool(re.match(r"^HTTP [45]\d\d\b", text))
 
 
+REPEAT_NUDGE = ("\n\nNOTE: this result repeats an earlier one, so another call like it will not help. "
+                "Use what you already have, or try a different tool or approach, or call ask_user.")
+
+
 def step_trace(steps: list[ActionStep]) -> list[dict]:
     """Per step: the call signature, whether it failed, and whether its result repeats an earlier one (#77)."""
     seen: set[str] = set()
     trace = []
     for s in steps:
-        obs = (s.observations or "").strip()
+        obs = (s.observations or "").replace(REPEAT_NUDGE, "").strip()  # a nudged result still counts as itself
         trace.append({"call": _tool_calls_key(s.tool_calls), "failed": _is_failure(s), "repeat": bool(obs) and obs in seen})
         seen.add(obs)
     return trace
@@ -220,6 +224,8 @@ def repeat_tail(trace: list[dict]) -> str:
 # Second stall rule (#77): two results in a row that repeat earlier ones. 0 switches a limit off (the env vars).
 STALL_FAILS = int(os.environ.get("SMOLPAW_STALL_FAILS", "0"))
 STALL_REPEATS = int(os.environ.get("SMOLPAW_STALL_REPEATS", "2"))
+# #117: the first time that rule fires, tell the model instead of stopping; the stop still follows if it repeats again.
+STALL_NUDGE = os.environ.get("SMOLPAW_STALL_NUDGE", "1") != "0"
 
 
 def check_stall(step, agent) -> None:
@@ -237,6 +243,10 @@ def check_stall(step, agent) -> None:
             return
     reason = no_progress(step_trace(steps), STALL_FAILS, STALL_REPEATS)
     if reason:
+        if STALL_NUDGE and "repeated" in reason and not getattr(agent, "stall_nudged", False) and step.observations:
+            agent.stall_nudged = True
+            step.observations += REPEAT_NUDGE  # the next prompt is built from this
+            return
         agent.stall_reason = reason
         agent.interrupt()
 
@@ -290,6 +300,7 @@ def run_request(agent, model: str, toolset: str, user_input: str, thread: str | 
     if toolset == "generic":
         print(f"[log] {generic_tools.start_log(model, user_input, thread, schedule, backend, context)}", file=log_stream)
     agent.stall_reason = None
+    agent.stall_nudged = False
     try:
         response = agent.run(context + user_input)
     except AgentError:

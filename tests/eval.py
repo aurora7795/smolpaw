@@ -334,6 +334,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         # per step: call, failed, result repeats an earlier one; the second stall rule can be replayed on it (#77)
         "trace": [{"call": str(t["call"])[:120], "failed": t["failed"], "repeat": t["repeat"]} for t in step_trace(steps)],
         "stalled": getattr(agent, "stall_reason", None),
+        "nudged": bool(getattr(agent, "stall_nudged", False)),
         # which tools produced the repeated results that ended the run (#115)
         "stalled_calls": repeat_tail(step_trace(steps)) if getattr(agent, "stall_reason", None) else "",
         "input_tokens": tokens_in,

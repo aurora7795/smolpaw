@@ -53,6 +53,8 @@ SHELL_META = re.compile(r"[;&|<>`$()\\\n]")
 MAX_OUT = 4000
 USER_AGENT = "SmolPaw/0.1 (local agent; https://github.com/aurora7795/smolpaw)"
 DECLINED = "DECLINED: the user said no. Nothing was done. Try another approach or call ask_user."
+if os.environ.get("SMOLPAW_DECLINED_HINT", "1") != "0":  # #117: stop models retrying a declined command in new words
+    DECLINED = DECLINED.replace("Try another", "Do not retry it or a variation of it. Try another")
 
 
 def _ask(prompt: str) -> bool:
