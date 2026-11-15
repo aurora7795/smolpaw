@@ -35,7 +35,7 @@ POOL: list[tuple[str, int]] = [
     ("Dark Star", 1974),
     ("Beyond the Black Rainbow", 2010),
     ("Rubber", 2010),
-    ("Resolution", 2012),
+    ("Timecrimes", 2007),
 ]
 PROMPT = "Add the movie {title} ({year}) to Radarr."
 MAX_WRITES_PER_RUN = 3
