@@ -203,6 +203,20 @@ def no_progress(trace: list[dict], fails: int = 0, repeats: int = 0) -> str | No
     return None
 
 
+def repeat_tail(trace: list[dict]) -> str:
+    """The tools of the steps at the end of a run whose results repeated earlier ones, e.g. 'openapi_search x2' (#115)."""
+    names: list[str] = []
+    for t in reversed(trace):
+        if not t["repeat"]:
+            break
+        key = t["call"]
+        names.append(", ".join(sorted({name for name, _ in key})) if key else "(no call)")
+    counts: dict[str, int] = {}
+    for n in reversed(names):
+        counts[n] = counts.get(n, 0) + 1
+    return ", ".join(f"{n} x{c}" for n, c in counts.items())
+
+
 # Second stall rule (#77): two results in a row that repeat earlier ones. 0 switches a limit off (the env vars).
 STALL_FAILS = int(os.environ.get("SMOLPAW_STALL_FAILS", "0"))
 STALL_REPEATS = int(os.environ.get("SMOLPAW_STALL_REPEATS", "2"))

@@ -1786,7 +1786,7 @@ check("a smolagents-level error counts as a failure too", a.interrupted)
 
 # second stall rule (#77): off by default, replayable on a recorded trace
 import agent as _agent  # noqa: E402
-from agent import no_progress, step_trace  # noqa: E402
+from agent import no_progress, repeat_tail, step_trace  # noqa: E402
 
 _bad = lambda i: _step([ToolCall("run_shell", {"cmd": f"c{i}"}, "x")], observations="DECLINED: no")  # noqa: E731
 _trace = step_trace([_bad(i) for i in range(4)])
@@ -3924,4 +3924,12 @@ current_undo = {(p.name, p.stat().st_size) for p in real_undo.iterdir()} if real
 check("real .undo folder is untouched", not real_undo.exists() if not undo_snapshot else current_undo == undo_snapshot)
 
 print(f"\n{check.failed} failed")
+# repeat_tail names the tools behind the repeated results that ended a run (#115)
+_rep = [{"call": (("openapi_search", "{}"),), "failed": False, "repeat": False},
+        {"call": (("openapi_search", "{}"),), "failed": False, "repeat": True},
+        {"call": (("http_request", "{}"),), "failed": False, "repeat": True}]
+check("repeat_tail counts the trailing repeated steps by tool", repeat_tail(_rep) == "openapi_search x1, http_request x1")
+check("repeat_tail is empty when the last step is new", repeat_tail(_rep[:1]) == "")
+
 sys.exit(1 if check.failed else 0)
+
