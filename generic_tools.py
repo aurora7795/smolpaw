@@ -1121,20 +1121,59 @@ def openapi_search(spec_url: str, keyword: str = "") -> str:
         tags = sorted({t for ops in paths.values() for op in ops.values() if isinstance(op, dict) for t in op.get("tags", [])})
         _log("openapi_search", spec_url=spec_url, keyword=keyword, result=f"{len(paths)} endpoints, no keyword")
         return f"{len(paths)} endpoints. Tags: {', '.join(tags)}"
-    kw = keyword.lower()
-    hits = []
-    for path, ops in paths.items():
+    methods, terms = _split_query(keyword)
+    found = []
+    for path, ops in paths.items() if terms or not SEARCH_RANK else []:  # a method alone would list every write endpoint
         for method, op in ops.items():
-            if not isinstance(op, dict):
+            if not isinstance(op, dict) or (methods and method.lower() not in methods):
                 continue
             text = " ".join([path, op.get("summary", ""), " ".join(op.get("tags", []))]).lower()
-            if kw in text:
-                hint = ""
-                if WRITE_HINTS and method.lower() in ("post", "put", "patch") and sum("Fill from a GET" in h for h in hits) < 3:  # a few, so the list stays short
-                    hint = _write_hints(spec, method, path, op)
-                hits.append(f"{method.upper()} {path}  {op.get('summary', '')}".rstrip() + hint)
+            if all(t in text for t in terms):
+                found.append((path, method, op))
+    if SEARCH_RANK:
+        found.sort(key=lambda h: h[0].count("/"))  # stable: /api/v3/movie before /api/v3/importlist/movie
+    hits = []
+    for path, method, op in found:
+        hint = ""
+        if WRITE_HINTS and method.lower() in ("post", "put", "patch") and sum("Fill from a GET" in h for h in hits) < 3:  # a few, so the list stays short
+            hint = _write_hints(spec, method, path, op)
+        hits.append(f"{method.upper()} {path}  {op.get('summary', '')}".rstrip() + hint)
     _log("openapi_search", spec_url=spec_url, keyword=keyword, result=f"{len(hits)} hits")
-    return "\n".join(hits[:20]) + (f"\n... {len(hits) - 20} more" if len(hits) > 20 else "") or "No matching endpoints."
+    if not hits:
+        return "No matching endpoints. Search for a word from a path (add the method to narrow it), e.g. one of: " + _path_words(paths) if SEARCH_RANK else "No matching endpoints."
+    return "\n".join(hits[:20]) + (f"\n... {len(hits) - 20} more" if len(hits) > 20 else "")
+
+
+SEARCH_RANK = os.environ.get("SMOLPAW_SEARCH_FORGIVING", "1") != "0"  # #117: off restores the exact-substring search
+_HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
+_WRITE_WORDS = {"add", "create", "insert", "new"}  # models ask for "add" when they mean POST; specs rarely say it
+
+
+def _split_query(keyword: str) -> tuple[set[str], list[str]]:
+    """A search query as (methods to keep, terms that must all appear). A model writes "POST /api/v3/movie" or "add"."""
+    kw = keyword.lower().strip()
+    if not SEARCH_RANK:
+        return set(), [kw]
+    methods: set[str] = set()
+    terms: list[str] = []
+    for tok in re.split(r"[\s,|]+", kw):
+        if tok in _HTTP_METHODS:
+            methods.add(tok)
+        elif tok in _WRITE_WORDS:
+            methods.add("post")
+        elif tok and tok not in ("or", "and", "-"):
+            terms.append(tok)
+    return methods, terms
+
+
+def _path_words(paths: dict, limit: int = 40) -> str:
+    """The distinct words in the spec's paths, most common first, for a search that matched nothing."""
+    counts: dict[str, int] = {}
+    for path in paths:
+        for w in re.findall(r"[a-zA-Z]{3,}", re.sub(r"\{[^}]*\}", "", path)):
+            if w.lower() not in ("api", "v3", "v1", "v2"):
+                counts[w] = counts.get(w, 0) + 1
+    return ", ".join(sorted(counts, key=lambda w: -counts[w])[:limit])
 
 
 # --- files ------------------------------------------------------------------------

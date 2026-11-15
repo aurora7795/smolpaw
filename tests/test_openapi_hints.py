@@ -100,5 +100,17 @@ try:
 finally:
     srv.terminate()
 
+# forgiving queries (#117): a method word filters, "add" means POST, an empty result points at real path words
+s2 = spec(props)
+out = search(s2, "POST /api/things")
+check("a query with a method and a path finds that write", out.startswith("POST /api/things") and "GET /api/things" not in out)
+check("a method alone lists nothing and points at path words", "No matching endpoints" in search(s2, "POST") and "things" in search(s2, "POST"))
+check("add means POST", search(s2, "add things").startswith("POST /api/things"))
+check("a word nowhere in the spec lists real path words", "vaults" in search(s2, "ThingResource"))
+check("the shorter path comes first", search(s2, "things").splitlines()[0].endswith("List things"))
+g.SEARCH_RANK = False
+check("with the switch off an unmatched query is a plain miss", search(s2, "POST /api/things") == "No matching endpoints.")
+g.SEARCH_RANK = True
+
 print(f"\n{failed} failed")
 sys.exit(1 if failed else 0)

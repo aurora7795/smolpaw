@@ -661,7 +661,7 @@ g.requests.get = lambda *a, **k: _Page()
 msg = g.openapi_search("http://x/index", "queue")
 check("openapi_search explains non-spec JSON", "not an OpenAPI spec" in msg and "http_request" in msg)
 g.requests.get = lambda *a, **k: _Resp()
-check("openapi_search no match", g.openapi_search("http://x/spec.json", "zzz") == "No matching endpoints.")
+check("openapi_search no match", g.openapi_search("http://x/spec.json", "zzz").startswith("No matching endpoints."))
 
 # openapi_search calls are logged, like http_request and run_shell (#30)
 _SPECS_SAVED = dict(g._SPECS)
