@@ -42,7 +42,7 @@ import generic_tools as g  # noqa: E402
 from agent import BACKENDS, NO_ANSWER, build_agent, load_env, repeat_tail, step_trace  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
-from tests import housekeeping_fixture, probe_fixture, readonly_fixture, tracking_fixture  # noqa: E402
+from tests import housekeeping_fixture, probe_fixture, readonly_fixture, real_radarr, tracking_fixture  # noqa: E402
 
 LMS = Path.home() / ".lmstudio/bin/lms"
 OLLAMA = BACKENDS["ollama"]["url"].removesuffix("/v1")
@@ -500,6 +500,15 @@ def main() -> None:
                     help="first-contact case: an invented device the model knows nothing about (#100)")
     ap.add_argument("--fake-radarr", action="store_true",
                     help="serve tests/fake_radarr.py and ask the agent to add a movie (cycles Primer, Moon, Arrival) (#102)")
+    ap.add_argument("--real-radarr", action="store_true",
+                    help="rung 3 against a real Radarr (RADARR_URL and RADARR_API_KEY from .env): add a pool film per run "
+                         "with scripted approvals that allow only POST /api/v3/movie for that film; needs --allow-real-writes (#1)")
+    ap.add_argument("--allow-real-writes", action="store_true",
+                    help="with --real-radarr: required when the server is not on this machine, since runs add real films")
+    ap.add_argument("--radarr-url", default="", metavar="URL",
+                    help="with --real-radarr: use this server and no key instead of RADARR_URL (a dry run against tests/fake_radarr.py)")
+    ap.add_argument("--radarr-films", default="", metavar="'Title:Year,...'",
+                    help="with --real-radarr: films to add instead of the built-in pool (a dry run against the fake)")
     ap.add_argument("--add-skill", action="append", default=[], metavar="FILE",
                     help="copy this skill file into the run's isolated skills folder (repeatable); every run uses a copy of "
                          "the repo's skills/ in a temp folder, so a candidate skill never touches the real one (#103)")
@@ -547,6 +556,24 @@ def main() -> None:
         spec_line = f"  OpenAPI spec: {url}/api/v3/openapi.json\n" if args.radarr_spec else ""
         (tmp / "notes.md").write_text(f"# notes\n\n- radarr: {url}\n  Movie manager. No API key needed.\n{spec_line}")
         expects = expects or []
+    elif args.real_radarr:
+        url = (args.radarr_url or os.environ.get("RADARR_URL", "")).rstrip("/")
+        key = "" if args.radarr_url else os.environ.get("RADARR_API_KEY", "")
+        if not url or (not args.radarr_url and not key):
+            ap.error("--real-radarr needs RADARR_URL and RADARR_API_KEY in .env, or --radarr-url for a dry run")
+        if not real_radarr.is_local(url) and not args.allow_real_writes:
+            ap.error("this Radarr is not on this machine: its runs add real films; pass --allow-real-writes to go ahead")
+        pool = [(t.rsplit(":", 1)[0], int(t.rsplit(":", 1)[1])) for t in args.radarr_films.split(",") if t] or real_radarr.POOL
+        films, skipped, pool_ids = real_radarr.resolve_films(url, key, pool)
+        for line in skipped:
+            print(f"pool: skipped {line}")
+        if len(films) < args.n:
+            ap.error(f"only {len(films)} pool film(s) usable, --n is {args.n}")
+        films = films[:args.n]
+        print("films for this eval: " + ", ".join(f"{f.title} ({f.year})" for f in films))
+        key_opts = " | key_env=RADARR_API_KEY | header=X-Api-Key" if key else ""
+        (tmp / "notes.md").write_text(f"# notes\n\n- radarr: {url}{key_opts}\n  Movie manager.\n")
+        expects = expects or []
     elif args.notes_file:
         (tmp / "notes.md").write_text(Path(args.notes_file).read_text())
     else:
@@ -572,7 +599,7 @@ def main() -> None:
         prompt = prompt or COUNTING_HOME_PROMPT
     for name in args.without_tool:
         g.GENERIC_TOOLS[:] = [t for t in g.GENERIC_TOOLS if t.name != name]
-    if not prompt and not args.tracking and not args.readonly and not args.housekeeping and not args.probe and not args.fake_radarr:
+    if not prompt and not args.tracking and not args.readonly and not args.housekeeping and not args.probe and not args.fake_radarr and not args.real_radarr:
         ap.error("--prompt is required unless --tidepool, --listing, --counting, --counting-home, --tracking, --housekeeping or --readonly is used")
     g.NOTES = tmp / "notes.md"
     g.MEMORY = tmp / "memory.md"
@@ -590,6 +617,11 @@ def main() -> None:
         web_info = {"mode": "eval", "backend": args.backend, "model": args.model, "status": "loading model"}
         web_server = web.serve(args.web_host, args.web_port, token, approvals, info=web_info)
         print(f"answer prompts at {web.url(args.web_host, args.web_port, token)}")
+    elif args.real_radarr:
+        approver = real_radarr.Approver(url, pool_ids, g.ACTIONS)
+        g.CONFIRM = approver.confirm
+        requests.request = approver.wrap(requests.request)  # a last check of the whole body before any write is sent
+        g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
     elif args.fake_radarr:
         g.CONFIRM = radarr_confirm(url)
         g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
@@ -627,11 +659,27 @@ def main() -> None:
             for case_name in READONLY_CASES if args.readonly == "all" else [args.readonly]:
                 run_readonly(args, tmp, case_name, ctx)
             return
-        label = args.label or ("fake-radarr" if args.fake_radarr else f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "counting-home" if args.counting_home else "custom")
+        label = args.label or ("real-radarr" if args.real_radarr else "fake-radarr" if args.fake_radarr else f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "counting-home" if args.counting_home else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
+        added_log: list[real_radarr.Added] = []
         for i in range(1, args.n + 1):
             web_info.update(status="running", progress=f"{label}: run {i} of {args.n}")
+            if args.real_radarr:
+                film = films[i - 1]
+                before = real_radarr.library_ids(url, key)
+                approver.start_run(film.tmdb_id)
+                r = run_once(args.model, real_radarr.PROMPT.format(title=film.title, year=film.year), [], args.max_steps,
+                             args.backend, not args.text_history,
+                             check=lambda f=film, b=before: real_radarr.check(url, key, f, b, added_log))
+                approver.after_run()
+                r.update(approver.run_record())
+                results.append(r)
+                print_run(i, r)
+                if approver.stop_reason:
+                    print(f"STOPPED: {approver.stop_reason}; the remaining runs were not started")
+                    break
+                continue
             if args.fake_radarr:
                 title = list(RADARR_MOVIES)[(i - 1) % len(RADARR_MOVIES)]
                 radarr_reset(url)
@@ -648,6 +696,8 @@ def main() -> None:
             print_run(i, r)
         save_results(args, label, ctx, prompt, expects, results)
     finally:
+        if args.real_radarr and "added_log" in locals():
+            print(real_radarr.cleanup_report(url, key, added_log))
         if server:
             server.terminate()
         if web_server:
