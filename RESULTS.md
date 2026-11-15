@@ -1073,3 +1073,19 @@ Passes of 6:
 - **Result: 0 of 3, and no write reached Radarr in any run.** Runs 1 and 2 hit the step cap (13 steps) after searching the spec and calling `http_request` on read endpoints, ending with a description of how to add the film instead of an add; run 3 was stopped by the repeated-results rule after 6 steps (four `openapi_search` calls, then `fetch_page`). Nothing was added, so there was nothing to clean up.
 - **Reading.** The earlier 0 of 3 had one correct add (at step 12 of 12); this rerun had none, so Qwen's real-Radarr failure is mostly not reaching the write within the step budget, and the approver was not the cause. Three runs, one session, one library.
 - Reproduce (writes to the Radarr in `.env`; remove the films it lists afterwards): `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --real-radarr --allow-real-writes --radarr-films "Pi:1998,Another Earth:2011,Upstream Color:2013" --n 3 --label real-radarr-qwen-rerun`.
+
+### The guard and the write hints, one switch at a time (#118, 2026-11-15)
+
+- **Question.** Which of the unseen-id guard (#102) and the `openapi_search` write hints (#112) matters? On the real Radarr Gemma went 2 of 3 with both on and 0 of 3 with both off, but they were switched off together.
+- **Criterion, stated on #118 before the runs (descriptive).** A switch matters for a model if its cell passes 3 or more fewer of 12 than that model's baseline cell, run in the same session; 2 or fewer is within what n=12 can separate from noise.
+- **Setup.** Fake Radarr (`tests/fake_radarr.py`), Primer, Moon and Arrival four times each (n=12 per cell), Ollama, 32K context, step cap 12, default config (the model finds the public Radarr spec through the `api-discovery` skill). Pass: the server holds exactly that film. Labels `ablate118-base`, `ablate118-no-hints`, `ablate118-no-guard`.
+
+| Model | Baseline | `--no-write-hints` | `--no-id-guard` |
+|---|---|---|---|
+| Gemma 4 E4B | 11 of 12 (8.5 steps) | **0 of 12** (7.2 steps, 5 stalled) | 9 of 12 (8.2 steps) |
+| Qwen 3.5 9B | 3 of 12 (11.5 steps, 5 capped) | 1 of 12 (7 capped) | 4 of 12 (5 capped) |
+
+- **Gemma: the hints matter, the guard does not.** Removing the hints cost 11 passes, far past the criterion; removing the guard cost 2, inside it. The guard refused 3 writes in the no-hints cell and none in the others. No cell sent a POST with a wrong `tmdbId` for Gemma.
+- **Qwen: neither shows an effect.** 3, 1 and 4 of 12 are within noise of each other; its failures are step-cap and stall runs in every cell, as in #117, so the switches cannot show up. One POST with a wrong `tmdbId` reached the server in the no-guard cell (none in the other two).
+- **Reading.** This supports the earlier suggestion from the real Radarr that the hints, not the guard, carried Gemma's result. The guard is still cheap insurance (zero prompt cost, and it refused three guessed writes), but on this fixture it is not what makes writes succeed. Not measured: the real Radarr per switch (the fake already separates them for Gemma, so a real run would only spend films), and Qwen on the real Radarr with the switches off (Qwen does not reach the write with them on).
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --fake-radarr --n 12 --label ablate118-base`; add `--no-write-hints` or `--no-id-guard` for the other cells; same with `qwen3.5:9b`.
