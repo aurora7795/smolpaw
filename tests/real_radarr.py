@@ -9,6 +9,9 @@ The approver is the only thing between a model's write and the library, so it is
   - it approves `POST <radarr>/api/v3/movie` for the film this run is meant to add, and nothing else
     (a lookup in Radarr is a GET, so no other POST is needed);
   - a body whose tmdbId is not this run's film is declined; one whose tmdbId is not any pool film also stops the eval;
+  - a body with no tmdbId and no other film id (imdbId, tvdbId) is let through, so that Radarr's own refusal is the
+    model's feedback, as it is for any other malformed write; one carrying another film id is declined, since Radarr
+    might resolve it to a film that is not this run's;
   - a film whose write already succeeded is not written again, and a run gets at most MAX_WRITES_PER_RUN attempts
     (a model's first body is often malformed and Radarr refuses it without writing, so a retry is allowed);
   - an auth failure (401/403) or MAX_FAILED_WRITES_IN_A_ROW failed writes in a row stop the eval: after a stop it
@@ -85,6 +88,14 @@ def resolve_films(url: str, key: str, pool: list[tuple[str, int]]) -> tuple[list
     return usable, skipped, found
 
 
+OTHER_FILM_IDS = ("imdbId", "tvdbId")
+
+
+def has_other_film_id(text: str) -> bool:
+    """True when a body (or the visible part of one) names a film by an id other than tmdbId."""
+    return any(re.search(rf'"{k}"\s*:', text) for k in OTHER_FILM_IDS)
+
+
 def preview_cut_off(desc: str) -> bool:
     """True when the confirmation prompt shows only the first 500 characters of a longer body."""
     return len(desc.split("body: ", 1)[1]) >= 500 if "body: " in desc else False
@@ -143,9 +154,13 @@ class Approver:
         """Why a write must not be sent, judged on the whole body; empty when it may go."""
         if method.upper() != "POST" or url.rstrip("/") != f"{self.url.rstrip('/')}/api/v3/movie":
             return f"{method} {url} is not the one write this eval allows"
-        tmdb = body.get("tmdbId") if isinstance(body, dict) else None
+        if not isinstance(body, dict):
+            return "the body is not a JSON object"
+        tmdb = body.get("tmdbId")
         if tmdb is None:
-            return "the body has no tmdbId"
+            if any(k in body for k in OTHER_FILM_IDS):
+                return "the body names the film by an id other than tmdbId"
+            tmdb = self.current  # nothing names a film: Radarr refuses it, and its refusal is the feedback
         if tmdb not in self.pool_ids:
             self.stop_reason = f"a write for tmdbId {tmdb}, which is not one of the pool films"
             return self.stop_reason
@@ -186,10 +201,10 @@ class Approver:
         if first.rstrip("/") != f"POST {self.url.rstrip('/')}/api/v3/movie":
             return no("only POST /api/v3/movie is approved")
         tmdb = preview_tmdb_id(desc)
-        if tmdb is None and not preview_cut_off(desc):
-            return no("no tmdbId in the body")
+        if tmdb is None and has_other_film_id(desc):
+            return no("the body names the film by an id other than tmdbId")
         if tmdb is None:
-            tmdb = self.current  # not visible in the preview; the send-time gate checks the whole body
+            tmdb = self.current  # absent, or past the preview; the send-time gate checks the whole body
         if tmdb not in self.pool_ids:
             self.stop_reason = f"a write for tmdbId {tmdb}, which is not one of the pool films"
             return no(self.stop_reason)

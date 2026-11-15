@@ -79,7 +79,14 @@ try:
         ap.start_run(14337)
         ap.succeeded.clear()
         check(f"declined: {desc.splitlines()[0][:50]}", not ap.confirm(desc))
-    check("a short body with no tmdbId is declined: it is all there is to see", not ap.confirm(f"POST {url}/api/v3/movie\n  body: {{\"title\": \"x\"}}"))
+    actions.clear()
+    ap.start_run(14337)
+    ap.succeeded.clear()
+    check("a body with no film id at all is approved, so Radarr's own refusal reaches the model",
+          ap.confirm(f"POST {url}/api/v3/movie\n  body: {{\"title\": \"x\", \"qualityProfileId\": 4}}"))
+    check("a body naming the film by imdbId or tvdbId alone is declined",
+          not ap.confirm(f"POST {url}/api/v3/movie\n  body: {{\"title\": \"x\", \"imdbId\": \"tt0\"}}")
+          and not ap.confirm(f"POST {url}/api/v3/movie\n  body: {{\"tvdbId\": 5}}"))
     long_body = '{"title": "x", "overview": "' + "a" * 600
     actions.clear()
     ap.start_run(14337)
@@ -132,7 +139,7 @@ try:
     api = f"{url}/api/v3/movie"
     check("the gate lets a GET through untouched", guarded("GET", f"{url}/api/v3/rootfolder") == "sent")
     check("the gate lets this run's film through", guarded("POST", api, json={"tmdbId": 14337, "title": "x"}) == "sent")
-    for what, args in (("another pool film", ("POST", api, {"tmdbId": 17431})), ("no tmdbId", ("POST", api, {"title": "Primer"})),
+    for what, args in (("another pool film", ("POST", api, {"tmdbId": 17431})), ("an imdbId and no tmdbId", ("POST", api, {"title": "Primer", "imdbId": "tt0390384"})),
                        ("a DELETE", ("DELETE", f"{api}/1", None)), ("a PUT", ("PUT", f"{api}/1", {"tmdbId": 14337})),
                        ("another endpoint", ("POST", f"{url}/api/v3/rootfolder", {"tmdbId": 14337})),
                        ("another host", ("POST", "http://example.com/api/v3/movie", {"tmdbId": 14337})), ("a non-dict body", ("POST", api, [14337]))):
@@ -144,6 +151,8 @@ try:
             blocked = True
         check(f"the gate blocks {what} before it is sent", blocked and len(sent) == n)
     check("blocked writes are recorded", len(ap.blocked) == 7 and not ap.stop_reason)
+    n = len(sent)
+    check("the gate sends a body with no film id at all, for Radarr to refuse", guarded("POST", api, json={"title": "Primer"}) == "sent" and len(sent) == n + 1)
     try:
         guarded("POST", api, json={"tmdbId": 603})
     except requests.RequestException:
