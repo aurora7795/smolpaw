@@ -65,6 +65,16 @@ SPEC = {
         "qualityProfileId": {"type": "integer"}, "rootFolderPath": {"type": "string"}, "monitored": {"type": "boolean"},
     }}}},
 }
+OVERVIEW = ("A made-up synopsis, long on purpose: a real Radarr lookup returns the film's overview, alternate titles, "
+            "images and ratings before its tmdbId, so a model that copies a lookup result into its POST sends a body "
+            "whose tmdbId is past the first 500 characters shown by the confirmation prompt (#1). ") * 3
+
+
+def lookup_view(film: dict) -> dict:
+    """A film as the lookup returns it: the overview comes before the tmdbId, as in Radarr."""
+    return {"title": film["title"], "year": film["year"], "overview": OVERVIEW, "tmdbId": film["tmdbId"]}
+
+
 ADDED: list[dict] = []
 ATTEMPTS: list[dict] = []  # {"tmdbId", "qualityProfileId", "status", "problems": [...]}
 
@@ -106,12 +116,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, SPEC)
         elif path == "/api/v3/movie/lookup/tmdb":
             wanted = parse_qs(url.query).get("tmdbId", [""])[0]
-            self._send(200, [f for f in FILMS if str(f["tmdbId"]) == wanted])
+            self._send(200, [lookup_view(f) for f in FILMS if str(f["tmdbId"]) == wanted])
         elif path == "/api":
             self._send(200, {"current": "v3", "deprecated": []})
         elif path == "/api/v3/movie/lookup":
             term = parse_qs(url.query).get("term", [""])[0].lower().strip()
-            self._send(200, [f for f in FILMS if term and term in f["title"].lower()])
+            self._send(200, [lookup_view(f) for f in FILMS if term and term in f["title"].lower()])
         elif path == "/api/v3/qualityprofile":
             self._send(200, PROFILES)
         elif path == "/api/v3/rootfolder":
