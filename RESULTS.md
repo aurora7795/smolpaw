@@ -1064,3 +1064,12 @@ Passes of 6:
 - **Not run: Qwen 3.5 9B.** Only three pool films were unused and the other three are the films the first run added, which are still in the library.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --real-radarr --allow-real-writes --no-id-guard --no-write-hints --n 3 --label real-radarr-guards-off` (writes to the Radarr in `.env` when a run succeeds; remove what it lists).
 
+
+### Rung 3 against a real Radarr: Qwen 3.5 9B rerun with the fixed approver (#1, #117, 2026-11-15)
+
+- **Question.** Does Qwen add a film to the real Radarr now that the scripted approver lets a body with no film id reach Radarr (so its refusal is the feedback)?
+- **Criterion, descriptive.** Passes out of 3, by the eval's rule (the right film added, answer given, no step cap, no stall).
+- **Setup.** As in "Rung 3 against a real Radarr" above (Ollama, 32K context, step cap 12, unseen-id guard and write hints on) with three new films not in the library: Pi (1998), Another Earth (2011), Upstream Color (2013). `--radarr-films "Pi:1998,Another Earth:2011,Upstream Color:2013"`, label `real-radarr-qwen-rerun`.
+- **Result: 0 of 3, and no write reached Radarr in any run.** Runs 1 and 2 hit the step cap (13 steps) after searching the spec and calling `http_request` on read endpoints, ending with a description of how to add the film instead of an add; run 3 was stopped by the repeated-results rule after 6 steps (four `openapi_search` calls, then `fetch_page`). Nothing was added, so there was nothing to clean up.
+- **Reading.** The earlier 0 of 3 had one correct add (at step 12 of 12); this rerun had none, so Qwen's real-Radarr failure is mostly not reaching the write within the step budget, and the approver was not the cause. Three runs, one session, one library.
+- Reproduce (writes to the Radarr in `.env`; remove the films it lists afterwards): `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --real-radarr --allow-real-writes --radarr-films "Pi:1998,Another Earth:2011,Upstream Color:2013" --n 3 --label real-radarr-qwen-rerun`.
