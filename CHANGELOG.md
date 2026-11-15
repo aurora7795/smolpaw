@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- The eval's stall line also names the tools behind the repeated results (`STALL(the last 2 results repeated earlier results: openapi_search x2)`), saved as `stalled_calls`; `repeat_tail` in `agent.py` (refs #115).
 - `tests/eval.py` prints the stall reason on a stopped run and counts stalled runs in the cell summary (fixes #115). Measured: switching the stall stop off did not recover Qwen's fake-Radarr runs (1 of 6 against 0 of 6).
 - `openapi_search` write hints (#112): a POST, PUT or PATCH hit now lists its id-like and path-like body fields beside the GET endpoint that supplies them, with that endpoint's first query parameter (`tmdbId <- GET /api/v3/movie/lookup?term=`). Tool output only, no prompt cost. On the fake Radarr with the public spec Gemma 4 E4B went from 0 to 5 of 6; Qwen 3.5 9B stayed at 0 of 6 there (4 of 6 with the fake's own spec in notes). One part of the stated criterion was missed; see RESULTS.md. `tests/test_openapi_hints.py`.
 - The fake Radarr serves its own OpenAPI spec (#114); `tests/eval.py --radarr-spec`, `--no-write-hints`.

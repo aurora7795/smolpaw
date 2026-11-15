@@ -39,7 +39,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import generic_tools as g  # noqa: E402
-from agent import BACKENDS, NO_ANSWER, build_agent, load_env, step_trace  # noqa: E402
+from agent import BACKENDS, NO_ANSWER, build_agent, load_env, repeat_tail, step_trace  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
 from tests import housekeeping_fixture, probe_fixture, readonly_fixture, tracking_fixture  # noqa: E402
@@ -334,6 +334,8 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
         # per step: call, failed, result repeats an earlier one; the second stall rule can be replayed on it (#77)
         "trace": [{"call": str(t["call"])[:120], "failed": t["failed"], "repeat": t["repeat"]} for t in step_trace(steps)],
         "stalled": getattr(agent, "stall_reason", None),
+        # which tools produced the repeated results that ended the run (#115)
+        "stalled_calls": repeat_tail(step_trace(steps)) if getattr(agent, "stall_reason", None) else "",
         "input_tokens": tokens_in,
         "output_tokens": tokens_out,
         "tools": [tc.name for s in steps for tc in (s.tool_calls or [])],
@@ -356,7 +358,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
 def print_run(i: int, r: dict) -> None:
     flag = "PASS" if r["passed"] else "FAIL"
     cap = " CAP" if r["hit_cap"] else ""
-    cap += f" STALL({r['stalled']})" if r.get("stalled") else ""
+    cap += f" STALL({r['stalled']}{': ' + r['stalled_calls'] if r.get('stalled_calls') else ''})" if r.get("stalled") else ""
     print(f"  run {i}: {flag}{cap} {r['wall_s']}s steps={r['steps']} parse_err={r['parse_errors']} "
           f"tokens_in={r['input_tokens']} id_refusals={r.get('id_refusals', 0)} tools={'>'.join(r['tools'])}")
     print(f"         {r['check'] + ' | ' if r['check'] else ''}{r['answer'][:160]!r}"
