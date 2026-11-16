@@ -4,6 +4,10 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- RESULTS.md: the parked #117 experiments retried on the hard fake-Radarr task at n=12; neither met the merge gate ([#117](https://github.com/aurora7795/smolpaw/issues/117)).
+
 ### Added
 - `tests/eval.py --fake-radarr --radarr-task hard` and `tests/fake_radarr.py <port> hard` ([#119](https://github.com/aurora7795/smolpaw/issues/119)): a task with headroom for the merge gate. The model must add a film with a named quality profile in the root folder with the most free space (three folders with `freeSpace`); the check wants that profile and folder. Baseline at n=12: Gemma 6 of 12, Qwen 5 of 12 (see RESULTS.md). The plain task is unchanged.
 - `tests/test_prompt_budget.py` (fixes #110): the suite fails when the first-call prompt outgrows its budget. It counts the characters of the first call (system prompt and each tool's schema) offline and compares them with `tests/prompt_budget.json`: at most 3% growth overall, per tool and for the system prompt, and an estimated 5000 tokens in all, with a per-tool breakdown on failure. A deliberate bump is `--update --measured <model>=<tokens>` after `tests/first_call_tokens.py`. No model is needed.
