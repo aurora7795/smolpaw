@@ -6,6 +6,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ### Changed
 
+- `mail_summary` check ([#94](https://github.com/aurora7795/smolpaw/issues/94)): a sender's deadline may sit up to two digit-free lines below the sender line (sender / action / deadline). The swapped-deadline and deadline-first tests still pass on all seeds. Rerun in RESULTS.md.
 - RESULTS.md: the parked #117 experiments retried on the hard fake-Radarr task at n=12; neither met the merge gate ([#117](https://github.com/aurora7795/smolpaw/issues/117)).
 
 ### Added

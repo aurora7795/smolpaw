@@ -513,6 +513,10 @@ for seed in (0, 1, 2):
           sok("mail_summary", f"{s1}: {d1}. {s2}: {d2}. {s3}: {d3}. Not {nl} or {nr}."))
     check(f"mail_summary (seed {seed}): sender line then deadline line passes",
           sok("mail_summary", f"- **Sender:** {s1}\n  **Deadline:** {d1}\n- **Sender:** {s2}\n  **Deadline:** {d2}\n- **Sender:** {s3}\n  **Deadline:** {d3}"))
+    check(f"mail_summary (seed {seed}): sender, action, then deadline on three lines passes",
+          sok("mail_summary", f"Sender: {s1}\nAction needed: Review the contract.\nDeadline: {d1}\n\nSender: {s2}\nAction needed: Reply.\nDeadline: {d2}\n\nSender: {s3}\nAction needed: Sign.\nDeadline: {d3}"))
+    check(f"mail_summary (seed {seed}): three-line items with swapped deadlines fail",
+          not sok("mail_summary", f"Sender: {s1}\nAction needed: Review.\nDeadline: {d2}\n\nSender: {s2}\nAction needed: Reply.\nDeadline: {d1}\n\nSender: {s3}\nAction needed: Sign.\nDeadline: {d3}"))
     check(f"mail_summary (seed {seed}): deadline under the wrong sender's item fails",
           not sok("mail_summary", f"- **Sender:** {s1}\n  **Deadline:** {d2}\n- **Sender:** {s2}\n  **Deadline:** {d1}\n- **Sender:** {s3}\n  **Deadline:** {d3}"))
     check(f"mail_summary (seed {seed}): a full stop between a sender and their deadline passes",

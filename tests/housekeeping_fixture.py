@@ -253,8 +253,10 @@ def _mail(ws: Path, rng: random.Random) -> Case:
         h = deadline_hours[i]
         deadlines.append(f"{d} Nov {h:02d}:00")
         when_re = rf"(?:{date_re(d)}[^\n]{{0,40}}?{time_re(h)}|{time_re(h)}[^\n]{{0,40}}?{date_re(d)})"
-        # a sender line without digits, then the deadline on the next line ("Sender: X" / "Deadline: ...")
-        next_line = rf"{name_re}[^\n\d]{{0,150}}\n{gap}{when_re}"
+        # a sender line without digits, then the deadline on the next line ("Sender: X" / "Deadline: ..."), or up to
+        # two digit-free lines later ("Sender: X" / "Action: ..." / "Deadline: ..."); none may name another sender (#94)
+        mid = rf"(?:(?!{others})[^\n\d]){{0,150}}\n"
+        next_line = rf"{name_re}[^\n\d]{{0,150}}\n(?:{mid}){{0,2}}{gap}{when_re}"
         # the sender and their own deadline together, in either order: a deadline swapped between senders must fail
         expects.append(rf"(?i)(?:{name_re}{fwd_gap}{when_re}|{when_re}{gap}{name_re}|{next_line})")
 
