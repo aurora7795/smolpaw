@@ -72,6 +72,18 @@ Pick a few — no need to do all of them. Each one exercises something different
 7. **If you have more than one local model**, run the same prompt on each and note which finishes,
    in how many steps, and how long it took — a real, if informal, model comparison.
 
+## Comparing eval runs
+
+`tests/eval.py` ends with the list of log files it wrote. Pool logs into arms and compare them (pass counts, stalls,
+steps, tokens, seconds, and a one-sided Fisher exact p for the first arm beating the second):
+
+```bash
+.venv/bin/python tests/compare_runs.py --arm compact='logs/eval-*-compact*.json' --arm default='logs/eval-*-default*.json' --family housekeeping
+```
+
+Keep `logs/` outside any git worktree you will delete (it is gitignored, so deleting the worktree deletes the evidence):
+run evals from the main checkout, or copy the `logs/eval-*.json` files out first.
+
 ## Sending findings back
 
 Every request writes one file to `logs/` (gitignored, already redacted — no keys ever reach the

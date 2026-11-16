@@ -380,6 +380,9 @@ def print_run(i: int, r: dict) -> None:
           f"{' ERROR ' + r['error'] if r['error'] else ''}")
 
 
+SAVED: list[str] = []  # log files written this invocation, listed at the end so a comparison can be rebuilt (#132)
+
+
 def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[str], results: list[dict]) -> None:
     n = len(results)
     stalled = sum(bool(r.get("stalled")) for r in results)
@@ -391,10 +394,11 @@ def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[s
     out = ROOT / "logs" / f"eval-{stamp}-{args.backend}-{safe_name(args.model)}-{label}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
-                               "history": "text" if args.text_history else "native", "without_tool": args.without_tool,
+                               "history": "text" if args.text_history else "native", "system_prompt": os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact"), "without_tool": args.without_tool,
                                "loaded_context": ctx, "max_tokens": args.max_tokens, "prompt": prompt, "expect": expects,
                                "runs": results}, indent=2))
     print(f"  saved {out.relative_to(ROOT)}")
+    SAVED.append(out.name)
 
 
 def run_tracking(args, tmp: Path, case_name: str, ctx: int | None) -> None:
@@ -729,6 +733,8 @@ def main() -> None:
             server.terminate()
         if web_server:
             web_server.shutdown()
+        if SAVED:
+            print("\nlog files (compare with tests/compare_runs.py):\n  " + "\n  ".join(SAVED))
 
 
 if __name__ == "__main__":
