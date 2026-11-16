@@ -253,10 +253,21 @@ def load_env(path: str = ".env") -> None:
             os.environ.setdefault(k.strip(), v.strip())
 
 
+def env_max_tokens() -> int | None:
+    """SMOLPAW_MAX_TOKENS: cap on one model reply (#95), so a model stuck in a loop cannot hang a run. Unset or 0: no cap."""
+    raw = os.environ.get("SMOLPAW_MAX_TOKENS", "").strip()
+    try:
+        return int(raw) if raw and int(raw) > 0 else None
+    except ValueError:
+        print(f"WARNING: SMOLPAW_MAX_TOKENS={raw!r} is not a whole number; no cap applied.", file=sys.stderr)
+        return None
+
+
 def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps: int = MAX_STEPS,
                 toolset: str = "generic", backend: str = "lmstudio", native_history: bool = True,
                 max_tokens: int | None = None):
     cfg = BACKENDS[backend]
+    max_tokens = max_tokens or env_max_tokens()
     extra = {"max_tokens": max_tokens} if max_tokens else {}  # caps one reply, so a looping model ends it
     model = (NativeHistoryModel if native_history else OpenAIServerModel)(
         model_id=model_id or cfg["model"],

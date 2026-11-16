@@ -1813,6 +1813,23 @@ a = _FakeAgent([_step([ToolCall("read_file", {"p": f"p{i}"}, "x")], observations
 check_stall(a.memory.steps[-1], a)
 check("four different successful results are progress", not a.interrupted)
 
+# SMOLPAW_MAX_TOKENS (#95): off by default, read by build_agent, bad values ignored
+import agent as _agent95  # noqa: E402
+_saved95 = os.environ.pop("SMOLPAW_MAX_TOKENS", None)
+_mk = lambda: _agent95.build_agent("m", "tool", 3, "generic", "lmstudio").model.kwargs.get("max_tokens")  # noqa: E731
+check("no SMOLPAW_MAX_TOKENS: replies are not capped", _mk() is None)
+os.environ["SMOLPAW_MAX_TOKENS"] = "1234"
+check("SMOLPAW_MAX_TOKENS caps one reply", _mk() == 1234)
+check("an explicit max_tokens wins over the environment",
+      _agent95.build_agent("m", "tool", 3, "generic", "lmstudio", True, 77).model.kwargs.get("max_tokens") == 77)
+for _bad in ("abc", "0", "-5", ""):
+    os.environ["SMOLPAW_MAX_TOKENS"] = _bad
+    check(f"SMOLPAW_MAX_TOKENS={_bad!r} means no cap", _mk() is None)
+if _saved95 is None:
+    os.environ.pop("SMOLPAW_MAX_TOKENS", None)
+else:
+    os.environ["SMOLPAW_MAX_TOKENS"] = _saved95
+
 # run_request() reports a stall as a finished answer, but still lets a real Stop-button interrupt through
 from smolagents.utils import AgentError  # noqa: E402
 

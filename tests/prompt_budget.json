@@ -1,0 +1,29 @@
+{
+  "chars": 19265,
+  "system_chars": 12296,
+  "tool_chars": {
+    "run_shell": 444,
+    "http_request": 629,
+    "fetch_page": 556,
+    "openapi_search": 573,
+    "read_file": 565,
+    "list_dir": 419,
+    "write_file": 411,
+    "edit_file": 661,
+    "ask_user": 328,
+    "list_skills": 246,
+    "read_skill": 248,
+    "write_skill": 530,
+    "remember": 374,
+    "recall": 341,
+    "web_search": 368,
+    "final_answer": 276
+  },
+  "tokens_per_char": 0.24342,
+  "measured_tokens": {
+    "qwen3.5:9b": 4855,
+    "gemma4:e4b": 4524
+  },
+  "tolerance": 0.03,
+  "budget_tokens": 5000
+}
