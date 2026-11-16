@@ -926,6 +926,22 @@ The check was changed again (#93): a sender's name may be followed by its deadli
 - **Caveats.** One session, one machine, n=5 per cell, two seeds, two models; the step-cap rule fails a run that has written the right answer.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --ctx 32768 --housekeeping mail_summary --seed 0 --n 5 --label mailfix2` (also `--seed 1`, and the same with `gemma4:e4b`).
 
+### `mail_summary` with sender, action and deadline on separate lines (#94, 2026-11-16)
+
+The check was changed again (#94): the deadline may sit up to two digit-free lines below the sender line, with no other sender's name in between. Swapped deadlines, deadline-first order and the decoy rules are unchanged, and two offline tests were added (three-line items pass, three-line items with swapped deadlines fail, all seeds). This was changed after seeing earlier answers, so the four cells were rerun (label `mailfix3`; same settings as `mailfix2`, n=5 per cell, no pass threshold). Logs: `logs/eval-20261116-*-housekeeping-mail_summary-*mailfix3.json`.
+
+| | Full stops allowed (#93) | Three-line items allowed (#94) |
+|---|---|---|
+| Qwen 3.5 9B, seed 0 | 5/5 | 5/5 |
+| Qwen 3.5 9B, seed 1 | 3/5 | 5/5 |
+| Gemma 4 E4B, seed 0 | 3/5 | 2/5 |
+| Gemma 4 E4B, seed 1 | 2/5 | 3/5 |
+
+- **The check did not decide any of the five Gemma failures.** From the final answers: seed 0 runs 3 and 5 named Hannah Ruiz (a chatter sender) in place of a real one; run 4 hit the step cap (13) and its answer opens with a "With a Specified Deadline" list that includes Isaac Ross and Clara Chen, who the other runs also named, so it may have been sound but the cap fails it; seed 1 run 2 said it had no access to the mail folder (2 steps); seed 1 run 3 gave two senders, one of them wrong, at the step cap. All are the model's. Qwen passed all ten.
+- **Pooled, 15 of 20 against 13 of 20 before.** Treat the difference as run-to-run variation at n=5, as in the previous section.
+- **Caveats.** One session, one machine, n=5 per cell, two seeds, two models. The #94 rejection itself (Gemma's three-line answer) is covered by the offline test, not by a model run in this rerun, since none of these runs wrote that format.
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --ctx 32768 --housekeeping mail_summary --seed 0 --n 5 --label mailfix3` (also `--seed 1`, and the same with `gemma4:e4b`).
+
 ## First contact with an unknown device (#100, 2026-11-14)
 
 Question: does one sentence in `ssh_run`'s description ("If you do not know what the device runs, start with `uname -a`, then `help`, before guessing commands") help a small model operate a device it has no notes on?
