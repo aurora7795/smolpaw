@@ -7,7 +7,8 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Long files break both working models (#87, n=3 per cell, Ollama): editing or appending to a file longer than the 4,000-character read clip passed 0 of 12 runs, mostly because the model wrote back the clipped view it had seen and said nothing was lost; reporting figures from long files passed 3 of 6. With a paged `read_file` (#86): edit and append 1 of 12, reading 3 of 6, all within noise. With `edit_file` added (#72): edit and append 10 of 12, reading 2 of 6. On five harder edit cases, same session, `edit_file` 24 of 30 runs against 0 of 30 without it. See "Do small models keep track of what they read and write?".
 - A lean harness with generic tools works with small local models, but only some of them. Gemma 4 E4B and Qwen 3.5 9B can follow a skill and discover an unseen API. Bonsai 8B (ternary) cannot do discovery. Nanbeige 3B produced garbage under LM Studio.
 - Harness fixes mattered as much as model choice. Inlining skills, warning on HTML responses and clearer tool errors took rung 1 from 3 of 6 to 6 of 6 across the two working models.
-- OpenClaw's prompt is still about 5.5 to 5.9 times larger than SmolPaw's (about 24K tokens against 4.1K to 4.4K on the first call, measured 2026-10-26; it was about 3K in early builds, before more tools were added). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against roughly 7s to 20s for SmolPaw's current prompt, which is the efficiency gap this project is aiming at.
+- Since 2026-11-16 the first call is 2.3K to 2.7K tokens (a compact system prompt, #125, see "Compact system prompt"), so OpenClaw's prompt is about 9 to 10 times larger (24K against 2.3K to 2.7K); the 5.5 to 5.9 times below is the earlier ratio (about 24K tokens against 4.1K to 4.4K on the first call, measured 2026-10-26; it was about 3K in early builds, before more tools were added). Locally, reading 24K tokens takes about 40s (Gemma) to 115s (Qwen) per call, against roughly 7s to 20s for SmolPaw's current prompt, which is the efficiency gap this project is aiming at.
+- Dropping smolagents' duplicate text tool list and notional examples cut the first call by 44 to 49 percent (Qwen 4,855 to 2,693 tokens, Gemma 4,524 to 2,330) and input tokens per run by about 40 to 55 percent, with no regression found at n=3 to 10 per cell (#125).
 - Discovery held up on harder variants of the invented API: 17 of 18 runs passed (hint, detail, paged).
 - Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time. A recheck with the actual error text shows the remaining rare errors are a different, generic issue (the model skipping a tool call, not copying history) (#14).
 - On Ollama the default MLX builds beat the GGUF ones on speed (Gemma reads prompts about twice as fast) with the same pass rates (#16). With native history at 32K, the earlier Ollama weakness on Tidepool `detail` is gone: 11 of 12 on each runtime (#15).
@@ -535,6 +536,49 @@ The tokens of the first model call for the request "hello", counted by Ollama (`
 - Other tools' individual in-prompt costs were not measured, only the whole and the `web_search` difference. Reading time at this size is worked out from the speeds in the prefill table above (about 20s on Qwen, about 7s on Gemma, cold), not timed. OpenClaw's 24K figure comes from one run on a different tokenizer, so the ratio is approximate.
 
 
+
+## Compact system prompt (#125, 2026-11-16)
+
+smolagents' tool-calling prompt prints every tool as text ("You only have access to these tools: ...", about 6.8K characters) and carries notional examples (an image generator, a document question tool, Guangzhou against Shanghai) and instructions to write `Action: {...}` blobs. SmolPaw also sends the same tools as native schemas, so each tool reached the model twice. This is the likely reason a tool cost about 1.7 times its raw schema in the section above (not tested separately). The compact style (`SMOLPAW_SYSTEM_PROMPT=compact`, `agent.py`) keeps SmolPaw's own instructions and smolagents' four rules and drops the rest.
+
+**Pass criterion, stated before the run:** first-call tokens down at least 25 percent, and neither Gemma 4 E4B nor Qwen 3.5 9B worse beyond noise on any task family (CLAUDE.md section 6).
+
+**First call** (`tests/first_call_tokens.py`, Ollama, 32K context, 1 run per figure):
+
+| Model | Default prompt | Compact prompt | Change |
+|---|---|---|---|
+| Qwen 3.5 9B | 4,855 | 2,693 | -44.5% |
+| Gemma 4 E4B | 4,524 | 2,330 | -48.5% |
+
+**Pass counts** (`tests/eval.py --system-prompt default|compact`, Ollama, 32K context, native history, interleaved by task; n=3 per cell, hard fake-Radarr n=6; passes over runs, default then compact):
+
+| Family | Qwen 3.5 9B | Gemma 4 E4B |
+|---|---|---|
+| Tidepool, 4 variants | 12/12, 10/12 | 10/12, 9/12 |
+| Housekeeping, 8 chores | 13/24, 13/24 | 15/24, 13/24 |
+| Tracking, 3 cases | 6/9, 8/9 | 7/9, 4/9 |
+| Read-only scheduled, 5 cases | 3/15, 5/15 | 11/15, 11/15 |
+| Hard fake-Radarr (#119) | 3/6, 4/6 | 4/6, 3/6 |
+| Total | 37/66, 40/66 | 47/66, 40/66 |
+
+Mean input tokens per run fell about 40 to 55 percent in every family (for example Qwen housekeeping 34.4K to 16.3K, Gemma Tidepool 30.7K to 17.8K) and mean seconds per run fell in most.
+
+**Follow-up at n=10.** Gemma's totals looked worse (47 against 40 of 66, p about 0.2 by a two-sided look; not established), driven by tracking and Tidepool `easy`. I then reran those cells at n=10, with the rule fixed before seeing them (a regression is a one-sided Fisher exact p below 0.1 with the default better, on a pooled family per model). That rule was written after the n=3 results, so it describes a follow-up and is not the original gate.
+
+| Cell | Default | Compact | p (default better) |
+|---|---|---|---|
+| Gemma, tracking (3 cases pooled, 30 runs) | 16/30 | 13/30 | 0.30 |
+| Gemma, Tidepool `easy` | 6/10 | 7/10 | 0.83 |
+| Gemma, Tidepool `paged` | 10/10 | 8/10 | 0.24 |
+| Qwen, Tidepool `paged` | 8/10 | 10/10 | 0.99 |
+
+No cell met the rule. Gemma's `easy` result had been 3/3 against 1/3 at n=3 and came out the other way at n=10, which shows how much of the n=3 spread is noise. Gemma's tracking runs were slower with the compact prompt (mean 68s against 41s), unexplained.
+
+**Verdict.** The size criterion is met and no regression was found, so compact is the default. Ten runs per arm cannot show a real drop of 10 to 20 points, so this is "no regression found", not "no regression". The budget in `tests/prompt_budget.json` was lowered from 5,000 to 3,000 tokens.
+
+Caveats: one session, one machine, Ollama only (LM Studio was not rerun); the default arm's housekeeping and tracking cells vary a lot from run to run (Gemma's `read_three_report` was 0/10 on both arms); the stall counts differ by arm in small ways (Gemma Tidepool 0 against 3 at n=3, then 0 against 2 at n=10 `paged`) that were not explained.
+
+Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --ctx 32768 --system-prompt default --tracking all --n 10 --label sp10-default`, then the same with `--system-prompt compact`, and the same with `qwen3.5:9b` and the other task flags. `tests/test_prompt_budget.py` checks the compact prompt has no second tool list and no notional examples.
 
 ## Do small models keep track of what they read and write? (#87, 2026-10-29)
 

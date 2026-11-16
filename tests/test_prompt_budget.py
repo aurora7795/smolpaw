@@ -49,6 +49,34 @@ def measure() -> dict:
     return {"system_chars": system_chars, "tool_chars": tools, "chars": system_chars + sum(tools.values())}
 
 
+def check_prompt_style() -> None:
+    """The compact system prompt (#125) carries no second copy of the tools and none of smolagents' notional examples."""
+    def system_text() -> str:
+        agent = agent_mod.build_agent("budget-check", backend="ollama")
+        return agent.initialize_system_prompt()
+
+    saved = os.environ.get("SMOLPAW_SYSTEM_PROMPT")
+    try:
+        os.environ.pop("SMOLPAW_SYSTEM_PROMPT", None)
+        compact = system_text()  # the default style
+        os.environ["SMOLPAW_SYSTEM_PROMPT"] = "default"
+        original = system_text()
+    finally:
+        if saved is None:
+            os.environ.pop("SMOLPAW_SYSTEM_PROMPT", None)
+        else:
+            os.environ["SMOLPAW_SYSTEM_PROMPT"] = saved
+    check("default style: no text list of the tools in the system prompt",
+          "You only have access to these tools" not in compact and "Takes inputs" not in compact)
+    check("default style: no notional examples from smolagents' template",
+          "image_generator" not in compact and "Guangzhou" not in compact and "document_qa" not in compact)
+    check("default style: still says to finish with final_answer and keeps the four rules",
+          "final_answer" in compact and "ALWAYS provide a tool call" in compact and "exact same parameters" in compact)
+    check("default style: SmolPaw's own instructions are in the prompt", "Home folder:" in compact and "--- notes.md ---" in compact)
+    check("SMOLPAW_SYSTEM_PROMPT=default brings smolagents' own prompt back",
+          "You only have access to these tools" in original and "Guangzhou" in original and len(original) > 3 * len(compact) // 2)
+
+
 def main() -> None:
     now = measure()
     if "--update" in sys.argv:
@@ -63,6 +91,7 @@ def main() -> None:
         }, indent=2) + "\n")
         print(f"wrote {BUDGET}: {now['chars']} chars, ratio {ratio:.5f}")
         return
+    check_prompt_style()
     base = json.loads(BUDGET.read_text())
     tol, ratio = base["tolerance"], base["tokens_per_char"]
     est = now["chars"] * ratio
