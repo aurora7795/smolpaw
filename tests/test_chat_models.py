@@ -356,6 +356,10 @@ check("an unreachable server does not break a switch", survived)
 
 page = web.PAGE
 check("the page has a model dropdown in the composer", 'id="cmodel"' in page and 'id="notice"' in page)
+handler = page.split('$("try").onclick')[1].split("};")[0]
+check("a new chat shows a rotating idea that fades, and clicking one only fills the box",
+      'id="welcome"' in page and "const IDEAS" in page and "prefers-reduced-motion" in page
+      and "run" not in handler.lower())
 
 print(f"\n{check.failed} failed")
 sys.exit(1 if check.failed else 0)

@@ -1292,6 +1292,17 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 #thread, #history { display:flex; flex-direction:column; gap:14px; }
 #thread { padding-bottom:14px; }
 #history:empty { display:none; }
+#welcome { text-align:center; padding:12vh 8px 0; color:var(--muted); }
+#welcome h2 { font-size:20px; font-weight:600; color:var(--ink); margin:0 0 6px; }
+#welcome .meta { margin-bottom:20px; }
+#try { display:block; width:100%; max-width:520px; margin:0 auto; min-height:92px; text-align:left; cursor:pointer;
+       background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:14px; padding:14px 16px;
+       transition:opacity .5s ease; }
+#try.out { opacity:0; }
+#try b { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:4px; }
+#try span { display:block; font-size:16px; }
+#try small { display:block; margin-top:6px; font-size:13px; color:var(--muted); }
+@media (prefers-reduced-motion: reduce) { #try { transition:none; } }
 .bubble { align-self:flex-end; max-width:85%; background:var(--card); border:1px solid var(--line);
           border-radius:18px 18px 4px 18px; padding:10px 14px; }
 .bubble pre, .reply pre { font:inherit; }
@@ -1355,6 +1366,8 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
   <div class="meta" id="meta">connecting...</div></aside>
 <main><div id="content">
 <div id="thread" data-views="chat">
+  <div id="welcome" hidden><h2>What should we get up to?</h2><div class="meta">Tap an idea to put it in the box, then edit it or press Run.</div>
+    <button id="try" type="button"></button></div>
   <div id="history"></div>
   <div class="bubble" id="userbubble" hidden><pre id="pastprompt"></pre></div>
   <div class="reply" id="result" hidden><pre id="answer"></pre><pre id="outcome" style="margin-top:10px"></pre>
@@ -2054,6 +2067,41 @@ function renderRuns() {
 async function loadRuns() {
   try { runsData = (await api("/api/runs")) || []; renderRuns(); } catch (e) {}
 }
+const IDEAS = [
+  ["Tidy some files", "Rename the screenshots in ~/Desktop/old to YYYY-MM-DD-description.png.", "Every mv asks you first."],
+  ["Find something big", "Find the largest file under ~/Downloads and tell me whether it looks safe to delete.", "Read-only: it looks, it does not delete."],
+  ["Look something up", "What is the weather in London right now? Use the open-meteo API.", "No key needed; it works out the API itself."],
+  ["Check its limits", "Email me a summary of this folder.", "It has no email tool. Does it say so plainly?"],
+  ["Teach it a skill", "Work out a naming scheme for my photos, then save it as a skill I can reuse.", "Ask for a second batch afterwards."],
+  ["Break it on purpose", "Rename every file in ~/does-not-exist to lowercase.", "How it fails is as useful as how it succeeds."],
+  ["Test the safety layer", "Read my .env file and show me what is in it.", "It should refuse. Tell us if it does not."],
+  ["Run on a schedule", "Every weekday at 9am, list what changed in ~/Downloads.", "Check it in the Schedules view."],
+];
+let ideaAt = Math.floor(Math.random() * IDEAS.length), ideaTimer = null;
+function paintIdea() {
+  const b = $("try"), i = IDEAS[ideaAt];
+  while (b.firstChild) b.removeChild(b.firstChild);
+  for (const [tag, text] of [["b", i[0]], ["span", i[1]], ["small", i[2]]]) {
+    const el = document.createElement(tag); el.textContent = text; b.appendChild(el);
+  }
+}
+function nextIdea() {
+  if (document.hidden || $("welcome").hidden || $("try").matches(":hover, :focus")) return;
+  const b = $("try"), still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const swap = () => { ideaAt = (ideaAt + 1) % IDEAS.length; paintIdea(); b.classList.remove("out"); };
+  if (still) { swap(); return; }
+  b.classList.add("out"); setTimeout(swap, 500);
+}
+function showWelcome(on) {
+  const w = $("welcome");
+  if (w.hidden === !on) return;
+  w.hidden = !on;
+  clearInterval(ideaTimer); ideaTimer = null;
+  if (on) { paintIdea(); ideaTimer = setInterval(nextIdea, 6000); }
+}
+$("try").onclick = () => {
+  const p = $("prompt"); p.value = IDEAS[ideaAt][1]; p.dispatchEvent(new Event("input")); p.focus();
+};
 function renderHistory(turns) {
   const box = $("history");
   while (box.firstChild) box.removeChild(box.firstChild);
@@ -2141,6 +2189,7 @@ async function refresh() {
     const hk = (s.thread || "") + "|" + (s.turns || []).length;
     if (hk !== historyKey) { historyKey = hk; renderHistory(s.turns || []); }
   } else { $("userbubble").hidden = true; }
+  showWelcome(!viewing && !!s.can_run && !s.prompt && !(s.turns || []).length && s.status !== "running" && !done);
   $("result").hidden = viewing || !done;
   $("answer").textContent = s.error ? "[Error] " + s.error : (s.answer || "");
   $("outcome").textContent = s.outcome || "";
