@@ -1576,14 +1576,19 @@ You are SmolPaw, an agent on the user's Mac. Work out how to meet the user's goa
 INLINE_SKILL_MAX = 1500  # chars; longer skills are listed by name and read on demand
 
 
-def build_instructions() -> str:
+def instruction_sections() -> list[tuple[str, str]]:
+    """SmolPaw's part of the system prompt as (name, text) sections, in order (the prompt budget test sizes each)."""
     notes = NOTES.read_text() if NOTES.exists() else "(no notes.md found)"
     inline, listed = [], []
     for f in sorted(SKILLS.glob("*.md")) if SKILLS.exists() else []:
         text = f.read_text()
         (inline if len(text) <= INLINE_SKILL_MAX else listed).append((f.stem, text))
-    parts = [GUIDANCE, f"Home folder: {Path.home()}. Shell commands start in workspace/. File tools take paths relative to workspace/; you can reach the home folder, e.g. Downloads, by full path or ~ (the user is asked first).", f"--- notes.md ---\n{notes}"]
-    parts += [f"--- skill: {name} ---\n{text}" for name, text in inline]
+    parts = [("guidance", GUIDANCE), ("home folder", f"Home folder: {Path.home()}. Shell commands start in workspace/. File tools take paths relative to workspace/; you can reach the home folder, e.g. Downloads, by full path or ~ (the user is asked first)."), ("notes.md", f"--- notes.md ---\n{notes}")]
+    parts += [(f"skill: {name}", f"--- skill: {name} ---\n{text}") for name, text in inline]
     if listed:
-        parts.append("Longer skills (read with read_skill): " + ", ".join(name for name, _ in listed))
-    return "\n\n".join(parts)
+        parts.append(("skill list", "Longer skills (read with read_skill): " + ", ".join(name for name, _ in listed)))
+    return parts
+
+
+def build_instructions() -> str:
+    return "\n\n".join(text for _, text in instruction_sections())

@@ -26,6 +26,10 @@ import generic_tools as g  # noqa: E402
 from tests.first_call_tokens import isolate  # noqa: E402
 
 BUDGET = Path(__file__).parent / "prompt_budget.json"
+MEASURED_WITH = ("characters of the first call: json of the messages (system prompt, user turn) plus json of each tool schema; "
+                 "sections are plain-text characters of the system prompt (template = smolagents' own text, then SmolPaw's "
+                 "guidance, home folder line, notes.md and each inlined skill), measured with an empty notes.md, git-tracked "
+                 "skills only and the default web search (#128); tokens_per_char was fitted to measured_tokens")
 failed = 0
 
 
@@ -46,7 +50,13 @@ def measure() -> dict:
     messages = agent.write_memory_to_messages()
     system_chars = sum(len(json.dumps(m, default=str)) for m in messages)
     tools = {t.name: len(json.dumps(get_tool_json_schema(t))) for t in agent.tools.values()}
-    return {"system_chars": system_chars, "tool_chars": tools, "chars": system_chars + sum(tools.values())}
+    system_text = agent.memory.system_prompt.system_prompt
+    sections = {"template": len(system_text) - len(g.build_instructions())}
+    sections.update({name: len(text) for name, text in g.instruction_sections()})
+    request = system_text + "".join(json.dumps(get_tool_json_schema(t)) for t in agent.tools.values())
+    repeated = [t.name for t in agent.tools.values() if request.count(t.description.strip()) != 1]
+    return {"system_chars": system_chars, "tool_chars": tools, "chars": system_chars + sum(tools.values()),
+            "sections": sections, "repeated_tools": repeated}
 
 
 def check_prompt_style() -> None:
@@ -85,7 +95,8 @@ def main() -> None:
         old = json.loads(BUDGET.read_text()) if BUDGET.exists() else {}
         ratio = sum(measured.values()) / (len(measured) * now["chars"]) if measured else old.get("tokens_per_char", 0.25)
         BUDGET.write_text(json.dumps({
-            "chars": now["chars"], "system_chars": now["system_chars"], "tool_chars": now["tool_chars"],
+            "measured_with": MEASURED_WITH, "chars": now["chars"], "system_chars": now["system_chars"],
+            "sections": now["sections"], "tool_chars": now["tool_chars"],
             "tokens_per_char": round(ratio, 5), "measured_tokens": measured or old.get("measured_tokens", {}),
             "tolerance": old.get("tolerance", 0.03), "budget_tokens": old.get("budget_tokens", 5000),
         }, indent=2) + "\n")
@@ -104,12 +115,20 @@ def main() -> None:
     check("no tool schema grew by more than the tolerance (and 50 characters)", not grown)
     check("the system prompt did not grow by more than the tolerance",
           now["system_chars"] <= base["system_chars"] * (1 + tol) + 50)
+    grew = {k: (base["sections"].get(k), v) for k, v in now["sections"].items()
+            if k in base.get("sections", {}) and v > base["sections"][k] * (1 + tol) + 50}
+    new = [k for k in now["sections"] if k not in base.get("sections", {})]
+    check("no system prompt section grew by more than the tolerance (and 50 characters)", not grew and not new)
+    check("every tool's description appears once in the request" + (f" (repeated or missing: {now['repeated_tools']})" if now["repeated_tools"] else ""),
+          not now["repeated_tools"])
     errs = {m: (base["chars"] * ratio - t) / t for m, t in base["measured_tokens"].items()}
     check("the characters-to-tokens ratio is within 10% of every measured figure: "
           + ", ".join(f"{m} {e:+.1%}" for m, e in errs.items()), all(abs(e) < 0.10 for e in errs.values()))
     if failed:
         print("\nBreakdown (characters; now vs recorded):")
         print(f"  system prompt and messages: {now['system_chars']} vs {base['system_chars']}")
+        for k, v in now["sections"].items():
+            print(f"    section {k}: {v} vs {base.get('sections', {}).get(k, 'new')}")
         for k, v in sorted(now["tool_chars"].items(), key=lambda kv: -kv[1]):
             print(f"  {k}: {v} vs {base['tool_chars'].get(k, 'new')}")
         print("If the growth is deliberate, measure with tests/first_call_tokens.py and rerun with --update.")
