@@ -1,6 +1,6 @@
 {
-  "chars": 19265,
-  "system_chars": 12296,
+  "chars": 10164,
+  "system_chars": 3195,
   "tool_chars": {
     "run_shell": 444,
     "http_request": 629,
@@ -19,11 +19,11 @@
     "web_search": 368,
     "final_answer": 276
   },
-  "tokens_per_char": 0.24342,
+  "tokens_per_char": 0.2471,
   "measured_tokens": {
-    "qwen3.5:9b": 4855,
-    "gemma4:e4b": 4524
+    "qwen3.5:9b": 2693,
+    "gemma4:e4b": 2330
   },
   "tolerance": 0.03,
-  "budget_tokens": 5000
+  "budget_tokens": 3000
 }
