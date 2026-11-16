@@ -77,5 +77,36 @@ try:
 finally:
     srv.terminate()
 
+# the hard variant (#119): three root folders with free space; the check wants the asked-for profile and the roomiest folder
+port2 = ev.free_port()
+url2 = f"http://127.0.0.1:{port2}"
+srv2 = subprocess.Popen([sys.executable, str(Path(__file__).parent / "fake_radarr.py"), str(port2), "hard"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    for _ in range(50):
+        try:
+            requests.get(url2, timeout=1)
+            break
+        except requests.RequestException:
+            time.sleep(0.1)
+    roots = requests.get(f"{url2}/api/v3/rootfolder").json()
+    check("hard: three root folders, each with free space", len(roots) == 3 and all(r["freeSpace"] for r in roots))
+    check("hard: the roomiest folder is neither the first nor the lowest id",
+          max(roots, key=lambda r: r["freeSpace"])["path"] == "/media/archive" and roots[0]["path"] != "/media/archive")
+    post2 = lambda body: requests.post(f"{url2}/api/v3/movie", json=body, timeout=5)  # noqa: E731
+    wrong = post2({**GOOD, "qualityProfileId": 4, "rootFolderPath": "/media/films"})
+    check("hard: any listed folder is a valid write, so the check (not the server) enforces the choice", wrong.status_code == 201)
+    ok, why = ev.radarr_hard_check(url2, 14337, 6)
+    check("hard: wrong profile and wrong folder fail the check and say what was wanted",
+          not ok and "profile 4 (wanted 6)" in why and "folder /media/films (wanted /media/archive)" in why)
+    ev.radarr_reset(url2)
+    post2({**GOOD, "qualityProfileId": 6, "rootFolderPath": "/media/archive"})
+    check("hard: the asked-for profile in the roomiest folder passes", ev.radarr_hard_check(url2, 14337, 6)[0])
+    check("hard: the right folder with the wrong profile fails", not ev.radarr_hard_check(url2, 14337, 9)[0])
+    from tests import fake_radarr  # noqa: E402
+    check("hard: the plain fake still has one root folder (only the hard flag changes it)", len(fake_radarr.ROOTS) == 1)
+finally:
+    srv2.terminate()
+
 print(f"\n{failed} failed")
 sys.exit(1 if failed else 0)

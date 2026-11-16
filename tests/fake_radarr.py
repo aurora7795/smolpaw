@@ -1,7 +1,10 @@
 """
 A fake Radarr for the unseen-id eval (#102): real film titles with TMDB-style ids a model may half-remember, and a
 quality profile and root folder whose ids are not the ones Radarr usually has. Nothing real is touched.
-Run: .venv/bin/python tests/fake_radarr.py [port]
+Run: .venv/bin/python tests/fake_radarr.py [port] [hard]
+
+With `hard` (#119) there are three root folders with `freeSpace` (the roomiest is not the first or the one with the lowest id)
+so a task can ask for a choice: see `HARD_ROOTS` and `tests/eval.py --radarr-task hard`.
 
   GET  /api                               {"current": "v3"}, as a real Radarr answers
   GET  /api/v3/openapi.json               its own OpenAPI spec: the routes below, with the movie body fields (#114)
@@ -37,6 +40,12 @@ FILMS = [
 ]
 PROFILES = [{"id": 4, "name": "HD-1080p"}, {"id": 6, "name": "Ultra-HD"}, {"id": 9, "name": "SD"}]
 ROOTS = [{"id": 2, "path": "/media/films"}]
+HARD_ROOTS = [
+    {"id": 2, "path": "/media/films", "freeSpace": 120_000_000_000},
+    {"id": 3, "path": "/media/archive", "freeSpace": 890_000_000_000},
+    {"id": 5, "path": "/media/scratch", "freeSpace": 45_000_000_000},
+]
+ROOMIEST = "/media/archive"  # the folder a "most free space" task must choose
 
 def _get(summary: str, tag: str, query: str = "") -> dict:
     op = {"tags": [tag], "summary": summary, "responses": {"200": {"description": "OK"}}}
@@ -164,4 +173,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if "hard" in sys.argv[2:]:
+        ROOTS[:] = HARD_ROOTS
     HTTPServer(("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 7878), Handler).serve_forever()
