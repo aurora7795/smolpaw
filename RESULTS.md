@@ -1104,3 +1104,15 @@ Passes of 6:
 - **Result (n=12 per model, Ollama, 32K context, step cap 12, guard and hints on, default config).** Gemma 6 of 12 (9.8 steps, 55K input tokens, 2 stalled, 3 capped); Qwen 5 of 12 (9.5 steps, 55K input tokens, 4 stalled, 5 capped). Both are inside the range the plain task could not offer: Gemma's 6 is the middle of the allowed band, and Qwen is above its plain-task 3 of 12. The failures are mostly no write at all (profile and folder `None`), then a few wrong folders for Gemma (up to 5 refused writes in one run).
 - **Caveats.** One session, one model build, one seed of film order; Qwen scoring higher than on the plain task means the extra instructions help it as often as they hurt, which is itself worth knowing before comparing across tasks. Differences of 2 of 12 between cells are inside what this fixture separates from noise.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --fake-radarr --radarr-task hard --n 12 --label hard119-base` (and `qwen3.5:9b`). Offline tests: `tests/test_fake_radarr.py`.
+
+## The parked #117 experiments retried on the hard fixture (2026-11-16)
+
+Both experiments failed the gate on the plain fake task at n=6 (see above). The hard task ([#119](https://github.com/aurora7795/smolpaw/issues/119)) has headroom, so each was rerun at n=12 per cell (Ollama, 32K context, guard and hints on). **Gate, stated before the run:** baseline Gemma 6/12, Qwen 5/12; an arm is worse if either model drops by 3 or more passes, a clear improvement if either gains 3 or more; merge only if neither is worse and one clearly improves. The rule was applied before seeing results.
+
+| Arm | Gemma 4 E4B | Qwen 3.5 9B | Gate |
+|---|---|---|---|
+| Baseline | 6/12 | 5/12 | - |
+| Repeated-result nudge + firmer DECLINED (`experiment/117-repeat-nudge`) | 8/12 (9.9 steps, 4 capped) | 5/12 (11.5 steps, 7 capped) | Not worse, but +2 is under the +3 bar: no merge |
+| Forgiving `openapi_search` (`experiment/117-forgiving-search`) | 4/12 (10.6 steps, 4 capped) | 2/12 (11.2 steps, 6 capped) | Qwen -3: worse, no merge |
+
+Caveats: n=12 per cell, so a difference of 2 is within noise; the nudge result is inconclusive, not negative. Qwen's step count and cap rate went up with both arms. Reproduce: check out each branch, then `.venv/bin/python tests/eval.py --backend ollama --model <model> --fake-radarr --radarr-task hard --n 12`.
