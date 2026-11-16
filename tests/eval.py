@@ -42,7 +42,7 @@ import generic_tools as g  # noqa: E402
 from agent import BACKENDS, NO_ANSWER, build_agent, load_env, repeat_tail, step_trace  # noqa: E402
 from smolagents.memory import ActionStep  # noqa: E402
 from smolagents.utils import AgentMaxStepsError, AgentParsingError  # noqa: E402
-from tests import housekeeping_fixture, probe_fixture, readonly_fixture, real_radarr, tracking_fixture  # noqa: E402
+from tests import fake_radarr, housekeeping_fixture, probe_fixture, readonly_fixture, real_radarr, tracking_fixture  # noqa: E402
 
 LMS = Path.home() / ".lmstudio/bin/lms"
 OLLAMA = BACKENDS["ollama"]["url"].removesuffix("/v1")
@@ -56,6 +56,10 @@ BOOK_EXPECTS = ["osprey", "c1"]
 OSPREY_ID, C1_ID = 4, 41  # what the server holds for them; the model has to look both up (#102)
 RADARR_MOVIES = {"Primer": 14337, "Moon": 17431, "Arrival": 329865}  # run i adds the i-th, cycling (#102)
 RADARR_PROMPT = "Add the movie {title} to Radarr."
+# #119: a variant with headroom. The task names a quality profile and asks for the root folder with the most free space,
+# so the model must read two lists and choose, not just copy the only profile and folder.
+RADARR_HARD_PROMPT = "Add the movie {title} to Radarr with the {profile} quality profile, in the root folder with the most free space."
+RADARR_HARD_PROFILES = {"Ultra-HD": 6, "SD": 9, "HD-1080p": 4}  # run i asks for the i-th, cycling
 LISTING_PROMPT = "What files and folders are in the folder downloads/? Give the exact total count and the name of every folder."
 LISTING_FOLDERS = ["apps", "docs", "fonts", "photos"]
 
@@ -273,6 +277,17 @@ def radarr_check(url: str, tmdb_id: int) -> tuple[bool, str]:
     return ok, (f"added {[f['tmdbId'] for f in added]}; {len(attempts)} POST(s) reached the server, "
                 f"{count('tmdbId')} with a wrong tmdbId, {count('profile')} wrong profile, {count('folder')} wrong folder, "
                 f"{sum(any(p.startswith('missing') for p in a['problems']) for a in attempts)} with a field missing")
+
+
+def radarr_hard_check(url: str, tmdb_id: int, profile_id: int) -> tuple[bool, str]:
+    """The plain check, and the film must hold the asked-for profile and the roomiest root folder (#119)."""
+    ok, why = radarr_check(url, tmdb_id)
+    added = requests.get(f"{url}/api/v3/movie", timeout=5).json()
+    film = added[0] if len(added) == 1 else {}
+    right_profile = film.get("qualityProfileId") == profile_id
+    right_folder = film.get("rootFolderPath") == fake_radarr.ROOMIEST
+    return ok and right_profile and right_folder, (
+        f"{why}; profile {film.get('qualityProfileId')} (wanted {profile_id}), folder {film.get('rootFolderPath')} (wanted {fake_radarr.ROOMIEST})")
 
 
 def free_port() -> int:
@@ -512,6 +527,8 @@ def main() -> None:
     ap.add_argument("--add-skill", action="append", default=[], metavar="FILE",
                     help="copy this skill file into the run's isolated skills folder (repeatable); every run uses a copy of "
                          "the repo's skills/ in a temp folder, so a candidate skill never touches the real one (#103)")
+    ap.add_argument("--radarr-task", choices=["plain", "hard"], default="plain",
+                    help="with --fake-radarr: hard = name a quality profile and ask for the root folder with the most free space (#119)")
     ap.add_argument("--radarr-spec", action="store_true",
                     help="with --fake-radarr: name the fake server's own OpenAPI spec in notes.md (#114)")
     ap.add_argument("--no-write-hints", action="store_true",
@@ -549,7 +566,7 @@ def main() -> None:
         expects = expects or (BOOK_EXPECTS if book else ["kestrel", "340"])
     elif args.fake_radarr:
         port = free_port()
-        server = subprocess.Popen([sys.executable, str(ROOT / "tests/fake_radarr.py"), str(port)],
+        server = subprocess.Popen([sys.executable, str(ROOT / "tests/fake_radarr.py"), str(port), *(["hard"] if args.radarr_task == "hard" else [])],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
         url = f"http://127.0.0.1:{port}"
@@ -659,7 +676,7 @@ def main() -> None:
             for case_name in READONLY_CASES if args.readonly == "all" else [args.readonly]:
                 run_readonly(args, tmp, case_name, ctx)
             return
-        label = args.label or ("real-radarr" if args.real_radarr else "fake-radarr" if args.fake_radarr else f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "counting-home" if args.counting_home else "custom")
+        label = args.label or ("real-radarr" if args.real_radarr else ("fake-radarr-hard" if args.radarr_task == "hard" else "fake-radarr") if args.fake_radarr else f"tidepool-{args.tidepool}" if args.tidepool else "listing" if args.listing else "counting" if args.counting else "counting-home" if args.counting_home else "custom")
         print(f"eval {label} | {args.backend}: {args.model} | loaded context {ctx} | n={args.n}")
         results = []
         added_log: list[real_radarr.Added] = []
@@ -683,8 +700,14 @@ def main() -> None:
             if args.fake_radarr:
                 title = list(RADARR_MOVIES)[(i - 1) % len(RADARR_MOVIES)]
                 radarr_reset(url)
-                r = run_once(args.model, RADARR_PROMPT.format(title=title), [title.lower()], args.max_steps, args.backend,
-                             not args.text_history, check=lambda t=RADARR_MOVIES[title]: radarr_check(url, t))
+                if args.radarr_task == "hard":
+                    profile = list(RADARR_HARD_PROFILES)[(i - 1) % len(RADARR_HARD_PROFILES)]
+                    r = run_once(args.model, RADARR_HARD_PROMPT.format(title=title, profile=profile), [title.lower()], args.max_steps,
+                                 args.backend, not args.text_history,
+                                 check=lambda t=RADARR_MOVIES[title], p=RADARR_HARD_PROFILES[profile]: radarr_hard_check(url, t, p))
+                else:
+                    r = run_once(args.model, RADARR_PROMPT.format(title=title), [title.lower()], args.max_steps, args.backend,
+                                 not args.text_history, check=lambda t=RADARR_MOVIES[title]: radarr_check(url, t))
                 results.append(r)
                 print_run(i, r)
                 continue
