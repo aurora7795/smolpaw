@@ -537,6 +537,8 @@ def main() -> None:
                     help="turn the unseen-id guard off (#102), for the comparison run")
     ap.add_argument("--without-tool", action="append", default=[],
                     help="drop a generic tool by name for this run, to compare (for example list_dir)")
+    ap.add_argument("--system-prompt", choices=["default", "compact"], default=None,
+                    help="system prompt style for this run (#125): compact drops smolagents' text tool list and examples")
     ap.add_argument("--label", default="")
     ap.add_argument("--confirm", choices=["no", "web"], default="no",
                     help="no = answer every prompt no; web = answer prompts in the browser (web.py)")
@@ -549,6 +551,8 @@ def main() -> None:
     MAX_TOKENS = args.max_tokens
     g.UNSEEN_ID_GUARD = not args.no_id_guard
     g.WRITE_HINTS = not args.no_write_hints
+    if args.system_prompt:
+        os.environ["SMOLPAW_SYSTEM_PROMPT"] = args.system_prompt
 
     load_env()
     tmp = Path(tempfile.mkdtemp())

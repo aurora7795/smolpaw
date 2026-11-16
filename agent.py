@@ -263,6 +263,32 @@ def env_max_tokens() -> int | None:
         return None
 
 
+# The smolagents tool-calling prompt prints every tool again as text and carries notional examples and text-blob
+# instructions; the tools already go out as native schemas, so the compact style drops all of that (#125).
+COMPACT_SYSTEM_PROMPT = """You are an assistant that solves the user's task by calling tools. After each call you get its result; use it to choose the next call. Finish by calling final_answer with your answer: it is the only way to end.
+{%- if custom_instructions %}
+
+{{custom_instructions}}
+{%- endif %}
+
+Rules:
+1. ALWAYS provide a tool call, else you will fail.
+2. Always use the right arguments for the tools. Use values, never variable names.
+3. Call a tool only when needed. If no tool call is needed, use final_answer.
+4. Never re-do a tool call with the exact same parameters."""
+
+
+def prompt_templates_for(style: str) -> dict | None:
+    """smolagents' tool-calling templates with the system prompt swapped for the compact one; None keeps the default."""
+    if style != "compact":
+        return None
+    import yaml
+    from importlib.resources import files
+    templates = yaml.safe_load(files("smolagents.prompts").joinpath("toolcalling_agent.yaml").read_text())
+    templates["system_prompt"] = COMPACT_SYSTEM_PROMPT
+    return templates
+
+
 def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps: int = MAX_STEPS,
                 toolset: str = "generic", backend: str = "lmstudio", native_history: bool = True,
                 max_tokens: int | None = None):
@@ -279,7 +305,9 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
         generic_tools.apply_search_provider()  # .env is loaded by now; the import-time call could not see it
         generic_tools.apply_devices()  # ssh_run only when notes.md lists a device
         # The generic path is ToolCallingAgent only: Bonsai was far more reliable with JSON tool calls.
+        style = os.environ.get("SMOLPAW_SYSTEM_PROMPT", "default").strip().lower()  # "compact" is the #125 experiment
         return ToolCallingAgent(tools=GENERIC_TOOLS, model=model, max_steps=max_steps,
+                                prompt_templates=prompt_templates_for(style),
                                 instructions=generic_tools.build_instructions(),
                                 step_callbacks=[check_stall])
     cls = ToolCallingAgent if agent_type == "tool" else CodeAgent
