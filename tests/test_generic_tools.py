@@ -629,17 +629,15 @@ check("action endpoint with empty body asks and is declined", g.http_request("PO
 check("/command needs a JSON body, so an empty POST is rejected",
       g.http_request("POST", "http://127.0.0.1:9/api/v3/command", "").startswith("ERROR") and not asked())
 
-saved_notes = g.NOTES.read_text() if g.NOTES.exists() else ""
+saved_notes = g.NOTES
+g.NOTES = tmp / "preflight-notes.md"  # never the real notes.md: concurrent test runs raced on it (#116)
 g.NOTES.write_text("- svc: http://x:7878 | key_env=SMOLPAW_TEST_PREFLIGHT_KEY\n")
 os.environ["SMOLPAW_TEST_PREFLIGHT_KEY"] = "preflight-test-key-abcdef"
 preflight_redacted = g.http_request("POST", "http://x:7878/api?k=preflight-test-key-abcdef", "")
 check("preflight error redacts secrets in URL",
       "preflight-test-key-abcdef" not in preflight_redacted and "[REDACTED]" in preflight_redacted)
 del os.environ["SMOLPAW_TEST_PREFLIGHT_KEY"]
-if saved_notes:
-    g.NOTES.write_text(saved_notes)
-else:
-    g.NOTES.unlink(missing_ok=True)
+g.NOTES = saved_notes
 
 # openapi_search (spec served from a fake requests.get)
 class _Resp:
@@ -1920,37 +1918,45 @@ _saved_stdin = sys.stdin
 sys.stdin = os.fdopen(_r)
 threading.Thread(target=terminal_relay, args=(_relay_approvals,), daemon=True).start()
 
+def _wait_pending(timeout: float = 10.0) -> None:
+    """Block until the relay has a pending prompt, then give its stdin reader a moment (a fixed sleep raced under load, #116)."""
+    end = time.time() + timeout
+    while _relay_approvals.pending is None and time.time() < end:
+        time.sleep(0.05)
+    time.sleep(0.8)
+
+
 _confirm_result = {}
 _th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Do a thing?")))
 _th.start()
-time.sleep(0.8)  # let the relay thread see the pending prompt and start reading
+_wait_pending()
 os.write(_w, b"y\n")
-_th.join(3)
+_th.join(15)
 check("terminal 'y' approves a confirm prompt", _confirm_result.get("v") is True)
 
 _th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Do another thing?")))
 _th.start()
-time.sleep(0.8)
+_wait_pending()
 os.write(_w, b"n\n")
-_th.join(3)
+_th.join(15)
 check("terminal 'n' declines a confirm prompt", _confirm_result.get("v") is False)
 
 _ask_result = {}
 _th = threading.Thread(target=lambda: _ask_result.update(v=_relay_approvals.ask("What is the path?")))
 _th.start()
-time.sleep(0.8)
+_wait_pending()
 os.write(_w, b"/tmp/demo\n")
-_th.join(3)
+_th.join(15)
 check("terminal free text answers an ask prompt", _ask_result.get("v") == "/tmp/demo")
 
 # a stale terminal line arriving just after the web page already answered must not flip the result
 _th = threading.Thread(target=lambda: _confirm_result.update(v=_relay_approvals.confirm("Race me?")))
 _th.start()
-time.sleep(0.8)
+_wait_pending()
 _pending_id = _relay_approvals.pending["id"]
 _relay_approvals.answer(_pending_id, True)  # the "web page" answers first
 os.write(_w, b"n\n")  # a stale terminal line, typed before the user saw the web had already answered
-_th.join(3)
+_th.join(15)
 check("a stale terminal answer after the web already answered does not flip the result",
       _confirm_result.get("v") is True and _relay_approvals.pending is None)
 
