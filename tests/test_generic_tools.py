@@ -1960,6 +1960,14 @@ _th.join(15)
 check("a stale terminal answer after the web already answered does not flip the result",
       _confirm_result.get("v") is True and _relay_approvals.pending is None)
 
+# first answer wins (#116): a second answer while `pending` is still set (the waiter has not cleared it yet) is refused
+_first = web.Approvals(timeout=5)
+_first.pending = {"id": 7, "kind": "confirm", "text": "First wins?"}  # no waiter thread, so the window stays open
+_first._done.clear()
+check("the first answer to a prompt is accepted", _first.answer(7, False) is True)
+check("a second answer to the same prompt is refused", _first.answer(7, True) is False)
+check("the first answer is the one the waiter would read", _first._answer is False)
+
 sys.stdin = _saved_stdin
 
 # settings card (#37): backend, model, step limit and timeout change between requests

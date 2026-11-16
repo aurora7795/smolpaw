@@ -74,8 +74,8 @@ class Approvals:
     def answer(self, prompt_id: int, value: object) -> bool:
         """Answer the pending prompt if `prompt_id` is still current; stale answers are refused."""
         with self._lock:
-            if not self.pending or self.pending["id"] != prompt_id:
-                return False
+            if not self.pending or self.pending["id"] != prompt_id or self._done.is_set():
+                return False  # a prompt already answered keeps its first answer, whatever arrives next (#116)
             kind = self.pending["kind"]
             if kind == "confirm" and not isinstance(value, bool):
                 return False
