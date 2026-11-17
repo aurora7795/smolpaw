@@ -345,4 +345,9 @@ PLAN.md               Goals, decisions, test ladder, next steps (tracked as GitH
 RESULTS.md            Measured results and caveats
 CHANGELOG.md          Keep a Changelog history
 CLAUDE.md             Project rules: commands, branching, issues, changelog, docs
+LICENSE               MIT licence
 ```
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
