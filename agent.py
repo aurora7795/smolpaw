@@ -25,15 +25,19 @@ from generic_tools import GENERIC_TOOLS
 from radarr_tools import RADARR_TOOLS
 
 BANNER = r"""
-      .-.     .-.
-     ( o )   ( o )
-      '-'     '-'        S M O L P A W
-  .-.             .-.    a small agent with big paws
- ( o )   .-"-.   ( o )
-  '-'   /     \   '-'
-       |  \_/  |
-        \     /
-         '-.-'
+      .--.      .--.
+     (    )    (    )
+      '--'      '--'
+  .--.              .--.        S M O L P A W
+ (    )   .-""-.   (    )       a small agent with big paws
+  '--'  .'  ||  '.  '--'
+       /  o-||-o  \
+      |     ||     |
+       \   _/\_   /
+        '-.    .-'
+          |    |
+          |    |
+          '-..-'
 """
 
 MAX_STEPS = 12
