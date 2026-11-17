@@ -29,6 +29,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -307,6 +308,38 @@ def safe_name(model: str) -> str:
 
 
 MAX_TOKENS: int | None = None  # set from --max-tokens; None leaves replies uncapped
+RUN_TIMEOUT: float | None = 600.0  # set from --run-timeout; seconds of wall clock for one run, None for no cap (#133)
+
+
+def run_with_timeout(agent, prompt: str, timeout: float | None) -> tuple[str, str, bool]:
+    """Run the agent in a worker thread; return (answer, error, timed_out).
+
+    On timeout the agent is interrupted and its open sockets shut down (best effort; the worker may still be blocked
+    in a retry), then the run is abandoned. The worker is a daemon, so it cannot hold the eval open. A server that is
+    still generating may stay busy for the next run; one runaway reply took 3,152s in #131.
+    """
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["answer"] = str(agent.run(prompt))
+        except BaseException as exc:  # noqa: BLE001
+            box["error"] = f"{type(exc).__name__}: {exc}"
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        with contextlib.suppress(Exception):
+            agent.interrupt()
+        with contextlib.suppress(Exception):
+            client = agent.model.client
+            client.max_retries = 0
+            for conn in list(client._client._transport._pool.connections):
+                conn._connection._network_stream.get_extra_info("socket").shutdown(socket.SHUT_RDWR)
+        worker.join(2)
+        return "", f"TimedOut: no answer within {timeout:g}s", True
+    return box.get("answer", ""), box.get("error", ""), False
 
 
 def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backend: str = "lmstudio",
@@ -320,12 +353,8 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     agent = build_agent(model, "tool", max_steps, "generic", backend, native_history, MAX_TOKENS)
     t0 = time.time()
     buf = io.StringIO()
-    error = ""
-    try:
-        with contextlib.redirect_stdout(buf):
-            answer = str(agent.run(prompt))
-    except Exception as exc:  # noqa: BLE001
-        answer, error = "", f"{type(exc).__name__}: {exc}"
+    with contextlib.redirect_stdout(buf):
+        answer, error, timed_out = run_with_timeout(agent, prompt, RUN_TIMEOUT)
     wall = time.time() - t0
     g.CONFIRM = confirm
     steps = [s for s in agent.memory.steps if isinstance(s, ActionStep)]
@@ -334,13 +363,14 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
     check_ok, check_reason = check() if check else (True, "")  # a disk check, for tasks that write files
     return {
         # A capped run did not finish, even if its forced last answer happens to match.
-        "passed": bool(answer) and not hit_cap and check_ok and all(re.search(e, answer, re.I) for e in expects),
+        "passed": bool(answer) and not timed_out and not hit_cap and check_ok and all(re.search(e, answer, re.I) for e in expects),
         "check": check_reason,
         # tool results cut at the read clip, to see how often a model worked from a partial view
         "clipped_results": sum("[truncated," in str(s.observations or "") or "to continue]" in str(s.observations or "") for s in steps),
         "wall_s": round(wall, 1),
         "steps": len(steps),
         "hit_cap": hit_cap,
+        "timed_out": timed_out,
         "parse_errors": sum(isinstance(s.error, AgentParsingError) for s in steps),
         # text of each parse error, to see which failure mode recurs (#14) instead of only a count
         "parse_error_detail": [str(s.error)[:300] for s in steps if isinstance(s.error, AgentParsingError)],
@@ -373,6 +403,7 @@ def run_once(model: str, prompt: str, expects: list[str], max_steps: int, backen
 def print_run(i: int, r: dict) -> None:
     flag = "PASS" if r["passed"] else "FAIL"
     cap = " CAP" if r["hit_cap"] else ""
+    cap += " TIMEOUT" if r.get("timed_out") else ""
     cap += f" STALL({r['stalled']}{': ' + r['stalled_calls'] if r.get('stalled_calls') else ''})" if r.get("stalled") else ""
     print(f"  run {i}: {flag}{cap} {r['wall_s']}s steps={r['steps']} parse_err={r['parse_errors']} "
           f"tokens_in={r['input_tokens']} id_refusals={r.get('id_refusals', 0)} tools={'>'.join(r['tools'])}")
@@ -395,7 +426,7 @@ def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[s
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
                                "history": "text" if args.text_history else "native", "system_prompt": os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact"), "without_tool": args.without_tool,
-                               "loaded_context": ctx, "max_tokens": args.max_tokens, "prompt": prompt, "expect": expects,
+                               "loaded_context": ctx, "max_tokens": args.max_tokens, "run_timeout": args.run_timeout, "prompt": prompt, "expect": expects,
                                "runs": results}, indent=2))
     print(f"  saved {out.relative_to(ROOT)}")
     SAVED.append(out.name)
@@ -479,7 +510,7 @@ def run_probe(args, tmp: Path, ctx: int | None) -> None:
 
 
 def main() -> None:
-    global MAX_TOKENS
+    global MAX_TOKENS, RUN_TIMEOUT
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
     ap.add_argument("--model", required=True)
@@ -489,6 +520,8 @@ def main() -> None:
     ap.add_argument("--max-steps", type=int, default=12)
     ap.add_argument("--max-tokens", type=int, default=None,
                     help="cap on tokens in one model reply (default: none); ends a looping reply, recorded in the log")
+    ap.add_argument("--run-timeout", type=float, default=600.0, metavar="SECONDS",
+                    help="wall-clock cap on one run (default 600; 0 for none); a run past it fails with timed_out (#133)")
     ap.add_argument("--ctx", type=int, default=16384,
                     help="context to load with (LM Studio); on Ollama, the context to expect from the server")
     ap.add_argument("--no-load", "--no-lms", dest="no_load", action="store_true",
@@ -553,6 +586,7 @@ def main() -> None:
                          "(for comparison, #14)")
     args = ap.parse_args()
     MAX_TOKENS = args.max_tokens
+    RUN_TIMEOUT = args.run_timeout or None
     g.UNSEEN_ID_GUARD = not args.no_id_guard
     g.WRITE_HINTS = not args.no_write_hints
     if args.system_prompt:
