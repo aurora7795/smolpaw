@@ -65,5 +65,20 @@ check("the report prints both arms, the pass counts and a one-sided p for the sh
       rc == 0 and "5/6" in out and "1/3" in out and "Fisher exact, one-sided, A better than B" in out)
 check("the report notes the small-n limit", "Small n shows little" in out)
 
+# Outliers (#134): one runaway run moves the mean; the report shows the median and names the run.
+runs = [{"passed": True, "steps": 3, "input_tokens": 100, "wall_s": s} for s in (50.0, 60.0, 3152.0, 55.0, 52.0)]
+(tmp / "outlier-1.json").write_text(json.dumps({"model": "m3", "label": "x", "runs": runs}))
+(tmp / "outlier-2.json").write_text(json.dumps({"model": "m3", "label": "x", "runs": [dict(runs[0]), dict(runs[1])]}))
+pooled = c.pool(c.load(str(tmp / "outlier-1.json"), None))["m3"]
+check("outliers lists the runaway run with its seconds and run number",
+      [(t, i) for t, _, i in c.outliers(pooled)] == [(3152.0, 3)])
+check("a cell with no runaway run lists no outliers", c.outliers(c.pool(c.load(str(tmp / "outlier-2.json"), None))["m3"]) == [])
+buf = io.StringIO()
+with redirect_stdout(buf):
+    c.main(["--arm", f"O={tmp}/outlier-1.json"])
+out = buf.getvalue()
+check("the report prints the mean, the median and the outlier's log file",
+      "mean  674s" in out and "median   55s" in out and "outlier: 3152s" in out and "run 3 of outlier-1.json" in out)
+
 print(f"\n{failed} failed")
 sys.exit(1 if failed else 0)

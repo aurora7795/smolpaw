@@ -15,12 +15,14 @@ beside it so a reader can see how little a small n can show.
 import argparse
 import glob
 import json
+import statistics
 import sys
 from collections import defaultdict
 from math import comb
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
+OUTLIER_FACTOR = 5.0  # a run this many times its arm's median (per model) is listed by name (#134)
 
 
 def fisher_greater(a_pass: int, a_n: int, b_pass: int, b_n: int) -> float:
@@ -47,24 +49,31 @@ def load(pattern: str, family: str | None) -> list[dict]:
 
 def pool(logs: list[dict]) -> dict[str, dict]:
     """Per model: runs, passes, stalls and sums of steps, input tokens and seconds across the logs."""
-    out: dict[str, dict] = defaultdict(lambda: {"n": 0, "passed": 0, "stalled": 0, "steps": 0, "tokens": 0, "secs": 0.0, "files": 0})
+    out: dict[str, dict] = defaultdict(lambda: {"n": 0, "passed": 0, "stalled": 0, "steps": 0, "tokens": 0, "secs": 0.0, "files": 0, "times": []})
     for d in logs:
         m = out[d.get("model", "?")]
         m["files"] += 1
-        for r in d["runs"]:
+        for i, r in enumerate(d["runs"], 1):
             m["n"] += 1
             m["passed"] += bool(r.get("passed"))
             m["stalled"] += bool(r.get("stalled"))
             m["steps"] += r.get("steps", 0)
             m["tokens"] += r.get("input_tokens", 0)
             m["secs"] += r.get("wall_s", 0.0)
+            m["times"].append((r.get("wall_s", 0.0), d["file"], i))
     return dict(out)
+
+
+def outliers(m: dict) -> list[tuple[float, str, int]]:
+    """Runs over OUTLIER_FACTOR times the median seconds of the arm and model: (seconds, log file, run number)."""
+    median = statistics.median(t for t, _, _ in m["times"])
+    return [t for t in m["times"] if median > 0 and t[0] > OUTLIER_FACTOR * median]
 
 
 def row(name: str, model: str, m: dict) -> str:
     n = m["n"]
     return (f"{name:<12} {model:<22} {m['passed']:>3}/{n:<3} passed  {m['stalled']:>2} stalled  "
-            f"{m['steps'] / n:>5.1f} steps  {m['tokens'] / n:>7.0f} in-tokens  {m['secs'] / n:>5.0f}s  ({m['files']} logs)")
+            f"{m['steps'] / n:>5.1f} steps  {m['tokens'] / n:>7.0f} in-tokens  mean {m['secs'] / n:>4.0f}s median {statistics.median(t for t, _, _ in m['times']):>4.0f}s  ({m['files']} logs)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{model}")
         for name, pooled in arms:
             print("  " + (row(name, model, pooled[model]) if model in pooled else f"{name:<12} no runs"))
+            for secs, file, i in outliers(pooled[model]) if model in pooled else []:
+                print(f"      outlier: {secs:.0f}s, over {OUTLIER_FACTOR:g}x this arm's median, run {i} of {file}")
         a_name, a = arms[0][0], arms[0][1].get(model)
         for b_name, b_pooled in arms[1:]:
             b = b_pooled.get(model)

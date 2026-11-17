@@ -75,7 +75,7 @@ Pick a few — no need to do all of them. Each one exercises something different
 ## Comparing eval runs
 
 `tests/eval.py` ends with the list of log files it wrote. Pool logs into arms and compare them (pass counts, stalls,
-steps, tokens, seconds, and a one-sided Fisher exact p for the first arm beating the second):
+steps, tokens, mean and median seconds, runs over 5 times the median named with their log file, and a one-sided Fisher exact p for the first arm beating the second):
 
 ```bash
 .venv/bin/python tests/compare_runs.py --arm compact='logs/eval-*-compact*.json' --arm default='logs/eval-*-default*.json' --family housekeeping
