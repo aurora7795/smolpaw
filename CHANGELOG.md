@@ -14,6 +14,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 - RESULTS.md: the parked #117 experiments retried on the hard fake-Radarr task at n=12; neither met the merge gate ([#117](https://github.com/aurora7795/smolpaw/issues/117)).
 
 ### Added
+- `LICENSE`: the project is released under the MIT licence.
 - `assets/smolpaw-logo.jpg`, the project logo, shown at the top of the README.
 - `tests/first_call_tokens.py --backend lmstudio` ([#135](https://github.com/aurora7795/smolpaw/issues/135)): measures the first call on LM Studio too (loads each model through `lms` with `--ctx`, default 32768), so the figures of the two runtimes can be compared. `tests/test_first_call_tokens.py` checks the request and the count read against a fake server.
 - `tests/compare_runs.py` prints the median seconds beside the mean and names every run over 5 times its arm's median, with its log file and run number ([#134](https://github.com/aurora7795/smolpaw/issues/134)); `tests/test_compare_runs.py` has a fixture with a runaway run.
