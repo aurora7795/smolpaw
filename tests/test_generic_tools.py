@@ -199,6 +199,19 @@ check("the pages join back into the whole file", "".join(pages) == big)
 check("an offset past the end says so", "past the end" in g.read_file("big.txt", offset=99999))
 check("a negative offset reads from the start", g.read_file("big.txt", offset=-5) == p0)
 check("a file of exactly MAX_OUT characters has no footer", g.read_file("exact.txt") == "x" * g.MAX_OUT)
+
+# the clip marker says how much was shown and how to narrow, per tool (#105, #123)
+(g.WORKSPACE / "long.txt").write_text("".join(f"line {i}\n" for i in range(2000)))
+long_out = g.run_shell("cat long.txt")
+check("a clipped shell result says how much was shown and how to narrow it",
+      f"[truncated, {g.MAX_OUT} of " in long_out and "| grep PATTERN" in long_out and "| tail -n 50" in long_out)
+check("the marker keeps the [truncated, prefix the eval counts", "[truncated," in long_out)
+check("a short shell result is not clipped", "truncated" not in g.run_shell("cat a.txt"))
+check("_clip without a hint still says how much was shown",
+      g._clip("y" * (g.MAX_OUT + 5)).endswith(f"[truncated, {g.MAX_OUT} of {g.MAX_OUT + 5} chars shown]"))
+check("_clip leaves text of exactly MAX_OUT alone", g._clip("y" * g.MAX_OUT) == "y" * g.MAX_OUT)
+check("the request hint says to ask for less, not to rerun a command",
+      "limit, filter or page" in g._clip("y" * (g.MAX_OUT + 5), g.CLIP_HINT_REQUEST) and "grep" not in g.CLIP_HINT_REQUEST)
 check("a short file read at offset 0 is unchanged", g.read_file("a.txt") == (g.WORKSPACE / "a.txt").read_text())
 (g.WORKSPACE / "sec.txt").write_text("x" * 3995 + "page-edge-secret-4242" + "y" * 500)  # the secret straddles the page boundary
 saved_secrets = g._secrets

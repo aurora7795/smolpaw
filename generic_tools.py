@@ -171,8 +171,17 @@ def _page(text: str, offset: int = 0) -> str:
     return f"{text[offset:end]}\n[characters {offset}-{end} of {total}; {more}]"
 
 
-def _clip(text: str) -> str:
-    return text if len(text) <= MAX_OUT else text[:MAX_OUT] + f"\n... [truncated, {len(text)} chars total]"
+CLIP_HINT_COMMAND = ("the rest was cut: rerun the command narrower, e.g. with | grep PATTERN, | tail -n 50, "
+                     "or its own options for a time range, unit or severity")
+CLIP_HINT_REQUEST = "the rest was cut: ask for less, e.g. a limit, filter or page parameter in the request"
+
+
+def _clip(text: str, hint: str = "") -> str:
+    """Cut text at MAX_OUT. The marker says how much was shown, that the answer may lie past it, and what to do."""
+    if len(text) <= MAX_OUT:
+        return text
+    return (text[:MAX_OUT] + f"\n... [truncated, {MAX_OUT} of {len(text)} chars shown"
+            + (f"; {hint}" if hint else "") + "]")
 
 
 def _show(label: str, text: str) -> None:
@@ -492,7 +501,7 @@ def run_shell(command: str) -> str:
         ACTIONS.append(f"shell exit {r.returncode}: {command}")
     out = f"exit code {r.returncode}\n{r.stdout}{('[stderr] ' + r.stderr) if r.stderr else ''}"
     _log("shell", command=command, read_only=bool(argv), exit=r.returncode, output=out[:LOG_OUT])
-    result = _clip(_redact(out))
+    result = _clip(_redact(out), CLIP_HINT_COMMAND)
     _show(f"$ {command}", result)
     return result
 
@@ -580,7 +589,7 @@ def ssh_run(device: str, command: str) -> str:
     ACTIONS.append(f"ssh {device} exit {r.returncode}: {command}")
     out = f"exit code {r.returncode}\n{r.stdout}{('[stderr] ' + r.stderr) if r.stderr else ''}"
     _log("ssh", device=device, command=command, exit=r.returncode, output=out[:LOG_OUT])
-    result = _clip(_redact(out))
+    result = _clip(_redact(out), CLIP_HINT_COMMAND)
     _show(f"ssh {device}: {command}", result)
     return result
 
@@ -816,7 +825,7 @@ def http_request(method: str, url: str, body: str = "") -> str:
     _log("http", method=method, url=url, status=r.status_code)
     if _looks_like_html(r) and not _is_service(url):
         # An ordinary web page: give the model its text, not the markup.
-        return _clip(_redact(f"HTTP {r.status_code} (web page converted to text)\n{html_to_text(r.text)}"))
+        return _clip(_redact(f"HTTP {r.status_code} (web page converted to text)\n{html_to_text(r.text)}"), CLIP_HINT_REQUEST)
     if _looks_like_html(r):
         # A service from the notes answering with HTML means a wrong API path (its web UI).
         return (
@@ -824,7 +833,7 @@ def http_request(method: str, url: str, body: str = "") -> str:
             "The path is probably wrong, so this is NOT an answer. Do not read anything into the page. "
             "Find the real endpoint (see the api-discovery skill)."
         )
-    return _clip(_redact(f"HTTP {r.status_code}\n{r.text}"))
+    return _clip(_redact(f"HTTP {r.status_code}\n{r.text}"), CLIP_HINT_REQUEST)
 
 
 def _trim_to_query(text: str, query: str, max_chars: int = 2500) -> tuple[str, int]:
