@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/smolpaw-logo.jpg" alt="SmolPaw logo: a black cat paw with circuit traces inside a circle" width="200">
+</p>
+
 # SmolPaw
 
 A lean, local-first agent harness built on [smolagents](https://github.com/huggingface/smolagents), with models served locally by LM Studio or Ollama. The aim is OpenClaw-like functionality (an agent that works out how to use services and remembers what it learned) using small local models on a 16GB Mac, with far less prompt overhead.
