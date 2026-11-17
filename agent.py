@@ -279,6 +279,13 @@ Rules:
 4. Never re-do a tool call with the exact same parameters."""
 
 
+# Experiment for #130: Gemma often ends with a plain-text reply instead of a final_answer call. This names the failure.
+COMPACT_FINAL_SYSTEM_PROMPT = COMPACT_SYSTEM_PROMPT.replace(
+    "Finish by calling final_answer with your answer: it is the only way to end.",
+    "Never reply with plain text: every reply must be a tool call. Finish by calling the final_answer tool with your "
+    "answer: it is the only way to end.")
+
+
 def prompt_templates_for(style: str) -> dict | None:
     """smolagents' tool-calling templates with the system prompt swapped for the compact one.
 
@@ -289,7 +296,7 @@ def prompt_templates_for(style: str) -> dict | None:
     import yaml
     from importlib.resources import files
     templates = yaml.safe_load(files("smolagents.prompts").joinpath("toolcalling_agent.yaml").read_text())
-    templates["system_prompt"] = COMPACT_SYSTEM_PROMPT
+    templates["system_prompt"] = COMPACT_FINAL_SYSTEM_PROMPT if style == "compact-final" else COMPACT_SYSTEM_PROMPT
     return templates
 
 
@@ -309,7 +316,7 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
         generic_tools.apply_search_provider()  # .env is loaded by now; the import-time call could not see it
         generic_tools.apply_devices()  # ssh_run only when notes.md lists a device
         # The generic path is ToolCallingAgent only: Bonsai was far more reliable with JSON tool calls.
-        style = os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact").strip().lower()
+        style = os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact-final").strip().lower()
         return ToolCallingAgent(tools=GENERIC_TOOLS, model=model, max_steps=max_steps,
                                 prompt_templates=prompt_templates_for(style),
                                 instructions=generic_tools.build_instructions(),
