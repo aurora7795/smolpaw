@@ -1,9 +1,9 @@
 {
   "measured_with": "characters of the first call: json of the messages (system prompt, user turn) plus json of each tool schema; sections are plain-text characters of the system prompt (template = smolagents' own text, then SmolPaw's guidance, home folder line, notes.md and each inlined skill), measured with an empty notes.md, git-tracked skills only and the default web search (#128); tokens_per_char was fitted to measured_tokens",
-  "chars": 10164,
-  "system_chars": 3195,
+  "chars": 10235,
+  "system_chars": 3266,
   "sections": {
-    "template": 491,
+    "template": 562,
     "guidance": 965,
     "home folder": 205,
     "notes.md": 25,

@@ -425,7 +425,7 @@ def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[s
     out = ROOT / "logs" / f"eval-{stamp}-{args.backend}-{safe_name(args.model)}-{label}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
-                               "history": "text" if args.text_history else "native", "system_prompt": os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact"), "without_tool": args.without_tool,
+                               "history": "text" if args.text_history else "native", "system_prompt": os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact-final"), "without_tool": args.without_tool,
                                "loaded_context": ctx, "max_tokens": args.max_tokens, "run_timeout": args.run_timeout, "prompt": prompt, "expect": expects,
                                "runs": results}, indent=2))
     print(f"  saved {out.relative_to(ROOT)}")
@@ -574,7 +574,7 @@ def main() -> None:
                     help="turn the unseen-id guard off (#102), for the comparison run")
     ap.add_argument("--without-tool", action="append", default=[],
                     help="drop a generic tool by name for this run, to compare (for example list_dir)")
-    ap.add_argument("--system-prompt", choices=["default", "compact"], default=None,
+    ap.add_argument("--system-prompt", choices=["default", "compact", "compact-final"], default=None,
                     help="system prompt style for this run (#125): compact drops smolagents' text tool list and examples")
     ap.add_argument("--label", default="")
     ap.add_argument("--confirm", choices=["no", "web"], default="no",
