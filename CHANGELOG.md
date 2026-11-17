@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Changed
+- The web page shows the logo as its favicon and beside the name in the sidebar and top bar (`assets/smolpaw-icon.png`, embedded as a data: URI). The page's Content-Security-Policy gains `img-src data:` for it and nothing else.
 - The terminal banner is redrawn to match the logo (four toes, a pad with a circuit stem, a wrist); it still prints only on a terminal.
 - RESULTS.md: the compact system prompt rerun on LM Studio at n=5 per cell ([#131](https://github.com/aurora7795/smolpaw/issues/131)). The pre-stated criterion is met, so compact stays the default on both runtimes. Qwen is clearly better with it (27/30 against 14/30); Gemma is not shown worse but leans that way again (11/30 against 16/30, p=0.15), with more stalls and slower runs.
 
