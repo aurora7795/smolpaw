@@ -726,6 +726,23 @@ A check that the 2026-10-30 figures hold on current `main` (the #77 repeated-res
 - **Caveats.** n=5 per model, one fixture; 4/5 against 5/5 is within noise. No code change was made, so this is a repeat, not a comparison.
 - Decision: `edit_file` is left as it is. Qwen's re-checking after a correct edit is not specific to this case; a fix would need its own prompt or tool change through the merge gate.
 
+### A "no need to read the file again" hint in the `edit_file` result (#141, 2026-11-17)
+
+Idea: Qwen often re-reads after a correct edit until the cap or a stall stop, so the success message was ended with "The edit is saved; there is no need to read the file again." Pass criterion, stated before either arm ran: merge if Qwen passes at least 3 more of 25 than its baseline (23/25 or better) or its stalled and capped runs at least halve, and Gemma is not below 23/25. Both arms were run in the same session: Ollama, 32K, step cap 12, `--tracking edit` (five edit cases, n=5 each, so 25 runs per model per arm), labels `h141-base` (main) and `h141-hint`. Logs: `logs/eval-20261117-22*-...-h141-base.json` and `logs/eval-20261117-23*-...-h141-hint.json`.
+
+| 25 runs per cell | Baseline | With the hint |
+|---|---|---|
+| Qwen 3.5 9B: passed | 21/25 | 21/25 |
+| Qwen: stalled runs | 3 | 2 |
+| Qwen: mean steps, input tokens | 6.6, 31,379 | 6.0, 27,982 |
+| Gemma 4 E4B: passed | 24/25 | 24/25 |
+| Gemma: mean steps, input tokens | 2.7, 7,806 | 2.7, 7,897 |
+
+- **No effect.** Qwen's pass count is unchanged (Fisher exact p=0.65), stalled runs went from 3 to 2 (not halved), and Gemma is unchanged (p=0.76). The criterion was not met, so the hint was not merged. On `edit_duplicate_passage` alone Qwen went from 2/5 to 1/5; every other case was unchanged for Qwen.
+- **Caveats.** n=5 per case. The Qwen baseline for the repeated-passage case here (2/5) matches the two earlier batches (2/5 on 2026-10-30 and 2026-11-17), so the spread is smaller than the sample suggests, but five runs cannot show an effect of one or two passes. Gemma finishes in 2 to 3 steps, so the hint had little room to act. Only this one wording was tried.
+- Qwen's re-checking after a correct edit remains open as #142 (a stall rule after a write).
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --tracking edit --n 5`, then `gemma4:e4b`; the hint arm is the one-sentence change to the final return of `edit_file`.
+
 ### `read_three_report` at n=10, with the tool arguments logged (#89, 2026-10-30)
 
 #89 asked whether Gemma's 0/3 on `read_three_report` after paging was noise. Same case, Ollama, 32K context, native history, paged `read_file` with `edit_file` in the toolset, n=10 per model. This time the run logs hold each call's arguments (`tool_args`, added to `tests/eval.py` in this change), so the pages each model asked for can be read back. The three facts sit at characters 4,552, 4,758 and 4,716 of files of 5,875, 6,298 and 6,093 characters, so each is on page 2 (page size 4,000) and a full read takes 6 `read_file` calls. Logs: `logs/eval-20261030-104700-ollama-gemma4_e4b-tracking-read_three_report-n10.json` and `logs/eval-20261030-105708-ollama-qwen3.5_9b-tracking-read_three_report-n10.json`.
