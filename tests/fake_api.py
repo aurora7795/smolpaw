@@ -12,6 +12,9 @@ Variants (harder discovery; the answer to "biggest cargo capacity" is always Kes
   hint    "/" is a 404 whose body points at /v2/docs, which holds the index
   detail  the vessel list has only id and name; hold_tons is only on /v2/vessels/<id>
   paged   /v2/vessels returns 2 items per page with a "next" link; Kestrel is on page 2
+  long    /v2/vessels returns 60 vessels, about 6,000 characters, so a reply clipped at 4,000 characters cuts it off;
+          Kestrel, the biggest, is last. The list takes ?sort=hold_tons&order=desc&limit=N, named in the index
+          (the clip marker's hint, #105: ask for less)
   book    a write: POST /v2/reservations {"vesselId": n, "berthId": n} books a vessel into a berth. Berths carry
           their own ids (not their codes), the vessel list is not in id order, and wrong ids are refused with
           a 404 and counted in /v2/_attempts (for the eval, not described anywhere). Osprey is vessel 4 and
@@ -37,6 +40,12 @@ BOOK_BERTHS = [{"id": i, "code": c} for i, c in [(21, "A1"), (22, "A2"), (23, "A
                                                   (33, "B3"), (41, "C1"), (42, "C2")]]
 RESERVATIONS: list[dict] = []
 ATTEMPTS: list[dict] = []  # every POST /v2/reservations that arrived, with the status it got
+# Sixty vessels in id order; every hold is under 340 tons except Kestrel, id 60, the last of the list.
+LONG_VESSELS = [{"id": i, "name": f"Skiff-{i:02d}", "hold_tons": 40 + (i * 37) % 250, "home_berth": f"{'ABC'[i % 3]}{i % 7 + 1}"}
+                for i in range(1, 60)] + [{"id": 60, "name": "Kestrel", "hold_tons": 340, "home_berth": "A1"}]
+LONG_INDEX = {"service": "Tidepool harbour logbook", "version": "2",
+              "resources": {"vessels": "/v2/vessels", "berths": "/v2/berths"},
+              "query": {"vessels": "sort (id|hold_tons), order (asc|desc), limit (number of items)"}}
 INDEX = {
     "service": "Tidepool harbour logbook",
     "version": "2",
@@ -61,12 +70,18 @@ class Handler(BaseHTTPRequestHandler):
             if VARIANT == "hint":
                 self._send(404, {"error": "not found", "docs": "/v2/docs"})
             else:
-                self._send(200, BOOK_INDEX if VARIANT == "book" else INDEX)
+                self._send(200, BOOK_INDEX if VARIANT == "book" else LONG_INDEX if VARIANT == "long" else INDEX)
         elif path == "/v2/docs" and VARIANT == "hint":
             self._send(200, INDEX)
         elif path == "/v2/vessels":
             if VARIANT == "detail":
                 self._send(200, [{"id": v["id"], "name": v["name"]} for v in VESSELS])
+            elif VARIANT == "long":
+                q = parse_qs(url.query)
+                items = sorted(LONG_VESSELS, key=lambda v: v.get(q.get("sort", ["id"])[0], v["id"]),
+                               reverse=q.get("order", ["asc"])[0] == "desc")
+                limit = q.get("limit", [""])[0]
+                self._send(200, items[:int(limit)] if limit.isdigit() else items)
             elif VARIANT == "paged":
                 page = int(parse_qs(url.query).get("page", ["1"])[0])
                 items = VESSELS[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
@@ -76,7 +91,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(200, VESSELS)
         elif path.startswith("/v2/vessels/") and path.rsplit("/", 1)[1].isdigit():
-            match = [v for v in VESSELS if v["id"] == int(path.rsplit("/", 1)[1])]
+            match = [v for v in (LONG_VESSELS if VARIANT == "long" else VESSELS) if v["id"] == int(path.rsplit("/", 1)[1])]
             self._send(200, match[0]) if match else self._send(404, {"error": "no such vessel"})
         elif path == "/v2/berths":
             self._send(200, BOOK_BERTHS if VARIANT == "book" else BERTHS)

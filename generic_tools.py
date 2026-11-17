@@ -180,6 +180,8 @@ def _clip(text: str, hint: str = "") -> str:
     """Cut text at MAX_OUT. The marker says how much was shown, that the answer may lie past it, and what to do."""
     if len(text) <= MAX_OUT:
         return text
+    if os.environ.get("SMOLPAW_OLD_CLIP_MARKER"):  # measurement switch (#105, #123): the marker before the hint
+        return text[:MAX_OUT] + f"\n... [truncated, {len(text)} chars total]"
     return (text[:MAX_OUT] + f"\n... [truncated, {MAX_OUT} of {len(text)} chars shown"
             + (f"; {hint}" if hint else "") + "]")
 

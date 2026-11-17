@@ -527,7 +527,7 @@ def main() -> None:
     ap.add_argument("--no-load", "--no-lms", dest="no_load", action="store_true",
                     help="do not unload/load models; use what is loaded")
     ap.add_argument("--notes-file", help="notes to use instead of the real notes.md")
-    ap.add_argument("--tidepool", metavar="VARIANT", help="serve the fake Tidepool API (easy|hint|detail|paged)")
+    ap.add_argument("--tidepool", metavar="VARIANT", help="serve the fake Tidepool API (easy|hint|detail|paged|long|book)")
     ap.add_argument("--listing", action="store_true",
                     help="folder-listing task on a generated 55-entry downloads/ in an isolated workspace (#46)")
     ap.add_argument("--counting", action="store_true",
