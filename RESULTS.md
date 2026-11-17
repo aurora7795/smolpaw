@@ -580,6 +580,29 @@ Caveats: one session, one machine, Ollama only (LM Studio was not rerun); the de
 
 Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --ctx 32768 --system-prompt default --tracking all --n 10 --label sp10-default`, then the same with `--system-prompt compact`, and the same with `qwen3.5:9b` and the other task flags. `tests/test_prompt_budget.py` checks the compact prompt has no second tool list and no notional examples.
 
+## Compact system prompt on LM Studio (#131, 2026-11-17)
+
+The #125 matrix ran on Ollama only. This reruns the cells that mattered on LM Studio (MLX builds, 32K context, one slot, native history), interleaved default then compact per cell, n=5 per cell: Tidepool `easy` and `paged`, tracking (3 cases), and the hard fake-Radarr task (#119). One session, one machine.
+
+**Pass criterion, stated before the run:** neither model worse beyond noise, meaning no one-sided Fisher exact p below 0.1 with the default better, on a pooled family per model. If it failed, the style would become a per-backend setting.
+
+Passes over runs, default then compact (`tests/compare_runs.py`; p is for "default better"):
+
+| Family | Gemma 4 E4B | p | Qwen 3.5 9B | p |
+|---|---|---|---|---|
+| Tidepool, easy + paged | 9/10, 8/10 | 0.50 | 8/10, 10/10 | 1.00 |
+| Tracking, 3 cases | 5/15, 2/15 | 0.195 | 3/15, 13/15 | 1.00 |
+| Hard fake-Radarr | 2/5, 1/5 | 0.50 | 3/5, 4/5 | 0.92 |
+| Total | 16/30, 11/30 | 0.15 | 14/30, 27/30 | 1.00 |
+
+Per run over all 30 runs per model and arm: input tokens fell 16 percent on Gemma (33.3K to 27.9K) and 59 percent on Qwen (69.3K to 28.2K). Median seconds per run: Gemma 125s to 170s (slower), Qwen 104s to 54s (faster). Mean steps: Gemma 6.0 to 7.5, Qwen 10.1 to 7.0. Stalled runs: Gemma 2 to 5, Qwen 3 to 0. One Qwen run (Tidepool `paged`, default arm) took 3,152s against 44 to 116s for the other four, a runaway generation with no wall-clock cap; it fails the run and is left in the pass counts, and it is the reason medians are reported instead of means.
+
+**Verdict.** The criterion is met: no family had the default better at p below 0.1, so the style stays compact on LM Studio and is not made a per-backend setting. Qwen is clearly better with the compact prompt here (13/15 against 3/15 on tracking; the default arm stalled in 3 of its runs, which the Ollama default arm did not at this rate). Gemma is not shown worse, but it leans that way in the same direction as on Ollama (tracking 5/15 against 2/15 here, 16/30 against 13/30 there), with more stalls and slower runs under the compact prompt; at n=15 per family a real drop of 20 points cannot be excluded. That is "no regression found by the rule", not "no regression", and #130 stays open with this data.
+
+Caveats: n=5 per cell; interleaved but run once; the first-call token count was not taken on LM Studio (`tests/first_call_tokens.py` reads Ollama's usage figure only), so the token change above is the per-run input tokens from the logs; the hard fake-Radarr cells have n=5.
+
+Reproduce: `.venv/bin/python tests/eval.py --backend lmstudio --model google/gemma-4-e4b --ctx 32768 --n 5 --system-prompt default --tidepool easy --label sp131-tidepool-easy-default`, then `compact`, then the other cells (`--tidepool paged`, `--tracking all`, `--fake-radarr --radarr-task hard`) and `--model qwen3.5-9b-mlx`. Compare with `.venv/bin/python tests/compare_runs.py --arm default='logs/eval-*sp131*-default.json' --arm compact='logs/eval-*sp131*-compact.json' --family tracking`.
+
 ## Do small models keep track of what they read and write? (#87, 2026-10-29)
 
 `tests/eval.py --tracking all --n 3`, on the fixture in `tests/tracking_fixture.py`: each run gets a fresh isolated workspace, files longer than the 4,000-character read clip, and every fact the task needs beyond that clip. Ollama, 32K context (the app's setting; the script's 16K default only warns), 12-step cap, native history, native MLX builds, 3 runs per cell. Pass means the file on disk equals the expected bytes (edit and append cases) or the answer holds all three figures (read case), and the run did not hit the step cap. Logs: `logs/eval-20261029-*-tracking-*.json` (the last six per model are the ones reported here).
