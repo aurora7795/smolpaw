@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Changed
+- RESULTS.md: the compact system prompt rerun on LM Studio at n=5 per cell ([#131](https://github.com/aurora7795/smolpaw/issues/131)). The pre-stated criterion is met, so compact stays the default on both runtimes. Qwen is clearly better with it (27/30 against 14/30); Gemma is not shown worse but leans that way again (11/30 against 16/30, p=0.15), with more stalls and slower runs.
 
 - The system prompt is now a compact one (fixes #125): smolagents' text list of the tools, its notional examples and its `Action: {...}` instructions are gone, because the tools already go out as native schemas. The first call is 44 to 49 percent smaller (Qwen 4,855 to 2,693 tokens, Gemma 4,524 to 2,330) and input tokens per run fall 48 percent on Qwen and 34 percent on Gemma; no regression found at n=3 to 10 per cell (RESULTS.md, "Compact system prompt"). `SMOLPAW_SYSTEM_PROMPT=default` brings smolagents' prompt back; `tests/eval.py --system-prompt default|compact` compares them. The budget in `tests/prompt_budget.json` is 3,000 tokens (was 5,000), and `tests/test_prompt_budget.py` now checks the compact prompt has no second tool list and no notional examples.
 - `mail_summary` check ([#94](https://github.com/aurora7795/smolpaw/issues/94)): a sender's deadline may sit up to two digit-free lines below the sender line (sender / action / deadline). The swapped-deadline and deadline-first tests still pass on all seeds. Rerun in RESULTS.md.
