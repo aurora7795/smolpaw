@@ -8,6 +8,7 @@ confirmation rules are unchanged: this only replaces where the prompts are answe
 """
 
 import argparse
+import base64
 import hmac
 import itertools
 import json
@@ -925,7 +926,7 @@ def make_handler(token: str, approvals: Approvals, session: Session | None, info
             self.send_header("Referrer-Policy", "no-referrer")  # the token is in the page URL
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; "
-                             "style-src 'unsafe-inline'; connect-src 'self'")
+                             "style-src 'unsafe-inline'; img-src data:; connect-src 'self'")
             self.end_headers()
             self.wfile.write(data)
 
@@ -1220,6 +1221,7 @@ PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SmolPaw</title>
+<link rel="icon" type="image/png" href="__ICON__">
 <style>
 :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#dcdad5; --accent:#2f6fde;
         --yes:#1f8a4c; --no:#c23b3b; --warn:#fff4d6; }
@@ -1229,6 +1231,7 @@ PAGE = """<!doctype html>
 body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, system-ui, sans-serif; }
 main { max-width:720px; margin:0 auto; padding:16px; overflow-wrap:anywhere; }
 h1 { font-size:20px; margin:0 0 4px; }
+.logo { width:28px; height:28px; vertical-align:-7px; margin-right:8px; border-radius:50%; }
 .meta { color:var(--muted); font-size:14px; margin-bottom:16px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
 .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 8px; }
@@ -1350,9 +1353,9 @@ main { display:flex; flex-direction:column; min-height:100vh; padding:0 16px; ma
 }
 </style></head><body data-view="chat">
 <div id="topbar"><button id="menubtn" aria-label="Menu" aria-expanded="false">&#9776;</button>
-  <span class="title">SmolPaw</span><button id="topnew" aria-label="New chat">+</button></div>
+  <span class="title"><img class="logo" src="__ICON__" alt="">SmolPaw</span><button id="topnew" aria-label="New chat">+</button></div>
 <div id="scrim" hidden></div>
-<aside><h1>SmolPaw</h1>
+<aside><h1><img class="logo" src="__ICON__" alt="">SmolPaw</h1>
   <button id="newchat">+ New chat</button>
   <button class="nav on" data-view="chat">Chat</button>
   <button class="nav" id="schednav" data-view="schedules" hidden>Schedules</button>
@@ -2235,6 +2238,18 @@ wide.onchange = openPanels; openPanels();
 refresh(); setInterval(refresh, 1500);
 </script></body></html>
 """
+
+
+def _icon_data_uri() -> str:
+    """The logo as a data: URI for the page and favicon; empty if assets/smolpaw-icon.png is missing."""
+    path = Path(__file__).parent / "assets" / "smolpaw-icon.png"
+    try:
+        return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
+    except OSError:
+        return ""
+
+
+PAGE = PAGE.replace("__ICON__", _icon_data_uri())
 
 
 if __name__ == "__main__":
