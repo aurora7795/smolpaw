@@ -1213,3 +1213,22 @@ The two runtimes tokenize the same request within about 2 percent, so the first-
 
 Reproduce: `.venv/bin/python tests/first_call_tokens.py --backend lmstudio --runs 2`, and without `--backend` for Ollama.
 
+
+## Clip marker with a narrowing hint (#105, #123, 2026-11-17): no clear gain, not merged
+
+The clip marker was changed from `... [truncated, N chars total]` to `[truncated, 4000 of N chars shown; <hint>]`, where the hint tells the model to rerun a command narrower (`| grep`, `| tail -n 50`, the command's own filters) or to ask an HTTP service for less. Plan and pass criterion stated before any run: n=6 per cell per model on the Tidepool `long` variant (60 vessels, about 6,000 characters, answer past the 4,000-character cut), n=4 per cell on `--tidepool easy` and `--housekeeping log_errors` as a no-loss check, old marker against new marker interleaved, Ollama at 32K, `compact-final` prompt. Merge if neither model is worse beyond noise (one-sided Fisher p below 0.1 with the old marker better) and at least one improves clearly on `long` (3 or more extra passes of 6).
+
+| Case | Model | Old marker | New marker |
+|---|---|---|---|
+| long (n=6) | Gemma 4 E4B | 3/6 | 4/6 |
+| long (n=6) | Qwen 3.5 9B | 5/6 | 6/6 |
+| easy (n=4) | Gemma 4 E4B | 3/4 | 2/4 |
+| easy (n=4) | Qwen 3.5 9B | 4/4 | 4/4 |
+| log_errors (n=4) | Gemma 4 E4B | 4/4 | 4/4 |
+| log_errors (n=4) | Qwen 3.5 9B | 3/4 | 3/4 |
+
+No-loss check passed (smallest p was 0.50). The improvement half of the gate was not met: one extra pass on each model on `long`, against the three needed. The old marker already passes half or more of `long`, so the fixture has little headroom. The rule was applied as written before the numbers were seen. Not merged; the branch is `feat/105-123-clip-marker`.
+
+An earlier attempt at this run was discarded: two copies of the measurement script ran at the same time against one Ollama server (a launch error), doubling the cell sizes and swapping the models in and out of memory. Its logs were set aside and none of its numbers are used.
+
+Reproduce: `SMOLPAW_OLD_CLIP_MARKER=1` for the old arm; `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:9b --tidepool long --n 6 --ctx 32768`.
