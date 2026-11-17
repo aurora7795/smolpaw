@@ -51,7 +51,7 @@ A summary of the measurements below, for the two models used throughout (Ollama,
 | Same, files padded to 11K characters (`read_three_long`) | 0/10 | 7/10 | **Qwen** | A larger `read_file` page |
 | Edit one section, append a section, with `edit_file` | 6/6 | 4/6 | too few runs (n=3 per case) | With `edit_file` as well |
 | Five harder single-passage edits, with `edit_file` | 12/15 | 12/15 | about equal | Five harder edit cases |
-| Edit a passage that appears twice (after #88) | 5/5 | 2/5 | **Gemma** | Repeated passage, old and new text |
+| Edit a passage that appears twice (after #88) | 4/5 (5/5 on 2026-10-30) | 2/5 | **Gemma** | Repeated passage, old and new text |
 
 ### Declined actions
 
@@ -711,6 +711,20 @@ With the arguments now logged, the failed Gemma runs of the match-places version
 - **Qwen improved but still hits the step cap.** Two runs passed in 6 steps. Of the three failures, two ended with the right file but reached 13 steps re-reading (the over-checking noted before, #77), and one never changed the file. Its files were correct in 4 of 5 runs.
 - **Caveats.** n=5 (n=3 before); one fixture where the repeated sentence's neighbours are also repeated, so the unique text came from the words before the sentence; other layouts (the copies differ only after the passage, or are further apart than 400 characters) were tested only by unit tests; the Qwen baseline is the earlier 3-run batch. The reach limit means very long repeated blocks still get only the places.
 - Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model gemma4:e4b --tracking edit_duplicate_passage --n 5`, then the same with `qwen3.5:9b`. `tests/test_generic_tools.py` checks the offered pair without a model.
+
+### Repeated passage, re-measured on main (#88, 2026-11-17)
+
+A check that the 2026-10-30 figures hold on current `main` (the #77 repeated-results stall rule is now in). Pass criterion, stated before the run: no change to `edit_file`; record whether the earlier 5/5 and 2/5 hold. Ollama, 32K, step cap 12, `--tracking edit_duplicate_passage --n 5 --label m88-n5`; logs `logs/eval-20261117-220634-ollama-gemma4_e4b-...-m88-n5.json` and `logs/eval-20261117-220255-ollama-qwen3.5_9b-...-m88-n5.json`.
+
+| | 2026-10-30 | 2026-11-17 |
+|---|---|---|
+| Gemma 4 E4B: passed | 5/5, 3.4 steps | **4/5**, steps 3, 6, 3, 10, 3 |
+| Qwen 3.5 9B: passed | 2/5, 10.2 steps | **2/5**, steps 13, 8, 8, 13, 8 (2 capped, 1 stopped by the stall rule) |
+
+- **Gemma's one failure** was the known one: it sent the offered `old` (with "sedge." before the sentence) but a `new` without those words, deleting 8 characters.
+- **Qwen's three failures:** one edited the sentence in both sections; two reached the cap or the stall stop after the edit, re-reading the file two or three more times. The stall rule did not turn those into passes.
+- **Caveats.** n=5 per model, one fixture; 4/5 against 5/5 is within noise. No code change was made, so this is a repeat, not a comparison.
+- Decision: `edit_file` is left as it is. Qwen's re-checking after a correct edit is not specific to this case; a fix would need its own prompt or tool change through the merge gate.
 
 ### `read_three_report` at n=10, with the tool arguments logged (#89, 2026-10-30)
 
