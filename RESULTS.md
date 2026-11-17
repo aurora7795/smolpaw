@@ -1199,3 +1199,17 @@ Both experiments failed the gate on the plain fake task at n=6 (see above). The 
 | Forgiving `openapi_search` (`experiment/117-forgiving-search`) | 4/12 (10.6 steps, 4 capped) | 2/12 (11.2 steps, 6 capped) | Qwen -3: worse, no merge |
 
 Caveats: n=12 per cell, so a difference of 2 is within noise; the nudge result is inconclusive, not negative. Qwen's step count and cap rate went up with both arms. Reproduce: check out each branch, then `.venv/bin/python tests/eval.py --backend ollama --model <model> --fake-radarr --radarr-task hard --n 12`.
+
+## First call on LM Studio against Ollama (#135, 2026-11-17)
+
+`tests/first_call_tokens.py --backend lmstudio` sends the same first request with `max_tokens=1` and reads `usage.prompt_tokens`, so the two runtimes can be compared. Both rows below are the current default prompt (`compact-final`, #130), empty notes.md, git-tracked skills, 32K context, MLX builds on LM Studio, 2 runs per figure (both runs agreed exactly on every figure).
+
+| Model | Ollama, whole call | LM Studio, whole call | Difference | Instructions alone (both) | Without web_search (Ollama, LM Studio) |
+|---|---|---|---|---|---|
+| Qwen 3.5 9B | 2,709 | 2,751 | +1.6% | 760 | 2,616, 2,658 |
+| Gemma 4 E4B | 2,346 | 2,370 | +1.0% | 791 | 2,265, 2,289 |
+
+The two runtimes tokenize the same request within about 2 percent, so the first-call figures in the #125 section (taken on Ollama) carry over to LM Studio, and the tool schemas cost the same on both (the instructions-alone figure is identical). Against the 10,235 characters in `tests/prompt_budget.json`, LM Studio gives 0.269 tokens per character for Qwen and 0.232 for Gemma, within 10 percent of the 0.2471 the budget test uses; the budget's own measured figures (2,693 and 2,330) are the compact prompt without the #130 line. One machine, one session.
+
+Reproduce: `.venv/bin/python tests/first_call_tokens.py --backend lmstudio --runs 2`, and without `--backend` for Ollama.
+
