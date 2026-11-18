@@ -1,6 +1,7 @@
 """
 Safety tests for generic_tools. Run with: .venv/bin/python tests/test_generic_tools.py
-The Radarr GET test is live and skipped if RADARR_URL/RADARR_API_KEY are unset.
+The Radarr GET test is live and skipped if RADARR_URL/RADARR_API_KEY are unset or the server is unreachable;
+the same key checks always run against a local fake service.
 """
 
 import json
@@ -1320,18 +1321,77 @@ g.NOTES = saved_notes
 # tokenizer, and a char-count proxy (as #27's schema-size check earlier in this file does) tests
 # string length, not tokens -- it would pass or fail for reasons unrelated to what it claims to check.
 
-# secrets
-if os.environ.get("RADARR_URL") and os.environ.get("RADARR_API_KEY"):
+# secrets: key injection and redaction, against a local fake service (always) and a live Radarr (if reachable)
+import socket as _socket  # noqa: E402
+import threading as _thr  # noqa: E402
+from http.server import BaseHTTPRequestHandler, HTTPServer  # noqa: E402
+from urllib.parse import urlparse as _urlparse  # noqa: E402
+
+FAKE_KEY = "test-key-0123456789"
+
+
+class _KeyedHandler(BaseHTTPRequestHandler):
+    """Answers 200 only when X-Api-Key is the fake key, else 401."""
+
+    def do_GET(self) -> None:  # noqa: N802
+        ok = self.headers.get("X-Api-Key") == FAKE_KEY
+        body = b'{"ok": true}' if ok else b'{"error": "unauthorized"}'
+        self.send_response(200 if ok else 401)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args) -> None:  # keep the test output clean
+        pass
+
+
+def reachable(url: str, timeout: float = 3.0) -> bool:
+    """True when a TCP connection to the URL's host and port opens within `timeout` seconds."""
+    u = _urlparse(url)
+    try:
+        with _socket.create_connection((u.hostname, u.port or (443 if u.scheme == "https" else 80)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def key_checks(label: str, base_url: str, key_env: str, key: str, path: str) -> None:
     g.NOTES = tmp / "notes.md"
-    g.NOTES.write_text(f"- radarr: {os.environ['RADARR_URL']} | key_env=RADARR_API_KEY | header=X-Api-Key\n")
-    key = os.environ["RADARR_API_KEY"]
-    res = g.http_request("GET", f"{os.environ['RADARR_URL']}/api/v3/system/status")
-    check("key injected for listed host (HTTP 200)", res.startswith("HTTP 200") and not asked())
-    check("key not in output", key not in res)
-    check("redaction removes key from any text", key not in g._redact(f"key is {key}") and "[REDACTED]" in g._redact(f"key is {key}"))
-    check("services parsed", "radarr" in g.services())
-    other = g._auth_headers("http://example.com/api")
-    check("no key sent to unlisted host", other == {})
+    g.NOTES.write_text(f"- svc: {base_url} | key_env={key_env} | header=X-Api-Key\n")
+    res = g.http_request("GET", f"{base_url}{path}")
+    check(f"{label}: key injected for listed host (HTTP 200)", res.startswith("HTTP 200") and not asked())
+    check(f"{label}: key not in output", key not in res)
+    check(f"{label}: redaction removes key from any text",
+          key not in g._redact(f"key is {key}") and "[REDACTED]" in g._redact(f"key is {key}"))
+    check(f"{label}: services parsed", "svc" in g.services())
+    check(f"{label}: no key sent to unlisted host", g._auth_headers("http://example.com/api") == {})
+
+
+_srv = HTTPServer(("127.0.0.1", 0), _KeyedHandler)
+_thr.Thread(target=_srv.serve_forever, daemon=True).start()
+os.environ["FAKE_SVC_KEY"] = FAKE_KEY
+key_checks("fake service", f"http://127.0.0.1:{_srv.server_address[1]}", "FAKE_SVC_KEY", FAKE_KEY, "/api/v3/system/status")
+_srv.shutdown()
+_srv.server_close()
+
+with _socket.socket() as _s:  # a local port with nothing listening
+    _s.bind(("127.0.0.1", 0))
+    _closed_port = _s.getsockname()[1]
+check("reachable() is False for a port with nothing listening", not reachable(f"http://127.0.0.1:{_closed_port}"))
+check("reachable() is False for a malformed URL", not reachable("not a url"))
+_up = HTTPServer(("127.0.0.1", 0), _KeyedHandler)
+_thr.Thread(target=_up.serve_forever, daemon=True).start()
+check("reachable() is True for a listening port", reachable(f"http://127.0.0.1:{_up.server_address[1]}"))
+_up.shutdown()
+_up.server_close()
+
+if os.environ.get("RADARR_URL") and os.environ.get("RADARR_API_KEY"):
+    if reachable(os.environ["RADARR_URL"]):
+        key_checks("live Radarr", os.environ["RADARR_URL"], "RADARR_API_KEY", os.environ["RADARR_API_KEY"],
+                   "/api/v3/system/status")
+    else:
+        print("SKIP  live Radarr tests (server unreachable)")
 else:
     print("SKIP  live Radarr tests (RADARR_URL/RADARR_API_KEY unset)")
 

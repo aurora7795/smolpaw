@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+- `tests/test_generic_tools.py`: the live Radarr check no longer fails when the server is unreachable ([#145](https://github.com/aurora7795/smolpaw/issues/145)). A 3-second TCP probe runs first; if nothing answers, the block prints `SKIP  live Radarr tests (server unreachable)`, as it already did for unset variables. The key-injection, redaction and no-key-to-unlisted-host checks now also always run against a local fake service that returns 200 only for the right `X-Api-Key`, so skipping the live block loses no coverage; new checks cover `reachable()` for a closed port, a malformed URL and a listening port. A reachable server that answers wrongly still fails. No change to the confirmation layer.
+
 ### Changed
 - RESULTS.md: housekeeping and read-only cases rerun on LM Studio with smolagents' prompt against compact-final ([#136](https://github.com/aurora7795/smolpaw/issues/136)). The pre-stated criterion is met (no family with p below 0.1 for the default better), so compact-final stays the default. Input tokens fall about 50 percent on both models; pass rates are within noise (Gemma 21/57 against 25/57, Qwen 21/57 against 19/57). `tests/run_136_matrix.sh` reproduces it.
 - The web page shows the logo as its favicon and beside the name in the sidebar and top bar (`assets/smolpaw-icon.png`, embedded as a data: URI). The page's Content-Security-Policy gains `img-src data:` for it and nothing else.
