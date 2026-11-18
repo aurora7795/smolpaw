@@ -1244,3 +1244,33 @@ The two runtimes tokenize the same request within about 2 percent, so the first-
 
 Reproduce: `.venv/bin/python tests/first_call_tokens.py --backend lmstudio --runs 2`, and without `--backend` for Ollama.
 
+
+## Housekeeping and read-only on LM Studio with the default prompt (#136, 2026-11-18)
+
+#125 ran the housekeeping chores and read-only scheduled cases on Ollama only, at n=3. This reruns them on LM Studio (MLX builds, 32K context, one slot, native history), smolagents' prompt (`default`) against the shipped `compact-final`, interleaved by case: housekeeping 8 cases at n=4 (32 runs per arm), read-only 5 cases at n=5 (25 runs per arm), 400s per-run timeout. One machine, one session.
+
+**Pass criterion, stated before the run (issue #136), applied as written:** neither model worse beyond noise, meaning no pooled family with a one-sided Fisher exact p below 0.1 for the default prompt being better.
+
+Passes over runs, default then compact-final (`tests/compare_runs.py`; p is for "default better"):
+
+| Family | Gemma 4 E4B | p | Qwen 3.5 9B | p |
+|---|---|---|---|---|
+| Housekeeping, 8 cases | 15/32, 12/32 | 0.31 | 12/32, 16/32 | 0.90 |
+| Read-only, 5 cases | 10/25, 9/25 | 0.50 | 7/25, 5/25 | 0.37 |
+
+Medians (default, compact-final), mean steps, input tokens per run, stalled runs:
+
+| Family | Model | Median s | Steps | Input tokens | Stalled |
+|---|---|---|---|---|---|
+| Housekeeping | Gemma | 120, 100 | 5.2, 3.7 | 26.3K, 11.0K | 7, 12 |
+| Housekeeping | Qwen | 135, 85 | 6.5, 5.0 | 36.8K, 19.9K | 6, 8 |
+| Read-only | Gemma | 81, 62 | 4.7, 3.6 | 21.9K, 9.0K | 8, 10 |
+| Read-only | Qwen | 44, 37 | 6.8, 5.8 | 35.7K, 17.5K | 18, 20 |
+
+Runs with `timed_out` set: Qwen 7 default and 3 compact-final, Gemma 1 default and 0 compact-final. One Qwen read-only outlier (`write_summary`, default arm) took 347s against a 44s median.
+
+**Verdict.** The criterion is met: no family has the default better at p below 0.1, so compact-final stays the default on LM Studio for both models. Compact-final halves input tokens (about 50 percent on both models) and is faster in every row. Pass rates are statistically indistinguishable; Gemma leans slightly toward the default (25/57 against 21/57 overall) with more stalled housekeeping runs under compact-final (12 against 7), as in #131, and Qwen leans toward compact-final on housekeeping. Read-only pass rates are low for both models under both prompts (Qwen 7/25 and 5/25), so that family is limited by the model, not the prompt.
+
+Caveats: n=25 to 32 per arm, so only a difference of about 30 points could reach p below 0.1; this is "no regression found by the rule", not "no regression". One machine, one session. The pass counts are the evaluator's checks against the real files and logs, not the model's final answer.
+
+Reproduce: `tests/run_136_matrix.sh` (about 5 hours), then `.venv/bin/python tests/compare_runs.py --arm default='logs/eval-*sp136-<model>-default.json' --arm final='logs/eval-*sp136-<model>-compact-final.json' --family housekeeping` (and `--family readonly`).
