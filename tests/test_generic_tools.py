@@ -180,6 +180,22 @@ check("read in workspace free", "hello" in g.read_file("a.txt") and not asked())
 answer["value"] = False
 check("write declined", g.write_file("c.txt", "x") == g.DECLINED and asked())
 check("declined write did not happen", not (g.WORKSPACE / "c.txt").exists())
+# an unattended run (a schedule, agent.py -p) gets a final decline; an interactive one keeps "try another approach" (#90)
+check("interactive decline text still suggests another approach or ask_user", "another approach" in g.DECLINED and "ask_user" in g.DECLINED)
+g.UNATTENDED = True
+try:
+    unattended = g.write_file("c.txt", "x")
+    check("unattended decline is the unattended text", unattended == g.DECLINED_UNATTENDED and asked())
+    check("unattended decline does not happen", not (g.WORKSPACE / "c.txt").exists())
+    check("unattended decline still starts with DECLINED (the stall rule counts it as a failure)", unattended.startswith("DECLINED"))
+    check("unattended decline says nobody can approve and not to redo it another way",
+          "nobody is here to approve" in unattended and "another way" in unattended and "telling the user" in unattended)
+    check("unattended decline does not invite another approach or ask_user", "another approach" not in unattended and "ask_user" not in unattended)
+    check("unattended shell decline is the same text", g.run_shell("rm a.txt") == g.DECLINED_UNATTENDED and asked())
+    check("unattended decline leaves the file alone", (g.WORKSPACE / "a.txt").exists())
+finally:
+    g.UNATTENDED = False
+check("interactive decline is back after an unattended run", g.write_file("c.txt", "x") == g.DECLINED and asked())
 answer["value"] = True
 check("write approved", g.write_file("c.txt", "x").startswith("SUCCESS") and asked())
 check("outside-scope read asks", "hello" not in g.read_file("../../outside") and asked())

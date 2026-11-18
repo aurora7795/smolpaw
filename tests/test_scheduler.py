@@ -67,9 +67,11 @@ class FakeAgent:
         self.stopped = threading.Event()
         self.tool_results: dict = {}
         self.inputs: list[str] = []
+        self.unattended_seen: list[bool] = []
 
     def run(self, text):
         self.inputs.append(text)
+        self.unattended_seen.append(g.UNATTENDED)
         if self.gate is not None:
             self.gate.wait(5)
             if self.stopped.is_set():
@@ -140,6 +142,7 @@ next_model(sess)
 check("a due schedule starts once", sched.tick() == s1["id"])
 wait_idle(sess)
 check("the run got the schedule's prompt", agent.inputs == ["check the queue"])
+check("a scheduled run is marked unattended while it runs and not afterwards (#90)", agent.unattended_seen == [True] and g.UNATTENDED is False)
 after = schedules.load()[0]
 check("next_run moved forward and last_run was set",
       datetime.fromisoformat(after["next_run"]) > clock["now"] and after["last_run"] == clock["now"].isoformat())
@@ -220,7 +223,7 @@ started = time.time()
 sched.tick()
 wait_idle(sess)
 check("a scheduled write that would ask [y/N] is declined without blocking", time.time() - started < 3)
-check("the model sees DECLINED", agent.tool_results["write"] == g.DECLINED)
+check("the model sees the unattended DECLINED text (#90)", agent.tool_results["write"] == g.DECLINED_UNATTENDED)
 check("nothing was written", not (g.WORKSPACE / "new.txt").exists())
 check("an auto-allowed read still runs in a scheduled run", "hello" in agent.tool_results["read"])
 check("ask_user returns NO_ANSWER instead of blocking", agent.tool_results["ask"] == web.NO_ANSWER)

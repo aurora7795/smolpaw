@@ -74,6 +74,11 @@ try:
     code = agent.run_noninteractive(fake, f"m{next(models)}", "hello", out_stream=out, err_stream=err)
     check("plain mode exits with 0", code == 0)
     check("plain mode prints the answer", "simple answer" in out.getvalue())
+    seen = {}
+    flag_fake = FakeAgent(lambda a: seen.setdefault("unattended", g.UNATTENDED) and "ok")
+    agent.run_noninteractive(flag_fake, f"m{next(models)}", "hello", out_stream=io.StringIO(), err_stream=io.StringIO())
+    check("-p marks the run unattended while it runs", seen.get("unattended") is True)
+    check("-p clears the unattended mark afterwards", g.UNATTENDED is False)
     check("plain mode prints the [Harness says] report", "[Harness says]" in out.getvalue())
     check("plain mode prints 'no changes made' when nothing changed", "no changes made" in out.getvalue())
 

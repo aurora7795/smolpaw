@@ -440,6 +440,7 @@ class Session:
                 deferred.append(g._redact(desc))
                 return False
             g.CONFIRM, g.ASK = confirm_later, lambda question: NO_ANSWER
+            g.UNATTENDED = True
         exc_type = ""
         try:
             with self._lock:
@@ -462,6 +463,7 @@ class Session:
                     self._timer = None
             if schedule:
                 g.CONFIRM, g.ASK = saved_hooks
+                g.UNATTENDED = False
             log_file = g._log_file
             answer = self.answer
             has_error = bool(self.error)

@@ -384,6 +384,7 @@ def run_noninteractive(agent, model: str, prompt: str, toolset: str = "generic",
 
     generic_tools.CONFIRM = confirm_decline
     generic_tools.ASK = lambda question: NO_ANSWER
+    generic_tools.UNATTENDED = True
 
     stop_tail = threading.Event()
     tail_thread = None
@@ -448,6 +449,7 @@ def run_noninteractive(agent, model: str, prompt: str, toolset: str = "generic",
         return 1
     finally:
         generic_tools.CONFIRM, generic_tools.ASK = saved_hooks
+        generic_tools.UNATTENDED = False
         if tail_thread is not None:
             stop_tail.set()
             tail_thread.join(timeout=2.0)
