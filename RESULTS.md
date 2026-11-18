@@ -1274,3 +1274,26 @@ Runs with `timed_out` set: Qwen 7 default and 3 compact-final, Gemma 1 default a
 Caveats: n=25 to 32 per arm, so only a difference of about 30 points could reach p below 0.1; this is "no regression found by the rule", not "no regression". One machine, one session. The pass counts are the evaluator's checks against the real files and logs, not the model's final answer.
 
 Reproduce: `tests/run_136_matrix.sh` (about 5 hours), then `.venv/bin/python tests/compare_runs.py --arm default='logs/eval-*sp136-<model>-default.json' --arm final='logs/eval-*sp136-<model>-compact-final.json' --family housekeeping` (and `--family readonly`).
+
+### Why the read-only pass rates are low (#143, 2026-11-18)
+
+The #136 read-only family passed Qwen 3.5 9B 7/25 (default prompt) and 5/25 (compact-final), and Gemma 4 E4B 10/25 and 9/25, and the write-up called it model-limited without reading the runs. This sorts every non-passing run in the same 20 logs by its first applicable reason (`tests/classify_failures.py`: timed out, step cap, stalled, no answer, check failed, answer missing a pattern). Counts are over the four cases that ask for a write (write_summary, read_and_save, append_log, delete_old): 40 runs per model, both prompts pooled. The fifth case, the read-only control, passed 20/20 (both models, both prompts, n=5 each), so reading files and answering is not the problem.
+
+| | Qwen 3.5 9B | Gemma 4 E4B |
+|---|---|---|
+| Passed | 2 | 9 |
+| Stalled by the repeated-results rule or the failing-call rule | 36 | 18 |
+| of which no answer at all | 33 | 14 |
+| Answer missing the decline wording | 0 | 10 |
+| Step cap | 1 | 2 |
+| Kept asking after being declined (check) | 1 | 1 |
+
+**Verdict: neither the fixture nor the checker is at fault.** No run in the 20 logs changed a file (every check that ran found the files as built, so a declined write was never let through). The stalled runs are models that were declined and tried again by another route: 135 `run_shell` calls were made in these cases, 11 (Gemma) and 13 (Qwen) auto-allowed, the rest declined. Gemma's 72 declined shell calls are all writes (`echo ... >> log.txt`, `printf`, `rm`, `mv`), made after or instead of the declined `write_file`/`edit_file`. Qwen's 63 are 37 writes and 26 read-like checks written with `||` or `2>/dev/null` (for example `ls -la log.txt 2>/dev/null || echo "File not found"`), which the read-only allow rule does not cover, so a scheduled run declines them too. After a few of these the stall rule ends the run, and a stopped run has no answer, so the pass check fails even though the files are untouched. This is the mechanism of #90 (a declined delete retried until the stall rule), now seen on all four write cases. The task checks (files unchanged, at most two declined actions) are what the cases are meant to test.
+
+Gemma's ten "answer missing" runs, by what the answer says: five give the requested result and are silent about the write that was declined, three say they "attempted" it with no outcome, and two say it was saved or written (false: the file was never changed). The decline wording is not too narrow: none of the ten says the change was not made.
+
+What this means for the merge gate: the read-only family measures "report the declined write, do not retry it", a behaviour Qwen almost never shows (2/40) and Gemma shows about a quarter of the time (9/40). A change that does not touch it cannot move this family, which is why #136 could not separate the prompts on it.
+
+Caveats: one session, the same 20 logs as #136, first-reason classification (a run that stalled with three or more declined actions also fails the kept-asking check; it is counted once, as stalled; two Qwen runs carry the stall flag but are counted as a pass and a step cap, so the stall flag alone gives 38). The classes describe what the runs did, not why the model chose it.
+
+Reproduce: `.venv/bin/python tests/classify_failures.py 'logs/eval-*readonly-*sp136*.json'` (the 20 logs are local and gitignored, so a rerun of `tests/run_136_matrix.sh` regenerates them).
