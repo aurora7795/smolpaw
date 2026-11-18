@@ -425,7 +425,7 @@ def save_results(args, label: str, ctx: int | None, prompt: str, expects: list[s
     out = ROOT / "logs" / f"eval-{stamp}-{args.backend}-{safe_name(args.model)}-{label}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"backend": args.backend, "model": args.model, "label": label,
-                               "history": "text" if args.text_history else "native", "system_prompt": os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact-final"), "without_tool": args.without_tool,
+                               "history": "text" if args.text_history else "native", "system_prompt": os.environ.get("SMOLPAW_SYSTEM_PROMPT", "compact-final"), "declined_text": args.declined_text, "without_tool": args.without_tool,
                                "loaded_context": ctx, "max_tokens": args.max_tokens, "run_timeout": args.run_timeout, "prompt": prompt, "expect": expects,
                                "runs": results}, indent=2))
     print(f"  saved {out.relative_to(ROOT)}")
@@ -577,6 +577,9 @@ def main() -> None:
     ap.add_argument("--system-prompt", choices=["default", "compact", "compact-final"], default=None,
                     help="system prompt style for this run (#125): compact drops smolagents' text tool list and examples")
     ap.add_argument("--label", default="")
+    ap.add_argument("--declined-text", choices=["report", "legacy"], default="report",
+                    help="what a declined action says in an unattended case (--readonly, --housekeeping) (#90): "
+                         "report = final, tell the user what could not be done; legacy = 'try another approach'")
     ap.add_argument("--confirm", choices=["no", "web"], default="no",
                     help="no = answer every prompt no; web = answer prompts in the browser (web.py)")
     ap.add_argument("--web-host", default="127.0.0.1")
@@ -698,6 +701,10 @@ def main() -> None:
     else:
         g.CONFIRM = lambda desc: False
         g.ASK = lambda q: "(no answer: nobody is at the keyboard. Do not ask again; make your best attempt.)"
+
+    g.UNATTENDED = bool(args.readonly or args.housekeeping)  # these cases emulate a scheduled run
+    if args.declined_text == "legacy":
+        g.DECLINED_UNATTENDED = g.DECLINED
 
     ctx = None
     try:

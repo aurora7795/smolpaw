@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Fixed
+- Unattended runs (a schedule, or `agent.py -p`) now tell the model a declined action will not be approved and to report it instead of retrying ([#90](https://github.com/aurora7795/smolpaw/issues/90)): `DECLINED_UNATTENDED` replaces the "try another approach or call ask_user" text, in those runs only. Pooled over the write cases at n=30 per arm: Qwen 3.5 9B 1 to 7 passed (p=0.026), Gemma 4 E4B 9 to 21 (p=0.002), read-only control 5/5 unchanged (RESULTS.md). What is blocked is unchanged; `tests/eval.py` gains `--declined-text {report,legacy}` and `tests/run_90_matrix.sh` reruns the comparison.
 - `tests/test_generic_tools.py`: the live Radarr check no longer fails when the server is unreachable ([#145](https://github.com/aurora7795/smolpaw/issues/145)). A 3-second TCP probe runs first; if nothing answers, the block prints `SKIP  live Radarr tests (server unreachable)`, as it already did for unset variables. The key-injection, redaction and no-key-to-unlisted-host checks now also always run against a local fake service that returns 200 only for the right `X-Api-Key`, so skipping the live block loses no coverage; new checks cover `reachable()` for a closed port, a malformed URL and a listening port. A reachable server that answers wrongly still fails. No change to the confirmation layer.
 
 ### Added

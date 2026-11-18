@@ -53,6 +53,17 @@ SHELL_META = re.compile(r"[;&|<>`$()\\\n]")
 MAX_OUT = 4000
 USER_AGENT = "SmolPaw/0.1 (local agent; https://github.com/aurora7795/smolpaw)"
 DECLINED = "DECLINED: the user said no. Nothing was done. Try another approach or call ask_user."
+# In an unattended run (a schedule, or `agent.py -p`) nobody can approve anything, so a decline is final: say so, and
+# do not invite another route to the same action (#90: models redid a declined write through run_shell until stalled).
+DECLINED_UNATTENDED = ("DECLINED: nobody is here to approve this, so it was not done and will not be. Do not retry it "
+                       "or do the same thing another way (another tool, a shell command). Finish by telling the user "
+                       "what you could not do.")
+UNATTENDED = False  # set while an unattended run is in progress
+
+
+def _declined() -> str:
+    """The result of a declined action: final in an unattended run, open to another approach otherwise."""
+    return DECLINED_UNATTENDED if UNATTENDED else DECLINED
 
 
 def _ask(prompt: str) -> bool:
@@ -475,7 +486,7 @@ def run_shell(command: str) -> str:
         proc = lambda: _run_argv(argv)  # noqa: E731
     else:
         if not _approved(f"Run shell command in workspace/:\n  {command}"):
-            return DECLINED
+            return _declined()
         proc = lambda: _run_shell_string(command)  # noqa: E731
     try:
         r = proc()
@@ -561,7 +572,7 @@ def ssh_run(device: str, command: str) -> str:
     where = f"{dev['user']}@{dev['host']}"
     # Every command asks, whatever it is: what runs on the device is opaque from here.
     if not _approved(f"Run on {device} ({where}) over ssh:\n  {command}"):
-        return DECLINED
+        return _declined()
     # argv, never a shell: only the remote side interprets `command`. The password reaches sshpass through the
     # child's environment, so it is on no command line and in no prompt or log.
     argv = (["sshpass", "-e"] if pass_env else []) + [
@@ -803,7 +814,7 @@ def http_request(method: str, url: str, body: str = "") -> str:
             return _redact(f"ERROR: {problem}")
         preview = f"\n  body: {body[:500]}" if body else ""
         if not _approved(f"{method} {url}{preview}"):
-            return DECLINED
+            return _declined()
     try:
         headers = {"User-Agent": USER_AGENT, **_auth_headers(url)}  # some sites refuse requests without one
         r = requests.request(method, url, json=data, headers=headers, timeout=30)
@@ -1154,7 +1165,7 @@ def read_file(path: str, offset: int = 0) -> str:
         return "BLOCKED: this file holds secrets and cannot be read."
     if not _in_scope(path) and not _approved(f"Read file outside workspace/:\n  {p}"):
         _log("read_file", path=path, result="declined")
-        return DECLINED
+        return _declined()
     try:
         content = p.read_text()
     except (OSError, UnicodeDecodeError) as exc:
@@ -1189,7 +1200,7 @@ def list_dir(path: str = ".") -> str:
         return "BLOCKED: this folder holds secrets and cannot be listed."
     if not _in_scope(path) and not _approved(f"List folder outside workspace/:\n  {p}"):
         _log("list_dir", path=path, result="declined")
-        return DECLINED
+        return _declined()
     try:
         entries = sorted(p.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
         lines = []
@@ -1252,7 +1263,7 @@ def write_file(path: str, text: str) -> str:
     where = "" if _in_scope(path) else "  (OUTSIDE workspace/)"
     if not _approved(f"Write {len(text)} chars to {p}{where}:\n{_replace_preview(p)}{text[:500]}"):
         _log("write_file", path=path, chars=len(text), result="declined")
-        return DECLINED
+        return _declined()
     saved_undo, undo_reason = _save_undo(p)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -1336,7 +1347,7 @@ def edit_file(path: str, old: str, new: str) -> str:
     after = before.replace(old, new)
     if not _approved(f"Edit {p}: replace {len(old)} chars with {len(new)}\n- {old[:300]}\n+ {new[:300]}"):
         _log("edit_file", path=path, result="declined")
-        return DECLINED
+        return _declined()
     saved_undo, undo_reason = _save_undo(p)
     try:
         p.write_bytes(after.encode())
@@ -1417,7 +1428,7 @@ def write_skill(name: str, text: str) -> str:
     verb = "Update" if p.exists() else "Create"
     if not _approved(f"{verb} skill '{p.stem}':\n{text[:1500]}"):
         _log("write_skill", name=name, chars=len(text), result="declined")
-        return DECLINED
+        return _declined()
     saved_undo, undo_reason = _save_undo(p)
     try:
         SKILLS.mkdir(exist_ok=True)
@@ -1452,7 +1463,7 @@ def remember(fact: str) -> str:
         return "ERROR: fact cannot be empty."
     clean_fact = redact_pasted_secrets(_redact(fact))
     if not _approved(f"Remember fact in memory:\n  {clean_fact}"):
-        return DECLINED
+        return _declined()
     entry = clean_fact if clean_fact.startswith("- ") else f"- {clean_fact}"
     try:
         if MEMORY.exists():
