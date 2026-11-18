@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Changed
+- RESULTS.md: housekeeping and read-only cases rerun on LM Studio with smolagents' prompt against compact-final ([#136](https://github.com/aurora7795/smolpaw/issues/136)). The pre-stated criterion is met (no family with p below 0.1 for the default better), so compact-final stays the default. Input tokens fall about 50 percent on both models; pass rates are within noise (Gemma 21/57 against 25/57, Qwen 21/57 against 19/57). `tests/run_136_matrix.sh` reproduces it.
 - The web page shows the logo as its favicon and beside the name in the sidebar and top bar (`assets/smolpaw-icon.png`, embedded as a data: URI). The page's Content-Security-Policy gains `img-src data:` for it and nothing else.
 - The terminal banner is redrawn to match the logo (four toes, a pad with a circuit stem, a wrist); it still prints only on a terminal.
 - RESULTS.md: the compact system prompt rerun on LM Studio at n=5 per cell ([#131](https://github.com/aurora7795/smolpaw/issues/131)). The pre-stated criterion is met, so compact stays the default on both runtimes. Qwen is clearly better with it (27/30 against 14/30); Gemma is not shown worse but leans that way again (11/30 against 16/30, p=0.15), with more stalls and slower runs.
