@@ -1403,3 +1403,18 @@ Caveats: n=12, one session; the engines differ (a GGUF on llama.cpp against an M
 **Verdict: the criterion is met by 2 passes, narrowly (3 against 5, one-sided Fisher p well above 0.1), so the wider matrix is allowed but the case for it is weak.** The engine mattered for the failure type: on LM Studio 4 of 12 Bonsai runs ended on a tool call its parser rejected; on Ollama none did, and Bonsai's failures are the step cap (6 runs) and writes with a field missing (3). Qwen itself scored 9/12 on LM Studio's MLX build and 5/12 here (7/12 on Ollama in #137), so the engine moves a 9B model's result by as much as the difference being measured. Speed: Bonsai was about the same per run on Ollama (84s against 91s; 7.5s against 9.2s per step), unlike its 38% advantage over MLX Qwen on LM Studio.
 
 Caveats: n=12, one session; Qwen's 5/12 is at the low end of its range, which makes the gap look smaller; Bonsai's 6 step-cap runs suggest it takes more steps than Qwen to the same result, so a larger step cap might change its score (not tried); only the Q2_0 pack was tried.
+
+### Bonsai 2 9B with the step cap raised to 20 (2026-11-19)
+
+**Why and criterion, stated before the run.** Six of Bonsai's 12 runs hit the step cap of 12 on Ollama. Criterion: Bonsai within 2 passes of Qwen 3.5 9B at n=12; if Bonsai gains 3 or more over its cap-12 result (3/12), the cap was limiting it. Setup as the Ollama run above, but `--max-steps 20 --run-timeout 600` (`tests/run_bonsai_cap20.sh`), both models back to back in one session.
+
+| | Qwen 3.5 9B | Bonsai 2 9B (Q2_0) |
+|---|---|---|
+| Passed | 6/12 | 5/12 |
+| Stalled by the repeated-results rule | 6 | 5 |
+| Step cap / wrong write | 1 / 0 | 0 / 2 |
+| Mean steps, input tokens, seconds | 12.8, 56K, 98 | 9.6, 37K, 65 |
+
+**Verdict.** Bonsai is 1 pass behind Qwen, inside the 2-pass criterion. Its gain from the higher cap is 2 passes (3 to 5), under the 3 set for "the cap was limiting it", so that is not established. The six runs that hit the cap at 12 mostly ended at the stall rule at 20 (5 stalled), i.e. they were looping on repeated results, not simply short of steps. Bonsai used about a third fewer steps and tokens than Qwen here and ran 34% faster per run (65s against 98s), the speed advantage seen on LM Studio, which the cap-12 Ollama run did not show.
+
+Caveats: n=12, one session; Qwen's pass counts on this task across today's runs are 5, 6, 7 and 9 of 12 (engine, cap and session all differ), so differences of 1 or 2 passes are noise; Bonsai's step-cap-12 result and this one are different runs of the same model, so their 3 and 5 also differ by chance alone; only the Q2_0 pack was tried.
