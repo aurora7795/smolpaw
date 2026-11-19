@@ -1319,3 +1319,22 @@ By case (old text to new text). Qwen: `write_summary` 0 to 1 of 5, `read_and_sav
 Caveats: n=30 per arm per model, one session, one prompt. Qwen is still low (7 of 30; it stalled in 24 of 30 runs), and `append_log` and `delete_old` did not move for it, so the text helps but does not make Qwen reliable here. `cleanup_proposal` did not change for Gemma. Pooled cases are not independent of the fixture's wording. The stall rule is unchanged ([#142](https://github.com/aurora7795/smolpaw/issues/142)). Real scheduled runs were not measured, only the eval's scripted unattended mode.
 
 Reproduce: `tests/run_90_matrix.sh` (about 3 hours), then `.venv/bin/python tests/compare_runs.py --arm report='logs/eval-*sp90-<model>-report.json' --arm legacy='logs/eval-*sp90-<model>-legacy.json'` (the control is in the same logs; leave it out of the pooled comparison by pointing the globs at the other cases).
+
+## Hard fake-Radarr baseline under compact-final, and the repeat-nudge retest (#137, #138, 2026-11-19)
+
+**Setup.** Ollama, `--ctx 32768`, step cap 12, `--run-timeout 400`, `--fake-radarr --radarr-task hard`, guard and write hints on, n=12 per cell, one overnight session (`tests/run_137_139_matrix.sh`). Arms: `cf` (compact-final, the default), `default` (smolagents' prompt, `--system-prompt default`) and `nudge` (compact-final plus the #117 repeated-result nudge and firmer DECLINED text, from `experiment/117-repeat-nudge` cherry-picked onto current `main`; the cherry-pick conflicted with #90 and #95 and was resolved by keeping both).
+
+**Criterion for #138, stated on the issue before the run.** The baseline is the `cf` arm. An arm is worse if either model drops 3 or more passes; a clear improvement is a gain of 3 or more for either model. Merge only if neither is worse and one clearly improves; at +2 or less, record and close without merging.
+
+| | cf (baseline) | default prompt | nudge |
+|---|---|---|---|
+| Gemma 4 E4B, passed | 7/12 (2 stalled, 8.7 steps, 30K input tokens) | 5/12 (1 stalled, 174s mean) | 8/12 (0 stalled) |
+| Qwen 3.5 9B, passed | 7/12 (4 stalled, 9.8 steps, 39K input tokens) | 10/12 (0 stalled, 59K input tokens) | 6/12 (2 stalled) |
+
+**#137: the baseline.** Gemma lands at 7 of 12, inside the 3 to 9 band set in #119, so the hard fixture stays usable as a gate fixture. Qwen is at 7 of 12 (5 of 12 with the old prompt). compact-final against the default prompt: Gemma 7 against 5 (one-sided Fisher p=0.34), Qwen 7 against 10; neither is below p 0.1. The default prompt used twice the input tokens (Gemma 60K against 30K, Qwen 59K against 39K).
+
+**#138: the verdict is not to merge.** Gemma +1, Qwen -1 against the baseline: no model is worse by 3 and neither gains 3, so there is no clear improvement. The rule was fixed before the run. `experiment/117-repeat-nudge` stays unmerged.
+
+Caveats: n=12 per cell, one session, so differences of 3 are within noise. Qwen's 10 of 12 on the default prompt (three more than compact-final, p about 0.2 in that direction) was not a planned comparison and does not meet any pre-stated rule; it matches the LM Studio matrix (#136) only in that Qwen's compact-final stalls are frequent here (4 of 12). The nudge arm ran from a worktree of `main`, so the `nudge` and `cf` arms differ only by the experiment commit.
+
+Reproduce: `tests/run_137_139_matrix.sh`, then `.venv/bin/python tests/compare_runs.py --arm cf='logs/eval-*r137-<model>-cf.json' --arm nudge='logs/eval-*r138-<model>-nudge.json'`.
