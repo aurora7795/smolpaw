@@ -1,5 +1,5 @@
 """
-SmolPaw — minimal smolagents CLI harness backed by LM Studio or Ollama.
+SmolPaw — minimal smolagents CLI harness backed by Ollama (or LM Studio).
 """
 
 import argparse
@@ -305,7 +305,7 @@ def prompt_templates_for(style: str) -> dict | None:
 
 
 def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps: int = MAX_STEPS,
-                toolset: str = "generic", backend: str = "lmstudio", native_history: bool = True,
+                toolset: str = "generic", backend: str = "ollama", native_history: bool = True,
                 max_tokens: int | None = None):
     cfg = BACKENDS[backend]
     max_tokens = max_tokens or env_max_tokens()
@@ -491,8 +491,8 @@ def main() -> None:
                         help="run once non-interactively with this request and exit")
     parser.add_argument("--json", dest="json_mode", action="store_true",
                         help="with -p: print run log entries as JSON lines to stdout")
-    parser.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio",
-                        help="model server: lmstudio (port 1234) or ollama (port 11434)")
+    parser.add_argument("--backend", choices=sorted(BACKENDS), default="ollama",
+                        help="model server: ollama (port 11434, the default) or lmstudio (port 1234)")
     parser.add_argument("--model", default=None,
                         help="model identifier on the chosen backend (default depends on --backend)")
     parser.add_argument("--tools", choices=["generic", "radarr"], default="generic",

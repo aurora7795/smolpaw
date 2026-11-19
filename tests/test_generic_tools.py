@@ -1416,9 +1416,10 @@ from smolagents import OpenAIServerModel  # noqa: E402
 
 from agent import build_agent  # noqa: E402
 
-lm = build_agent(toolset="generic").model
-check("default backend is LM Studio", lm.client_kwargs["base_url"] == "http://127.0.0.1:1234/v1"
+lm = build_agent(toolset="generic", backend="lmstudio").model
+check("lmstudio backend uses port 1234 and its default model", lm.client_kwargs["base_url"] == "http://127.0.0.1:1234/v1"
       and lm.model_id == "ternary-bonsai-8b-mlx")
+check("the default backend is Ollama", build_agent(toolset="generic").model.client_kwargs["base_url"] == "http://127.0.0.1:11434/v1")
 ol = build_agent(toolset="generic", backend="ollama").model
 check("ollama backend uses port 11434 and its default model",
       ol.client_kwargs["base_url"] == "http://127.0.0.1:11434/v1" and ol.model_id == "qwen3.5:9b")

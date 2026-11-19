@@ -512,7 +512,7 @@ def run_probe(args, tmp: Path, ctx: int | None) -> None:
 def main() -> None:
     global MAX_TOKENS, RUN_TIMEOUT
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
+    ap.add_argument("--backend", choices=sorted(BACKENDS), default="ollama")
     ap.add_argument("--model", required=True)
     ap.add_argument("--prompt", help="task prompt (default for --tidepool: the vessel question)")
     ap.add_argument("--expect", action="append", default=[], help="regex the answer must match (repeatable)")

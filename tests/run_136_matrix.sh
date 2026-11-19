@@ -1,4 +1,5 @@
 #!/bin/zsh
+# Historical: this run used LM Studio, whose copies of its models have been deleted (default is now Ollama); re-download them to rerun.
 # #136: housekeeping (n=4) and read-only (n=5) on LM Studio, smolagents' prompt against compact-final, interleaved by case.
 # Gemma 4 E4B first, then Qwen 3.5 9B. Read-only measurement; takes about 5 hours. Logs go to logs/ with the label sp136-*.
 # Compare: .venv/bin/python tests/compare_runs.py --arm default='logs/eval-*sp136-google_gemma-4-e4b-default.json' --arm final='logs/eval-*sp136-google_gemma-4-e4b-compact-final.json' --family housekeeping
