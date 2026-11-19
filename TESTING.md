@@ -25,8 +25,8 @@ approval instead of running free, same as any other command PowerShell does not 
 Run it:
 
 ```bash
-.venv/bin/python agent.py --model <your-model-id>          # LM Studio
-.venv/bin/python agent.py --backend ollama --model <id>     # Ollama
+.venv/bin/python agent.py --model <your-model-id>          # Ollama
+.venv/bin/python agent.py --backend lmstudio --model <id>   # LM Studio
 ```
 
 Add `--web` to also print a URL — approval prompts can then be answered either in the terminal

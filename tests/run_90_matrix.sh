@@ -1,4 +1,5 @@
 #!/bin/zsh
+# Historical: this run used LM Studio, whose copies of its models have been deleted (default is now Ollama); re-download them to rerun.
 # #90: the unattended DECLINED text. legacy ('try another approach or call ask_user') against report ('nobody can approve;
 # do not retry another way; tell the user'), interleaved by case, on LM Studio (MLX builds, 32K context, 400s per run).
 # Family per model: the four read-only write cases (n=5) plus housekeeping cleanup_proposal (n=10); the read-only

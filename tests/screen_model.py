@@ -12,7 +12,7 @@ Thresholds are fixed here, before any model was screened:
   3. tidepool Tidepool `easy` and `hint` (tests/eval.py), n=3 each. Pass: at least 2 of 3 on each.
   4. matrix   Not run here: a model that passes 1 to 3 is worth the full matrix of tests/eval.py cells (n>=5).
 
-  .venv/bin/python tests/screen_model.py --backend lmstudio --model <id> [--ctx 32768] [--stages loads,tools]
+  .venv/bin/python tests/screen_model.py --backend ollama --model <id> [--ctx 32768] [--stages loads,tools]
 
 Read-only. It unloads whatever is loaded first (only one model fits on 16GB). Logs go to logs/screen-*.json.
 """
@@ -155,7 +155,7 @@ STAGES = {"loads": stage_loads, "tools": stage_tools, "tidepool": stage_tidepool
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--backend", choices=["lmstudio", "ollama"], default="lmstudio")
+    ap.add_argument("--backend", choices=["lmstudio", "ollama"], default="ollama")
     ap.add_argument("--model", required=True)
     ap.add_argument("--ctx", type=int, default=32768)
     ap.add_argument("--stages", default=",".join(STAGES), help="comma list, in order (default: all three)")

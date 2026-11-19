@@ -38,7 +38,7 @@ def timed_request(url: str, model: str, words: int, rng: random.Random) -> tuple
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
+    ap.add_argument("--backend", choices=sorted(BACKENDS), default="ollama")
     ap.add_argument("--model", required=True)
     ap.add_argument("--ctx", type=int, default=32768)
     ap.add_argument("--sizes", default="2000,6000,12000,24000", help="approximate prompt tokens")

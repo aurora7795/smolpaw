@@ -4,6 +4,9 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+- The default `--backend` is now Ollama (was LM Studio) in `agent.py`, `web.py`, `tests/eval.py`, `tests/screen_model.py` and the prefill and prefix-cache scripts; LM Studio is still selectable. The LM Studio copies of Qwen 3.5 9B, Gemma 4 E4B, Llama 3.1 8B and Bonsai 9B were deleted to free disk, so the three LM Studio run scripts are marked historical.
+
 ### Fixed
 - `tests/screen_model.py`: the `loads` stage counts a `final_answer` call as a reply, so a model that finishes through the tool is no longer failed for an empty `content` ([#126](https://github.com/aurora7795/smolpaw/issues/126)).
 - Unattended runs (a schedule, or `agent.py -p`) now tell the model a declined action will not be approved and to report it instead of retrying ([#90](https://github.com/aurora7795/smolpaw/issues/90)): `DECLINED_UNATTENDED` replaces the "try another approach or call ask_user" text, in those runs only. Pooled over the write cases at n=30 per arm: Qwen 3.5 9B 1 to 7 passed (p=0.026), Gemma 4 E4B 9 to 21 (p=0.002), read-only control 5/5 unchanged (RESULTS.md). What is blocked is unchanged; `tests/eval.py` gains `--declined-text {report,legacy}` and `tests/run_90_matrix.sh` reruns the comparison.

@@ -268,7 +268,7 @@ def _load_deferred_approvals() -> list[dict]:
 class Session:
     """Runs one agent request at a time in a background thread."""
 
-    def __init__(self, agent, model: str, approvals: Approvals, backend: str = "lmstudio",
+    def __init__(self, agent, model: str, approvals: Approvals, backend: str = "ollama",
                  max_steps: int = MAX_STEPS, run_summaries: bool | None = None,
                  call_model: Callable[[str], str] | None = None,
                  schedule_timeout: float | None = None,
@@ -1190,7 +1190,7 @@ def url(host: str, port: int, token: str) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Run SmolPaw and answer its prompts from a browser.")
-    ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
+    ap.add_argument("--backend", choices=sorted(BACKENDS), default="ollama")
     ap.add_argument("--model", default=None, help="default depends on --backend")
     ap.add_argument("--max-steps", type=int, default=None, help="default: MAX_STEPS env var, else 12")
     ap.add_argument("--host", default="127.0.0.1",

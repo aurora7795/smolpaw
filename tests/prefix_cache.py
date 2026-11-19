@@ -124,7 +124,7 @@ def real_agent(model: str, backend: str, n: int, cold_rate: float) -> list[dict]
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--backend", choices=sorted(BACKENDS), default="lmstudio")
+    ap.add_argument("--backend", choices=sorted(BACKENDS), default="ollama")
     ap.add_argument("--model", required=True)
     ap.add_argument("--ctx", type=int, default=16384)
     ap.add_argument("--sizes", default="3000,12000", help="approximate prompt tokens")

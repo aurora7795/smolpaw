@@ -1,4 +1,5 @@
 #!/bin/zsh
+# Historical: this run used LM Studio, whose copies of its models have been deleted (default is now Ollama); re-download them to rerun.
 # Bonsai 2 9B (Q2_0 GGUF) against Qwen 3.5 9B (MLX) on the hard fake Radarr, same LM Studio session. Read-only measurement.
 # Criterion (stated before the run): Bonsai is worth the wider matrix if it is within 2 passes of Qwen at n=12; a clear improvement is +3 or more.
 cd "$(dirname "$0")/.." || exit 1

@@ -4,13 +4,13 @@
 
 # SmolPaw
 
-A lean, local-first agent harness built on [smolagents](https://github.com/huggingface/smolagents), with models served locally by LM Studio or Ollama. The aim is OpenClaw-like functionality (an agent that works out how to use services and remembers what it learned) using small local models on a 16GB Mac, with far less prompt overhead.
+A lean, local-first agent harness built on [smolagents](https://github.com/huggingface/smolagents), with models served locally by Ollama (LM Studio is still supported). The aim is OpenClaw-like functionality (an agent that works out how to use services and remembers what it learned) using small local models on a 16GB Mac, with far less prompt overhead.
 
 Status: experimental. See [RESULTS.md](RESULTS.md) for what has been measured, [PLAN.md](PLAN.md) for the plan and decisions, and the [comparison with OpenClaw](#how-it-compares-with-openclaw) below.
 
 ## How it works
 
-- `agent.py` runs a `ToolCallingAgent` against a model served by LM Studio (`http://127.0.0.1:1234/v1`, the default) or Ollama (`http://127.0.0.1:11434/v1`, with `--backend ollama`).
+- `agent.py` runs a `ToolCallingAgent` against a model served by Ollama (`http://127.0.0.1:11434/v1`, the default) or LM Studio (`http://127.0.0.1:1234/v1`, with `--backend lmstudio`).
 - The model gets a small set of general-purpose tools ([generic_tools.py](generic_tools.py)): shell, HTTP, web search, page fetching, files, skills, long-term memory and a way to ask you a question. It works out any service you list in `notes.md` from its API description, so nothing is built in for a particular service.
 - Every safety rule is enforced in Python, not in the prompt, so a model cannot talk its way past it.
 - `notes.md` lists the services the agent may use. Short skills in `skills/` are put straight into the prompt; longer ones are listed and read on demand.
@@ -70,9 +70,9 @@ Two projects aim at small local models rather than at a lighter OpenClaw: [Small
 
 - Python 3.10+
 - A local model server with at least one model that supports tool use. Only one model fits at a time on 16GB, so unload the other server's model before switching.
-  - [LM Studio](https://lmstudio.ai/) with its local server on port 1234 (default). Load the model with a context length of at least 16384 and one parallel slot.
-  - Or [Ollama](https://ollama.com/) on port 11434. See [Using Ollama](#using-ollama) for the context setting.
-- Models tried so far: on LM Studio `google/gemma-4-e4b`, `qwen3.5-9b-mlx`, `ternary-bonsai-8b-mlx`; on Ollama `qwen3.5:9b`, `gemma4:e4b`. See [RESULTS.md](RESULTS.md).
+  - [Ollama](https://ollama.com/) on port 11434 (default). See [Using Ollama](#using-ollama) for the context setting.
+  - Or [LM Studio](https://lmstudio.ai/) with its local server on port 1234 (`--backend lmstudio`). Load the model with a context length of at least 16384 and one parallel slot.
+- Models tried so far: on Ollama `qwen3.5:9b`, `gemma4:e4b`, `bonsai2-9b-q2`; on LM Studio (earlier measurements, models since deleted) `google/gemma-4-e4b`, `qwen3.5-9b-mlx`, `ternary-bonsai-8b-mlx`. See [RESULTS.md](RESULTS.md).
 - Developed on macOS; tested on Windows too. `run_shell` runs commands through PowerShell there (it knows `ls`/`cat` as its own aliases); some of the read-only allow-list (`head`, `grep`, `find`, `wc`, `stat`, `file`) has no native PowerShell equivalent and will ask for approval rather than run free, same as any other command PowerShell does not recognise.
 
 ## Setup
@@ -129,8 +129,8 @@ python3 agent.py --model google/gemma-4-e4b
 |---|---|---|
 | `-p` | none | Non-interactive mode: run once with this request and exit (no banner, no `You:` loop, no `--web`). Generic tools only. Approvals are declined; `ask_user` returns a no-answer reply. Exit codes: 0 finished, 1 error, 2 step limit, 3 stall stop (the same call failed three times, or two results in a row repeated earlier ones) |
 | `--json` | off | With `-p`: stream the run's redacted log entries as JSON lines to stdout as they are written, ending with `final`. Other output (`[log]` line, errors) goes to stderr |
-| `--backend` | `lmstudio` | `lmstudio` (port 1234) or `ollama` (port 11434) |
-| `--model` | `ternary-bonsai-8b-mlx` on LM Studio, `qwen3.5:9b` on Ollama | Model identifier on the chosen backend (see `lms ls` or `ollama list`) |
+| `--backend` | `ollama` | `ollama` (port 11434) or `lmstudio` (port 1234) |
+| `--model` | `qwen3.5:9b` on Ollama, `ternary-bonsai-8b-mlx` on LM Studio | Model identifier on the chosen backend (see `lms ls` or `ollama list`) |
 | `--tools` | `generic` | `generic`, or `radarr` (a hand-written single-service baseline for comparisons) |
 | `--agent` | `code` | `radarr` baseline only: `code` writes Python, `tool` makes JSON tool calls |
 | `--max-steps` | 12 | Also settable as `MAX_STEPS` in `.env` |
