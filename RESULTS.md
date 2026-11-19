@@ -1338,3 +1338,23 @@ Reproduce: `tests/run_90_matrix.sh` (about 3 hours), then `.venv/bin/python test
 Caveats: n=12 per cell, one session, so differences of 3 are within noise. Qwen's 10 of 12 on the default prompt (three more than compact-final, p about 0.2 in that direction) was not a planned comparison and does not meet any pre-stated rule; it matches the LM Studio matrix (#136) only in that Qwen's compact-final stalls are frequent here (4 of 12). The nudge arm ran from a worktree of `main`, so the `nudge` and `cf` arms differ only by the experiment commit.
 
 Reproduce: `tests/run_137_139_matrix.sh`, then `.venv/bin/python tests/compare_runs.py --arm cf='logs/eval-*r137-<model>-cf.json' --arm nudge='logs/eval-*r138-<model>-nudge.json'`.
+
+## The failing-steps stall switch under compact-final (#139, 2026-11-19)
+
+**Setup.** Ollama, `--ctx 32768`, step cap 12, `--run-timeout 400`, compact-final prompt, one overnight session (`tests/run_137_139_matrix.sh`). `SMOLPAW_STALL_FAILS=3` (stop after three failing steps in a row, #77) against the switch off, arms run back to back per case, n=3 per cell: the eight tracking cases (five edit cases, `edit_one_section`, `append_keep_all`, `read_three_report`) and `--counting-home`.
+
+**Criterion, stated on #139 before the run.** Adopt as a default only if neither model drops 2 or more passes in any pooled family and the runs it ends were failing anyway. Otherwise it stays off. Families pooled here: the five edit cases (15 runs per arm), the other three tracking cases (9) and `--counting-home` (6).
+
+| Passed, switch off to `STALL_FAILS=3` | Gemma 4 E4B | Qwen 3.5 9B |
+|---|---|---|
+| Five edit cases (15 runs) | 15 to 14 | 14 to 14 |
+| Other tracking cases (9 runs) | 4 to 6 | 8 to 6 |
+| `--counting-home` (6 runs) | 2 to 0 | 4 to 6 |
+
+By case, the ones that moved: Gemma `append_keep_all` 1 to 3, `edit_duplicate_passage` 3 to 2, `--counting-home` 2 to 0; Qwen `append_keep_all` 2 to 0 (the one run that stalled under the switch was a pass without it), `--counting-home` 4 to 6.
+
+**Verdict: the criterion is not met, so the switch stays off.** Gemma drops 2 on `--counting-home` and Qwen drops 2 on the other tracking cases. The rule was fixed before the run. The #77 regression case, `edit_duplicate_passage`, did not repeat at its old size (3 to 1 of 3 then; 3 to 2 of 3 for Gemma now, no change for Qwen), but the drops elsewhere are the same size.
+
+Caveats: n=3 per case and 6 to 15 per pooled family, one session, so every difference here is within noise (no one-sided Fisher p comes near 0.1); the criterion is a count threshold, not a test, and a 2-pass drop on 6 or 9 runs is easy to produce by chance, as are the gains (Gemma `append_keep_all` 1 to 3). The "stalled" flags in the logs include the repeated-results rule, which is on in both arms, so they do not isolate the switch. Gemma's `read_three_report` was 0 of 3 in both arms (see #89).
+
+Reproduce: `tests/run_137_139_matrix.sh`; logs have the labels `r139-<model>-off` and `r139-<model>-fails3`.
