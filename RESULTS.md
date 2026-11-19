@@ -1358,3 +1358,18 @@ By case, the ones that moved: Gemma `append_keep_all` 1 to 3, `edit_duplicate_pa
 Caveats: n=3 per case and 6 to 15 per pooled family, one session, so every difference here is within noise (no one-sided Fisher p comes near 0.1); the criterion is a count threshold, not a test, and a 2-pass drop on 6 or 9 runs is easy to produce by chance, as are the gains (Gemma `append_keep_all` 1 to 3). The "stalled" flags in the logs include the repeated-results rule, which is on in both arms, so they do not isolate the switch. Gemma's `read_three_report` was 0 of 3 in both arms (see #89).
 
 Reproduce: `tests/run_137_139_matrix.sh`; logs have the labels `r139-<model>-off` and `r139-<model>-fails3`.
+
+## Screening Ternary-Bonsai-2-9B with the new staged screen (#126, #7, 2026-11-19)
+
+**Setup.** `tests/screen_model.py` (thresholds in the script, fixed before any model was screened: tools stage at least 7 of 9 correct with no invented tool or malformed arguments; Tidepool `easy` and `hint` at least 2 of 3 each), LM Studio, 32K context, one session. The model is PrismML's `Ternary-Bonsai-2-9B-Q2_0.gguf` (2.56 GB, a ternary build of Qwen 3.5 9B; checksum matches the published SHA256SUMS), loaded by LM Studio's llama.cpp engine 2.56.0. Calibration: Gemma 4 E4B and Qwen 3.5 9B (MLX), which had to pass. A known-bad model was not screened (Nanbeige is not installed here), so the screen's ability to fail a model is shown only by its unit tests, not on a real model. A first version used a 200-token cap on the plain reply and failed Gemma because it spent the cap on hidden reasoning; the cap is now 2,000.
+
+| Stage | Gemma 4 E4B | Qwen 3.5 9B (MLX) | Ternary Bonsai 2 9B (Q2_0) |
+|---|---|---|---|
+| loads (prompt tokens with 3 tools) | pass, 204 | pass, 438 | pass, 438 |
+| tools, correct of 9 | 8 | 7 | 8 |
+| Tidepool easy, hint (of 3 each) | 3, 2 | 3, 3 | 2, 2 |
+| time | 457s | 306s | 239s |
+
+**Result.** Bonsai passes all three stages: it loads in LM Studio, called no tool that was not offered and produced no malformed arguments in 9 tool tasks (the old Bonsai 8B invented tools, #7). The full matrix (stage 4) has not been run. Caveats: n=3 per cell detects only large gaps, so Bonsai's 2 of 3 on Tidepool is not distinguishable from Qwen's 3 of 3; the Qwen 3.5 9B here is the MLX build while Bonsai is a GGUF, so the engines differ.
+
+Reproduce: `.venv/bin/python tests/screen_model.py --backend lmstudio --model ternary-bonsai-2-9b`.
