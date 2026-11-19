@@ -1431,3 +1431,14 @@ Same screen and thresholds as above, Ollama, 32K context, `granite4.2:8b` (Q4_K_
 | time | 524s |
 
 **Result.** It passes all three stages, so it is worth the full matrix; that has not been run. At n=3 per cell the screen only separates large gaps. Reproduce: `.venv/bin/python tests/screen_model.py --backend ollama --model granite4.2:8b`.
+
+## Granite 4.2 8B on the hard fake Radarr (Ollama)
+
+`tests/eval.py --backend ollama --model granite4.2:8b --ctx 32768 --max-steps 12 --run-timeout 400 --fake-radarr --radarr-task hard --n 12`, the settings of the Bonsai cap-12 run. Criterion stated before the run: competitive if within 2 passes of Qwen 3.5 9B (5/12 at cap 12 on Ollama), clearly better at 3 or more above.
+
+**Result: 0/12 passed**, mean 386s, 10.8 steps, 44,068 input tokens per run. 10 of 12 runs hit the 400s run timeout, one hit the step cap (13 steps) and one finished by `final_answer` after 258s with the film added in the wrong folder (`/media/films`, wanted `/media/archive`). Where a POST reached the server it usually lacked a field (1 or 2 per run); in runs that added anything, the profile was right and the folder wrong. No parse errors, no wrong film ids.
+
+**Verdict.** Not competitive: 5 passes behind Qwen, outside the criterion. About 36s per step against roughly 8s for Bonsai, so under a 400s timeout Granite mostly ran out of time before the step cap; the cap-20 or longer-timeout result was not tried, and the timeouts mean this measures speed as much as ability. It passed the screen (Tidepool 2/3 and 3/3), which is a much easier task.
+
+Caveats: n=12, one session; Qwen's own counts on this task vary 5 to 9 of 12 across runs, but 0 is outside that range. Log: `logs/eval-20261119-221502-ollama-granite4.2_8b-granite-hard-ollama.json` (gitignored).
+
