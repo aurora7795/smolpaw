@@ -1442,3 +1442,9 @@ Same screen and thresholds as above, Ollama, 32K context, `granite4.2:8b` (Q4_K_
 
 Caveats: n=12, one session; Qwen's own counts on this task vary 5 to 9 of 12 across runs, but 0 is outside that range. Log: `logs/eval-20261119-221502-ollama-granite4.2_8b-granite-hard-ollama.json` (gitignored).
 
+## Ternary-Bonsai-2-27B screen (Ollama)
+
+`tests/screen_model.py --backend ollama --model bonsai2-27b-q2`, imported from `Ternary-Bonsai-2-27B-Q2_0.gguf` (7.6 GB), 32K context. It passes all three stages: loads (473 prompt tokens with 3 tools), tools 7/9 (read_a_file 3, final_answer 1, no_tool_needed 3; no invented tools or bad arguments; 7 is the pass line exactly), and Tidepool easy 3/3 and hint 3/3 (530s for those six runs, about 88s each). The tools stage took 37s for 9 calls, so the 27B is not slow on short calls. The weak spot is the `final_answer` task (1 of 3).
+
+Caveats: n=3 per stage, one session; a pass only means it is worth the hard fake Radarr and the wider matrix. Log: `logs/screen-20261119-235533-ollama-bonsai2-27b-q2.json` (gitignored).
+
