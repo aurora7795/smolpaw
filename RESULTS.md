@@ -1319,3 +1319,71 @@ By case (old text to new text). Qwen: `write_summary` 0 to 1 of 5, `read_and_sav
 Caveats: n=30 per arm per model, one session, one prompt. Qwen is still low (7 of 30; it stalled in 24 of 30 runs), and `append_log` and `delete_old` did not move for it, so the text helps but does not make Qwen reliable here. `cleanup_proposal` did not change for Gemma. Pooled cases are not independent of the fixture's wording. The stall rule is unchanged ([#142](https://github.com/aurora7795/smolpaw/issues/142)). Real scheduled runs were not measured, only the eval's scripted unattended mode.
 
 Reproduce: `tests/run_90_matrix.sh` (about 3 hours), then `.venv/bin/python tests/compare_runs.py --arm report='logs/eval-*sp90-<model>-report.json' --arm legacy='logs/eval-*sp90-<model>-legacy.json'` (the control is in the same logs; leave it out of the pooled comparison by pointing the globs at the other cases).
+
+## Hard fake-Radarr baseline under compact-final, and the repeat-nudge retest (#137, #138, 2026-11-19)
+
+**Setup.** Ollama, `--ctx 32768`, step cap 12, `--run-timeout 400`, `--fake-radarr --radarr-task hard`, guard and write hints on, n=12 per cell, one overnight session (`tests/run_137_139_matrix.sh`). Arms: `cf` (compact-final, the default), `default` (smolagents' prompt, `--system-prompt default`) and `nudge` (compact-final plus the #117 repeated-result nudge and firmer DECLINED text, from `experiment/117-repeat-nudge` cherry-picked onto current `main`; the cherry-pick conflicted with #90 and #95 and was resolved by keeping both).
+
+**Criterion for #138, stated on the issue before the run.** The baseline is the `cf` arm. An arm is worse if either model drops 3 or more passes; a clear improvement is a gain of 3 or more for either model. Merge only if neither is worse and one clearly improves; at +2 or less, record and close without merging.
+
+| | cf (baseline) | default prompt | nudge |
+|---|---|---|---|
+| Gemma 4 E4B, passed | 7/12 (2 stalled, 8.7 steps, 30K input tokens) | 5/12 (1 stalled, 174s mean) | 8/12 (0 stalled) |
+| Qwen 3.5 9B, passed | 7/12 (4 stalled, 9.8 steps, 39K input tokens) | 10/12 (0 stalled, 59K input tokens) | 6/12 (2 stalled) |
+
+**#137: the baseline.** Gemma lands at 7 of 12, inside the 3 to 9 band set in #119, so the hard fixture stays usable as a gate fixture. Qwen is at 7 of 12 (5 of 12 with the old prompt). compact-final against the default prompt: Gemma 7 against 5 (one-sided Fisher p=0.34), Qwen 7 against 10; neither is below p 0.1. The default prompt used twice the input tokens (Gemma 60K against 30K, Qwen 59K against 39K).
+
+**#138: the verdict is not to merge.** Gemma +1, Qwen -1 against the baseline: no model is worse by 3 and neither gains 3, so there is no clear improvement. The rule was fixed before the run. `experiment/117-repeat-nudge` stays unmerged.
+
+Caveats: n=12 per cell, one session, so differences of 3 are within noise. Qwen's 10 of 12 on the default prompt (three more than compact-final, p about 0.2 in that direction) was not a planned comparison and does not meet any pre-stated rule; it matches the LM Studio matrix (#136) only in that Qwen's compact-final stalls are frequent here (4 of 12). The nudge arm ran from a worktree of `main`, so the `nudge` and `cf` arms differ only by the experiment commit.
+
+Reproduce: `tests/run_137_139_matrix.sh`, then `.venv/bin/python tests/compare_runs.py --arm cf='logs/eval-*r137-<model>-cf.json' --arm nudge='logs/eval-*r138-<model>-nudge.json'`.
+
+## The failing-steps stall switch under compact-final (#139, 2026-11-19)
+
+**Setup.** Ollama, `--ctx 32768`, step cap 12, `--run-timeout 400`, compact-final prompt, one overnight session (`tests/run_137_139_matrix.sh`). `SMOLPAW_STALL_FAILS=3` (stop after three failing steps in a row, #77) against the switch off, arms run back to back per case, n=3 per cell: the eight tracking cases (five edit cases, `edit_one_section`, `append_keep_all`, `read_three_report`) and `--counting-home`.
+
+**Criterion, stated on #139 before the run.** Adopt as a default only if neither model drops 2 or more passes in any pooled family and the runs it ends were failing anyway. Otherwise it stays off. Families pooled here: the five edit cases (15 runs per arm), the other three tracking cases (9) and `--counting-home` (6).
+
+| Passed, switch off to `STALL_FAILS=3` | Gemma 4 E4B | Qwen 3.5 9B |
+|---|---|---|
+| Five edit cases (15 runs) | 15 to 14 | 14 to 14 |
+| Other tracking cases (9 runs) | 4 to 6 | 8 to 6 |
+| `--counting-home` (6 runs) | 2 to 0 | 4 to 6 |
+
+By case, the ones that moved: Gemma `append_keep_all` 1 to 3, `edit_duplicate_passage` 3 to 2, `--counting-home` 2 to 0; Qwen `append_keep_all` 2 to 0 (the one run that stalled under the switch was a pass without it), `--counting-home` 4 to 6.
+
+**Verdict: the criterion is not met, so the switch stays off.** Gemma drops 2 on `--counting-home` and Qwen drops 2 on the other tracking cases. The rule was fixed before the run. The #77 regression case, `edit_duplicate_passage`, did not repeat at its old size (3 to 1 of 3 then; 3 to 2 of 3 for Gemma now, no change for Qwen), but the drops elsewhere are the same size.
+
+Caveats: n=3 per case and 6 to 15 per pooled family, one session, so every difference here is within noise (no one-sided Fisher p comes near 0.1); the criterion is a count threshold, not a test, and a 2-pass drop on 6 or 9 runs is easy to produce by chance, as are the gains (Gemma `append_keep_all` 1 to 3). The "stalled" flags in the logs include the repeated-results rule, which is on in both arms, so they do not isolate the switch. Gemma's `read_three_report` was 0 of 3 in both arms (see #89).
+
+Reproduce: `tests/run_137_139_matrix.sh`; logs have the labels `r139-<model>-off` and `r139-<model>-fails3`.
+
+## Screening Ternary-Bonsai-2-9B with the new staged screen (#126, #7, 2026-11-19)
+
+**Setup.** `tests/screen_model.py` (thresholds in the script, fixed before any model was screened: tools stage at least 7 of 9 correct with no invented tool or malformed arguments; Tidepool `easy` and `hint` at least 2 of 3 each), LM Studio, 32K context, one session. The model is PrismML's `Ternary-Bonsai-2-9B-Q2_0.gguf` (2.56 GB, a ternary build of Qwen 3.5 9B; checksum matches the published SHA256SUMS), loaded by LM Studio's llama.cpp engine 2.56.0. Calibration: Gemma 4 E4B and Qwen 3.5 9B (MLX), which had to pass. A known-bad model was not screened (Nanbeige is not installed here), so the screen's ability to fail a model is shown only by its unit tests, not on a real model. A first version used a 200-token cap on the plain reply and failed Gemma because it spent the cap on hidden reasoning; the cap is now 2,000.
+
+| Stage | Gemma 4 E4B | Qwen 3.5 9B (MLX) | Ternary Bonsai 2 9B (Q2_0) |
+|---|---|---|---|
+| loads (prompt tokens with 3 tools) | pass, 204 | pass, 438 | pass, 438 |
+| tools, correct of 9 | 8 | 7 | 8 |
+| Tidepool easy, hint (of 3 each) | 3, 2 | 3, 3 | 2, 2 |
+| time | 457s | 306s | 239s |
+
+**Result.** Bonsai passes all three stages: it loads in LM Studio, called no tool that was not offered and produced no malformed arguments in 9 tool tasks (the old Bonsai 8B invented tools, #7). The full matrix (stage 4) has not been run. Caveats: n=3 per cell detects only large gaps, so Bonsai's 2 of 3 on Tidepool is not distinguishable from Qwen's 3 of 3; the Qwen 3.5 9B here is the MLX build while Bonsai is a GGUF, so the engines differ.
+
+Reproduce: `.venv/bin/python tests/screen_model.py --backend lmstudio --model ternary-bonsai-2-9b`.
+
+### Bonsai 2 9B on the hard fake Radarr (2026-11-19)
+
+**Criterion, stated before the run.** Bonsai is worth the wider matrix if it is within 2 passes of Qwen 3.5 9B on the same engine at n=12; a clear improvement is +3 or more. Setup: LM Studio (llama.cpp 2.56.0 for Bonsai, MLX for Qwen), `--ctx 32768`, step cap 12, `--run-timeout 400`, `--fake-radarr --radarr-task hard --n 12`, compact-final prompt, back to back in one session (`tests/run_bonsai_hard.sh`).
+
+| | Qwen 3.5 9B (MLX) | Ternary Bonsai 2 9B (Q2_0) |
+|---|---|---|
+| Passed | 9/12 | 2/12 |
+| Stalled | 2 | 2 |
+| Mean steps, input tokens, seconds | 9.1, 34K, 98 | 9.2, 33K, 62 |
+
+**Verdict: not met (7 passes below), so no wider matrix.** Bonsai's failures: 4 runs ended with no answer because LM Studio rejected a tool call the model produced ("the model produced output that does not match the expected peg-native format", returned to the client as HTTP 400, then an `AgentGenerationError`); 3 reported a write that put the film in the wrong folder (`/media/films` rather than the one with the most free space) or left a field out; 2 stalled on repeated results; 1 hit the step cap. It passed the screen's single-call tool tasks (8 of 9) but did not hold a well-formed tool call through a multi-step task, which is the weakness the old Bonsai 8B showed (#7). The 4 malformed calls would be candidates for the tolerant parser in [#107](https://github.com/aurora7795/smolpaw/issues/107).
+
+Caveats: n=12, one session; the engines differ (a GGUF on llama.cpp against an MLX build), so part of the gap could be the engine or the strict tool-call parser rather than the weights; only the Q2_0 pack was tried (the faster PQ2_0 and PTQ1_0 packs need PrismML's llama.cpp fork); no sampling settings from the model card were applied (the 9B card's recommended values were not checked). Qwen's 9 of 12 here compares with 7 of 12 on Ollama (#137), a gap of 2 that is within noise.
