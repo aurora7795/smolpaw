@@ -1387,3 +1387,19 @@ Reproduce: `.venv/bin/python tests/screen_model.py --backend lmstudio --model te
 **Verdict: not met (7 passes below), so no wider matrix.** Bonsai's failures: 4 runs ended with no answer because LM Studio rejected a tool call the model produced ("the model produced output that does not match the expected peg-native format", returned to the client as HTTP 400, then an `AgentGenerationError`); 3 reported a write that put the film in the wrong folder (`/media/films` rather than the one with the most free space) or left a field out; 2 stalled on repeated results; 1 hit the step cap. It passed the screen's single-call tool tasks (8 of 9) but did not hold a well-formed tool call through a multi-step task, which is the weakness the old Bonsai 8B showed (#7). The 4 malformed calls would be candidates for the tolerant parser in [#107](https://github.com/aurora7795/smolpaw/issues/107).
 
 Caveats: n=12, one session; the engines differ (a GGUF on llama.cpp against an MLX build), so part of the gap could be the engine or the strict tool-call parser rather than the weights; only the Q2_0 pack was tried (the faster PQ2_0 and PTQ1_0 packs need PrismML's llama.cpp fork); no sampling settings from the model card were applied (the 9B card's recommended values were not checked). Qwen's 9 of 12 here compares with 7 of 12 on Ollama (#137), a gap of 2 that is within noise.
+
+### Bonsai 2 9B on Ollama, hard fake Radarr (2026-11-19)
+
+**Criterion, stated before the run (as for the LM Studio run).** Worth the wider matrix if within 2 passes of Qwen 3.5 9B at n=12; +3 or more is a clear improvement. Setup: Ollama, 32K context, step cap 12, `--run-timeout 400`, `--fake-radarr --radarr-task hard --n 12`, compact-final prompt, both models back to back (`tests/run_bonsai_hard_ollama.sh`). Bonsai is the same `Ternary-Bonsai-2-9B-Q2_0.gguf`, imported with `ollama create` (Ollama 0.40.16, llama.cpp runner, chat template read from the GGUF). The model screen on Ollama: loads, tools 9 of 9 correct with no invented or malformed calls (8 of 9 on LM Studio).
+
+| | Qwen 3.5 9B | Bonsai 2 9B (Q2_0) |
+|---|---|---|
+| Passed | 5/12 | 3/12 |
+| Stalled / hit the step cap | 4 / 3 | 0 / 6 |
+| Wrong write (field missing) | 0 | 3 |
+| No answer (generation error) | 0 | 0 |
+| Mean steps, input tokens, seconds | 9.9, 39K, 91 | 11.2, 43K, 84 |
+
+**Verdict: the criterion is met by 2 passes, narrowly (3 against 5, one-sided Fisher p well above 0.1), so the wider matrix is allowed but the case for it is weak.** The engine mattered for the failure type: on LM Studio 4 of 12 Bonsai runs ended on a tool call its parser rejected; on Ollama none did, and Bonsai's failures are the step cap (6 runs) and writes with a field missing (3). Qwen itself scored 9/12 on LM Studio's MLX build and 5/12 here (7/12 on Ollama in #137), so the engine moves a 9B model's result by as much as the difference being measured. Speed: Bonsai was about the same per run on Ollama (84s against 91s; 7.5s against 9.2s per step), unlike its 38% advantage over MLX Qwen on LM Studio.
+
+Caveats: n=12, one session; Qwen's 5/12 is at the low end of its range, which makes the gap look smaller; Bonsai's 6 step-cap runs suggest it takes more steps than Qwen to the same result, so a larger step cap might change its score (not tried); only the Q2_0 pack was tried.
