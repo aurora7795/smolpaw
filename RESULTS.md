@@ -1373,3 +1373,17 @@ Reproduce: `tests/run_137_139_matrix.sh`; logs have the labels `r139-<model>-off
 **Result.** Bonsai passes all three stages: it loads in LM Studio, called no tool that was not offered and produced no malformed arguments in 9 tool tasks (the old Bonsai 8B invented tools, #7). The full matrix (stage 4) has not been run. Caveats: n=3 per cell detects only large gaps, so Bonsai's 2 of 3 on Tidepool is not distinguishable from Qwen's 3 of 3; the Qwen 3.5 9B here is the MLX build while Bonsai is a GGUF, so the engines differ.
 
 Reproduce: `.venv/bin/python tests/screen_model.py --backend lmstudio --model ternary-bonsai-2-9b`.
+
+### Bonsai 2 9B on the hard fake Radarr (2026-11-19)
+
+**Criterion, stated before the run.** Bonsai is worth the wider matrix if it is within 2 passes of Qwen 3.5 9B on the same engine at n=12; a clear improvement is +3 or more. Setup: LM Studio (llama.cpp 2.56.0 for Bonsai, MLX for Qwen), `--ctx 32768`, step cap 12, `--run-timeout 400`, `--fake-radarr --radarr-task hard --n 12`, compact-final prompt, back to back in one session (`tests/run_bonsai_hard.sh`).
+
+| | Qwen 3.5 9B (MLX) | Ternary Bonsai 2 9B (Q2_0) |
+|---|---|---|
+| Passed | 9/12 | 2/12 |
+| Stalled | 2 | 2 |
+| Mean steps, input tokens, seconds | 9.1, 34K, 98 | 9.2, 33K, 62 |
+
+**Verdict: not met (7 passes below), so no wider matrix.** Bonsai's failures: 4 runs ended with no answer because LM Studio rejected a tool call the model produced ("the model produced output that does not match the expected peg-native format", returned to the client as HTTP 400, then an `AgentGenerationError`); 3 reported a write that put the film in the wrong folder (`/media/films` rather than the one with the most free space) or left a field out; 2 stalled on repeated results; 1 hit the step cap. It passed the screen's single-call tool tasks (8 of 9) but did not hold a well-formed tool call through a multi-step task, which is the weakness the old Bonsai 8B showed (#7). The 4 malformed calls would be candidates for the tolerant parser in [#107](https://github.com/aurora7795/smolpaw/issues/107).
+
+Caveats: n=12, one session; the engines differ (a GGUF on llama.cpp against an MLX build), so part of the gap could be the engine or the strict tool-call parser rather than the weights; only the Q2_0 pack was tried (the faster PQ2_0 and PTQ1_0 packs need PrismML's llama.cpp fork); no sampling settings from the model card were applied (the 9B card's recommended values were not checked). Qwen's 9 of 12 here compares with 7 of 12 on Ollama (#137), a gap of 2 that is within noise.
