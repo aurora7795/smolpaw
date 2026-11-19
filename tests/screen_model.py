@@ -99,10 +99,19 @@ def chat(backend: str, model: str, prompt: str, tools: bool = True, max_tokens: 
     return r.json()
 
 
+def reply_text(message: dict) -> str:
+    """The reply as text: the content, or the answer of a final_answer call (models told to finish that way give no content)."""
+    text = message.get("content") or ""
+    if not text.strip():
+        calls, _ = parse_calls(message)
+        text = next((str(a.get("answer", "")) for n, a in calls if n == "final_answer"), "")
+    return text
+
+
 def stage_loads(args) -> tuple[bool, str, dict]:
     ctx = ev.ensure_model(args.model, args.ctx, args.backend)
     reply = chat(args.backend, args.model, "Reply with one short sentence about cats.")
-    text = reply["choices"][0]["message"].get("content") or ""
+    text = reply_text(reply["choices"][0]["message"])
     toks = reply.get("usage", {}).get("prompt_tokens")
     ok = not looks_like_junk(text)
     return ok, f"context {ctx}, {toks} prompt tokens with 3 tools, reply: {text.strip()[:80]!r}", {"context": ctx, "prompt_tokens": toks, "reply": text}

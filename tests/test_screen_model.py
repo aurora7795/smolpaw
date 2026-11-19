@@ -39,6 +39,11 @@ calls, probs = sm.parse_calls({"tool_calls": [call("read_file", "[1]")]})
 check("arguments that are not an object are a problem", any("JSON" in p for p in probs))
 check("no tool calls parses to nothing", sm.parse_calls({"content": "hi"}) == ([], []))
 
+check("reply_text: content is the reply", sm.reply_text({"content": "Hello there."}) == "Hello there.")
+check("reply_text: a final_answer call carries the reply when content is empty",
+      sm.reply_text({"content": "", "tool_calls": [call("final_answer", '{"answer": "Cats purr."}')]}) == "Cats purr.")
+check("reply_text: another tool call is not a reply", sm.reply_text({"content": "", "tool_calls": [call("read_file", '{"path": "a"}')]}) == "")
+
 graders = {n: g for n, _, g in sm.TASKS}
 check("read task: read_file on notes.txt passes", graders["read_a_file"]([("read_file", {"path": "notes.txt"})], ""))
 check("read task: the wrong file fails", not graders["read_a_file"]([("read_file", {"path": "other.txt"})], ""))

@@ -1418,3 +1418,16 @@ Caveats: n=12, one session; Qwen's 5/12 is at the low end of its range, which ma
 **Verdict.** Bonsai is 1 pass behind Qwen, inside the 2-pass criterion. Its gain from the higher cap is 2 passes (3 to 5), under the 3 set for "the cap was limiting it", so that is not established. The six runs that hit the cap at 12 mostly ended at the stall rule at 20 (5 stalled), i.e. they were looping on repeated results, not simply short of steps. Bonsai used about a third fewer steps and tokens than Qwen here and ran 34% faster per run (65s against 98s), the speed advantage seen on LM Studio, which the cap-12 Ollama run did not show.
 
 Caveats: n=12, one session; Qwen's pass counts on this task across today's runs are 5, 6, 7 and 9 of 12 (engine, cap and session all differ), so differences of 1 or 2 passes are noise; Bonsai's step-cap-12 result and this one are different runs of the same model, so their 3 and 5 also differ by chance alone; only the Q2_0 pack was tried.
+
+### Screening Granite 4.2 8B (#126, 2026-11-19)
+
+Same screen and thresholds as above, Ollama, 32K context, `granite4.2:8b` (Q4_K_M, 5.3 GB). A first run failed the `loads` stage with an empty reply: with tools offered Granite answers by calling `final_answer`, as the screen's system prompt says, so `content` is empty. That was a flaw in the screen (it read only `content`), fixed by reading the `final_answer` answer as the reply, with a test; the earlier screens (Gemma, Qwen, Bonsai) gave non-empty content and are unaffected.
+
+| Stage | Granite 4.2 8B |
+|---|---|
+| loads (prompt tokens with 3 tools) | pass, 421 |
+| tools, correct of 9 | 9, no invented or malformed calls |
+| Tidepool easy, hint (of 3 each) | 2, 3 |
+| time | 524s |
+
+**Result.** It passes all three stages, so it is worth the full matrix; that has not been run. At n=3 per cell the screen only separates large gaps. Reproduce: `.venv/bin/python tests/screen_model.py --backend ollama --model granite4.2:8b`.
