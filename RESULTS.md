@@ -1448,3 +1448,13 @@ Caveats: n=12, one session; Qwen's own counts on this task vary 5 to 9 of 12 acr
 
 Caveats: n=3 per stage, one session; a pass only means it is worth the hard fake Radarr and the wider matrix. Log: `logs/screen-20261119-235533-ollama-bonsai2-27b-q2.json` (gitignored).
 
+## Ternary-Bonsai-2-27B on the hard fake Radarr (Ollama)
+
+`tests/eval.py --backend ollama --model bonsai2-27b-q2 --ctx 32768 --max-steps 12 --run-timeout 400 --fake-radarr --radarr-task hard --n 12`, the settings of the 9B cap-12 run. Criterion stated before the run: competitive if within 2 passes of Qwen 3.5 9B (5/12 at cap 12 on Ollama), clearly better at 3 or more above.
+
+**Result: 6/12 passed**, 1 stalled, mean 345s, 8.7 steps, 38,654 input tokens per run. Five runs hit the 400s run timeout (two of them at 11 to 12 steps), one stalled on repeated `openapi_search` results. Every pass took 239 to 348s, so the timeout cut off runs that were close to finishing. No parse errors and no wrong film ids; where a film was added the profile was right.
+
+**Verdict.** Competitive, 1 pass above Qwen, inside noise (Qwen's own counts on this task range 5 to 9 of 12), well short of the 3 needed for "clearly better". The 9B Bonsai scored 3/12 on the same settings. The 27B was much slower per run than the 9B (about 345s against 65 to 98s), so on this task it spends the extra size on time, not on a better pass rate, and the 400s timeout limits it.
+
+Caveats: n=12, one session; a longer timeout was not tried. Log: `logs/eval-*-ollama-bonsai2-27b-q2-bonsai27-hard-ollama.json` (gitignored).
+

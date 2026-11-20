@@ -13,6 +13,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 - `tests/test_generic_tools.py`: the live Radarr check no longer fails when the server is unreachable ([#145](https://github.com/aurora7795/smolpaw/issues/145)). A 3-second TCP probe runs first; if nothing answers, the block prints `SKIP  live Radarr tests (server unreachable)`, as it already did for unset variables. The key-injection, redaction and no-key-to-unlisted-host checks now also always run against a local fake service that returns 200 only for the right `X-Api-Key`, so skipping the live block loses no coverage; new checks cover `reachable()` for a closed port, a malformed URL and a listening port. A reachable server that answers wrongly still fails. No change to the confirmation layer.
 
 ### Added
+* Measured Ternary-Bonsai-2-27B (Q2_0) on the hard fake Radarr on Ollama (n=12): 6/12, five timeouts at 400s; recorded in RESULTS.md.
 * Screened Ternary-Bonsai-2-27B (Q2_0) on Ollama: passes loads, tools (7/9) and Tidepool (3/3, 3/3); recorded in RESULTS.md.
 * Measured Granite 4.2 8B on the hard fake Radarr on Ollama (n=12): 0/12, ten of them timeouts at 400s; recorded in RESULTS.md.
 - `tests/run_bonsai_hard_ollama.sh`: the Bonsai 2 9B against Qwen 3.5 9B comparison on Ollama (the model imported from the GGUF with `ollama create`), to separate the model from LM Studio's tool-call parser ([#7](https://github.com/aurora7795/smolpaw/issues/7)).
