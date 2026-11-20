@@ -1458,3 +1458,13 @@ Caveats: n=3 per stage, one session; a pass only means it is worth the hard fake
 
 Caveats: n=12, one session; a longer timeout was not tried. Log: `logs/eval-*-ollama-bonsai2-27b-q2-bonsai27-hard-ollama.json` (gitignored).
 
+### Ternary-Bonsai-2-27B at a 900s run timeout (Ollama)
+
+Same command as above with `--run-timeout 900` (label `bonsai27-hard-ollama-t900`). Criterion stated before the run: the 400s timeout was limiting if this scored 3 or more passes above 6/12, so 9/12 or better.
+
+**Result: 2/12 passed**, 3 stalled (repeated results), mean 401s, 11.1 steps, 45,864 input tokens. No run hit the timeout; seven hit the 12-step cap (the longest took 848s) and three stalled. Criterion not met: it scored 4 passes below the 400s run, not above.
+
+**Reading.** The timeout was not what limited the 27B: the runs it freed ran out of steps instead, and the five passes that took 240 to 348s at 400s did not repeat. The same model at the same settings gave 6/12 and 2/12 (Fisher exact, one-sided, p about 0.11 for 6 against 2), so run-to-run noise on this task at n=12 is at least that large, and the 27B's true rate is somewhere around 2 to 6 of 12. That also means the 6/12 above, and its 1 pass lead over Qwen, say nothing about the 27B being better. Step cap 20 was not tried for the 27B.
+
+Caveats: n=12, two sessions; the run was not done in the same session as the 400s run. Log: `logs/eval-*-ollama-bonsai2-27b-q2-bonsai27-hard-ollama-t900.json` (gitignored).
+
