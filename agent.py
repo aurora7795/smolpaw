@@ -20,6 +20,7 @@ from smolagents.models import ChatMessage, MessageRole
 from smolagents.utils import AgentError, AgentMaxStepsError
 
 import generic_tools
+import model_status
 import radarr_tools
 from generic_tools import GENERIC_TOOLS
 from radarr_tools import RADARR_TOOLS
@@ -131,8 +132,28 @@ def snip(text: str) -> str:
     return text[: len(text) // 2] + SNIP_NOTE + text[-(len(text) // 4):]
 
 
-class NativeHistoryModel(OpenAIServerModel):
-    """OpenAIServerModel that sends earlier tool calls and results in the native tool-call format.
+class StatusModel(OpenAIServerModel):
+    """OpenAIServerModel whose calls report their wait, retries and failures (model_status.py).
+
+    The OpenAI client's own silent retries and smolagents' rate-limit retries are switched off; this class retries
+    transient failures itself, `retries` times, so each attempt can be announced. Set `retries` to 0 to stop retrying.
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs["client_kwargs"] = {**(kwargs.get("client_kwargs") or {}), "max_retries": 0}
+        kwargs.setdefault("retry", False)
+        super().__init__(*args, **kwargs)
+        self.retries = model_status.max_retries()
+
+    def generate(self, *args, **kwargs):
+        return model_status.call_with_status(
+            lambda: super(StatusModel, self).generate(*args, **kwargs),
+            label=f"waiting for {self.model_id}", base_url=str(self.client.base_url), model=self.model_id,
+            retries=self.retries)
+
+
+class NativeHistoryModel(StatusModel):
+    """StatusModel that sends earlier tool calls and results in the native tool-call format.
 
     `snip_mode` (#73, experiment): "off", "step" (every older result is shortened on every call) or "batch"
     (nothing until the history passes `snip_at` estimated tokens, then every older result at once, and the
@@ -310,7 +331,7 @@ def build_agent(model_id: str | None = None, agent_type: str = "code", max_steps
     cfg = BACKENDS[backend]
     max_tokens = max_tokens or env_max_tokens()
     extra = {"max_tokens": max_tokens} if max_tokens else {}  # caps one reply, so a looping model ends it
-    model = (NativeHistoryModel if native_history else OpenAIServerModel)(
+    model = (NativeHistoryModel if native_history else StatusModel)(
         model_id=model_id or cfg["model"],
         api_base=cfg["url"],
         api_key=cfg["key"],
@@ -512,6 +533,7 @@ def main() -> None:
         parser.error("--json requires -p")
 
     load_env()
+    model_status.REPORTER.stream = sys.stderr  # the CLI shows model waits, retries and errors; the eval and web do not
     args.model = args.model or BACKENDS[args.backend]["model"]
     max_steps = args.max_steps or int(os.environ.get("MAX_STEPS", MAX_STEPS))
 
