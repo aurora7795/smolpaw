@@ -335,6 +335,7 @@ def run_with_timeout(agent, prompt: str, timeout: float | None) -> tuple[str, st
         with contextlib.suppress(Exception):
             client = agent.model.client
             client.max_retries = 0
+            agent.model.retries = 0  # the status layer's own retry loop (model_status.py)
             for conn in list(client._client._transport._pool.connections):
                 conn._connection._network_stream.get_extra_info("socket").shutdown(socket.SHUT_RDWR)
         worker.join(2)
