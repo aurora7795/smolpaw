@@ -371,7 +371,8 @@ def run_request(agent, model: str, toolset: str, user_input: str, thread: str | 
         if not agent.stall_reason:
             raise  # a genuine interrupt (the web harness's Stop button), not a stall
         last = generic_tools.LAST_RESULT if toolset == "generic" else radarr_tools.LAST_ACTION
-        response = f"STOPPED EARLY: {agent.stall_reason}. Last tool result -> {last or '(no tool results)'}"
+        response = (f"STOPPED EARLY: {agent.stall_reason}. I could not complete this request, so nothing below is an answer. "
+                    f"Last tool result -> {last or '(no tool results)'}")
     hit_cap = any(isinstance(getattr(step, "error", None), AgentMaxStepsError)
                   for step in getattr(getattr(agent, "memory", None), "steps", []))
     agent.hit_step_limit = hit_cap
