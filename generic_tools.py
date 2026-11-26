@@ -84,15 +84,18 @@ def _ask_user(question: str) -> str:
 ASK = _ask_user
 
 _SEARCH_COUNT = 0
+_SEARCH_REFUNDS = 0  # searches that found nothing are given back, at most MAX_SEARCH_REFUNDS per request
+MAX_SEARCH_REFUNDS = 3
 _SEARCH_LOCK = threading.Lock()  # tools can run in parallel threads: check and count together
 MAX_SEARCHES = 3
 
 
 def reset_search_count() -> None:
     """Start a new per-request search allowance (start_log() calls this once per request)."""
-    global _SEARCH_COUNT
+    global _SEARCH_COUNT, _SEARCH_REFUNDS
     with _SEARCH_LOCK:
         _SEARCH_COUNT = 0
+        _SEARCH_REFUNDS = 0
 
 
 ACTIONS: list[str] = []  # outcomes of side-effecting calls; the harness prints these as ground truth
@@ -946,18 +949,22 @@ def _search_ddgs(query: str, limit: int) -> list[dict]:
         from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
     except ImportError:
         raise RuntimeError("The 'ddgs' package is not installed. Re-run ./setup.sh to install it.")
-    try:
-        results = DDGS().text(query, max_results=limit)
-    except RatelimitException as exc:
-        raise RuntimeError(f"DuckDuckGo rate limit exceeded: {exc}. Do not retry the same query.")
-    except TimeoutException as exc:
-        raise RuntimeError(f"DuckDuckGo search timed out: {exc}. Do not retry the same query.")
-    except DDGSException as exc:
-        if "no results found" in str(exc).lower():
-            return []
-        raise RuntimeError(f"DuckDuckGo search error: {exc}. Do not retry the same query.")
-    except Exception as exc:
-        raise RuntimeError(f"DuckDuckGo search failed: {exc}. Do not retry the same query.")
+    results: list = []
+    for attempt in range(2):  # ddgs often fails on one try and works on the next: retry an empty result once
+        try:
+            results = DDGS().text(query, max_results=limit)
+        except RatelimitException as exc:
+            raise RuntimeError(f"DuckDuckGo rate limit exceeded: {exc}. Do not retry the same query.")
+        except TimeoutException as exc:
+            raise RuntimeError(f"DuckDuckGo search timed out: {exc}. Do not retry the same query.")
+        except DDGSException as exc:
+            if "no results found" not in str(exc).lower():
+                raise RuntimeError(f"DuckDuckGo search error: {exc}. Do not retry the same query.")
+            results = []
+        except Exception as exc:
+            raise RuntimeError(f"DuckDuckGo search failed: {exc}. Do not retry the same query.")
+        if results:
+            break
 
     out = []
     for r in results or []:
@@ -1032,7 +1039,7 @@ def web_search(query: str) -> str:
     if not provider_fn:
         return f"ERROR: unknown search provider '{provider_name}'. Valid choices: {', '.join(sorted(SEARCH_PROVIDERS.keys()))}."
 
-    global _SEARCH_COUNT
+    global _SEARCH_COUNT, _SEARCH_REFUNDS
     with _SEARCH_LOCK:
         allowed = _SEARCH_COUNT < MAX_SEARCHES
         if allowed:
@@ -1051,6 +1058,10 @@ def web_search(query: str) -> str:
         return _clip(_redact(err))
 
     if not raw_results:
+        with _SEARCH_LOCK:  # an empty result is often a flaky backend: don't spend the model's allowance on it
+            if _SEARCH_REFUNDS < MAX_SEARCH_REFUNDS and _SEARCH_COUNT > 0:
+                _SEARCH_REFUNDS += 1
+                _SEARCH_COUNT -= 1
         _log("web_search", provider=provider_name, query=query, status="ok", hits=0, result="0 hits")
         return f"No results found for {query!r}. Try different search terms, but do not repeat the same query."
 

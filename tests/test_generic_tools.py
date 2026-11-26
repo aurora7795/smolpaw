@@ -1180,6 +1180,32 @@ _ts = [_th.Thread(target=lambda: _outs.append(g.web_search("par"))) for _ in ran
 check("10 parallel searches let exactly 3 through", sum("limit reached" not in o.lower() for o in _outs) == 3)
 g.SEARCH_PROVIDERS.pop("fake_par", None)
 
+# Empty searches are given back (at most 3 per request), and the ddgs provider retries an empty result once
+g.SEARCH_PROVIDERS["fake_empty"] = lambda q, n: []
+os.environ["SMOLPAW_SEARCH_PROVIDER"] = "fake_empty"
+g.reset_search_count()
+_e = [g.web_search(f"e{_i}") for _i in range(6)]
+check("empty searches do not use up the cap (3 refunds)",
+      all("No results" in x for x in _e) and "limit reached" not in " ".join(_e).lower())
+check("a further empty search is refused once the refunds are used", "limit reached" in g.web_search("e6").lower())
+g.SEARCH_PROVIDERS.pop("fake_empty", None)
+import types as _types  # noqa: E402
+_calls: list[str] = []
+class _FakeDDGS:
+    def text(self, q, max_results=5):
+        _calls.append(q)
+        return [] if len(_calls) == 1 else [{"title": "T", "href": "https://t.example", "body": "b"}]
+_mod = _types.ModuleType("ddgs"); _mod.DDGS = _FakeDDGS
+_exc = _types.ModuleType("ddgs.exceptions")
+for _n in ("DDGSException", "RatelimitException", "TimeoutException"):
+    setattr(_exc, _n, type(_n, (Exception,), {}))
+_saved_mods = {k: sys.modules.get(k) for k in ("ddgs", "ddgs.exceptions")}
+sys.modules["ddgs"], sys.modules["ddgs.exceptions"] = _mod, _exc
+_got = g._search_ddgs("q", 5)
+for _k, _v in _saved_mods.items():
+    sys.modules.pop(_k) if _v is None else sys.modules.__setitem__(_k, _v)
+check("ddgs provider retries an empty result once", len(_calls) == 2 and len(_got) == 1)
+
 # Long snippets are clipped
 g.SEARCH_PROVIDERS["long_fake"] = lambda q, n: [{"title": "T", "url": "https://e.com", "snippet": "word " * 500}]
 os.environ["SMOLPAW_SEARCH_PROVIDER"] = "long_fake"
