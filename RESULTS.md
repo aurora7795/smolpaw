@@ -13,6 +13,7 @@ Measured 2026-10-23 to 2026-10-24 on a 16GB Apple Silicon Mac with LM Studio (an
 - Sending earlier tool calls back as native `tool_calls` instead of smolagents' text cut parse errors by about four times (19 to 5 across 48 Ollama runs) and raised passes from 19 to 23 of 24, with no cost in steps or time. A recheck with the actual error text shows the remaining rare errors are a different, generic issue (the model skipping a tool call, not copying history) (#14).
 - On Ollama the default MLX builds beat the GGUF ones on speed (Gemma reads prompts about twice as fast) with the same pass rates (#16). With native history at 32K, the earlier Ollama weakness on Tidepool `detail` is gone: 11 of 12 on each runtime (#15).
 - Ollama works as a second runtime. At 16K, Gemma passed 13 of 15 and Qwen 12 of 15 cleanly across rung 1 and the Tidepool variants, against 14 and 15 on LM Studio; most of the gap is the `detail` variant. Gemma was 2 to 5 times faster on Ollama.
+- Speed per model (2026-11-27, `tests/speed.py`): on this Mac Gemma 4 E4B gives a first token for SmolPaw's first call in 3.9s and writes 55 tok/s, against 6 to 13s and 24 to 30 tok/s for the Qwen 3.5 and Bonsai 9B-class models, and 18s against 46 to 58s for a 1,500-token page; the Bonsai 27B is too slow to chat with (11 tok/s). Per task, Gemma has the lower seconds per pass on 24 of 30 shared tasks, but where it fails (reading several files) it is far worse. Qwen 3.5 4B (MLX) kept Qwen's multi-file reading (7/10 and 9/10) at about half the first-call wait of the 9B. See "Speed per model and time per task".
 - Converting web pages to text instead of returning raw HTML turned a 0 of 3 failure (both models, step-capped or giving up on the markup) into 3 of 3, in 2 to 4 steps instead of 7 to 13, and cut input tokens by 6x (Gemma) to 83x (Qwen, which otherwise burns the whole 32K context on one clipped HTML blob) (#23).
 - Rung 3, a real write to Radarr (#1): the first supervised attempts (2026-10-25, by hand) failed, 0 of 3 with Qwen and one stopped-early Gemma run, because both models guessed a write's arguments before looking them up. Rerun on 2026-11-15 with the scripted, narrowed approvals of `tests/eval.py --real-radarr` against a real Radarr: Gemma 4 E4B 2 of 3 films added correctly, Qwen 3.5 9B 0 of 3 by the eval's rule (one of its runs did add the right film, then ran on to the step cap). Three runs per model, one session, one library; with the unseen-id guard and write hints off, Gemma went 0 of 3 (see "Rung 3 against a real Radarr" below).
 - Model by task (2026-11-09): neither Gemma 4 E4B nor Qwen 3.5 9B is better across the board. Qwen leads on reading several files, the home-folder count and three of the eight housekeeping chores; Gemma leads on declined actions (read-only scheduled writes, a declined delete) and on editing a passage that appears twice; the rest is about equal or too small to call. See "Model by task" below.
@@ -332,6 +333,59 @@ Prompt: "What is the latest Python release? Read https://www.python.org/download
 - Before: both models failed every run. Qwen hit the step cap each time, burning most of a 32K context on one clipped, still-tag-laden HTML response and retrying `http_request`/`run_shell`/`openapi_search` without ever finding the version number in the markup. Gemma did not hit the cap but gave up, telling the user it could not parse the HTML and had no web-search tool.
 - After: both models pass every run, in 2 to 4 steps, reading the version number straight out of the converted text (`Python 3.15.1`).
 - Caveat: one task, one page, 3 runs per cell; the page happens to have a `<main>` element, which is the easy case for the extractor.
+
+## Speed per model and time per task (`tests/speed.py`, `tests/task_times.py`, 2026-11-27, #148)
+
+Speed as a user feels it, by wall clock on streamed requests to Ollama (MLX or llama.cpp builds as `ollama list` shows, 32,768 context, one request at a time). `tests/speed.py` measures four things: load time (model unloaded first), time to first token (TTFT) for SmolPaw's real first call (system prompt plus tool schemas, about 2.4K to 2.8K tokens, `cold` with a unique first line, `warm` with the same prompt again), a context sweep (random words, so no cache helps; TTFT, prefill tok/s and decode tok/s while the model writes a fixed 256 tokens) and the time to write about 1,500 tokens (a tic-tac-toe page). Thinking tokens count as tokens and the first token is whichever arrives first. 3 repeats per cell, medians. The good/usable/slow verdicts use thresholds written into the script (decode 20 and 10 tok/s, cold first call 5s and 15s, load 15s and 45s, 1,500-token write 60s and 150s); they are judgement calls, not measurements.
+
+| Model | Load | First call, cold | First call, warm | Decode tok/s (one-line prompt / 4K / 12K) | Prefill tok/s (4K / 12K) | Write 1,500 tokens |
+|---|---|---|---|---|---|---|
+| Gemma 4 E4B (`gemma4:e4b`, 9.5 GB) | 6.9s | 3.9s | 0.12s | 54.7 / 50.5 / 37.7 | 485 / 591 | 18s |
+| Qwen 3.5 4B (`qwen3.5:4b-mlx`, nvfp4, 4.0 GB) | 3.3s | 6.4s | 0.09s | 25.1 / 24.6 / 22.7 | 421 / 383 | 58s |
+| Qwen 3.5 9B (`qwen3.5:9b`, nvfp4, 7.6 GB; since deleted) | 5.7s | 11.7s | 0.16s | 24.0 / 26.0 / 24.8 | 218 / 216 | 47s |
+| Bonsai 2 9B (`bonsai2-9b-q2`, 2.6 GB) | 0.8s | 12.9s | 0.07s | 30.3 / 29.3 / 25.1 | 202 / 184 | 46s |
+| Bonsai 2 27B (`bonsai2-27b-q2`, 7.6 GB) | 5.9s | 48.6s | 0.25s | 11.3 / 10.0 / 9.6 | 58 / 56 | 141s |
+
+- **Gemma is the fastest to respond.** It writes about twice as fast as the other small models (55 against 24 to 30 tok/s), reads a long prompt 1.4 to 3 times faster, and its cold first call is 3.9s against 6 to 13s. Warm calls cost 0.07 to 0.25s on every model, so the prompt cache works on Ollama and only the first message in a chat pays the cold wait.
+- **The 4B is not faster at writing than the 9B** (25 against 24 tok/s, and 58s against 47s for the page), though it reads prompts about twice as fast. The cause was not investigated.
+- **The 27B is too slow to chat with on this Mac:** 11 tok/s, 49s before the first token, and 205s to read a 12K prompt.
+- **Decode slows as context grows** on Gemma (55 to 38 tok/s from a one-line prompt to 12K) and little on the others.
+- Prefill at the one-line prompt (22 to 64 tokens) is not a meaningful speed and is left out of the table; the per-repeat spread was not summarised (the logs hold every repeat).
+- Caveats: one machine, one session, 3 repeats, Ollama only; every run loaded at 32,768 context; light read-only scripts (reading logs, the task-time table) ran on the same machine during the Gemma, 9B and 27B runs.
+- Reproduce: `.venv/bin/python tests/speed.py --model <ollama-id>` for each model, then `.venv/bin/python tests/speed.py --report`. Logs: `logs/speed-ollama-*.json` (gitignored).
+
+### Time per task from the existing eval logs (Gemma 4 E4B against Qwen 3.5 9B)
+
+`tests/task_times.py` groups every eval run on Ollama by prompt (fixture ports blanked) and lists, for tasks both models have at least 5 runs of, the pass rate, median seconds per run, median steps, seconds per step and **seconds per pass** (all seconds spent divided by passes, so failing and retrying is charged to the model). 30 tasks qualify. Gemma has the lower seconds per pass on 24 of them, Qwen on 6.
+
+| Task | Gemma 4 E4B | Qwen 3.5 9B |
+|---|---|---|
+| Delete `old.txt` | 14/15, 28s median, 123s per pass | 3/15, 97s, 899s per pass |
+| List every ERROR line in `app.log` | 10/10, 13s, 14s per pass | 9/10, 39s, 50s per pass |
+| Report one figure from each of three files | 1/56, 46s median, 5,358s per pass | 32/40, 74s, 175s per pass |
+| Mail needing a reply | 17/40, 64s, 182s per pass | 29/40, 60s, 93s per pass |
+| "How many files are in my Downloads folder?" | 2/32, 46s, 1,254s per pass | 13/32, 24s, 88s per pass |
+
+- Gemma is quicker per task mainly because it takes fewer steps (a median of 8 against 11 over all runs), not because each step is quicker: its seconds per step in these logs are often higher than Qwen's (for example 21 against 15 on one edit task), although `tests/speed.py` shows it generating twice as fast. This was not explained. Candidates are longer outputs per step, different code states and contexts, and time spent outside the model.
+- Where Gemma fails (reading several files, the mail summary, the Downloads count) its seconds per pass is the worse of the two, in some cases by a large factor, because few runs pass.
+- Caveats: the logs span 2026-10-24 to 2026-11-26, with different code states, prompts, contexts and checkers, so a task's runs for the two models are not always matched; timed-out runs count at the seconds they were stopped at; runs with no recorded prompt are left out.
+- Reproduce: `.venv/bin/python tests/task_times.py --min-n 5` (options: `--models`, `--backend`, `--glob`, `--label`).
+
+### Qwen 3.5 4B (MLX) as a replacement for the 9B (2026-11-27)
+
+The 9B was deleted from Ollama and replaced with `qwen3.5:4b-mlx` (4.0 GB, `nvfp4`, `runner mlx` in `ollama ps`).
+
+- **Screen** (`tests/screen_model.py`, Ollama, 32K, the thresholds fixed in the script): passes all three stages. loads 10s; tools 8/9 correct with no invented tool; Tidepool `easy` 2/3 and `hint` 3/3 (268s). The 9B's only screen on file is from LM Studio (2026-11-19): tools 7/9, Tidepool 3/3 and 3/3. At n=3 these cannot be told apart.
+- **Multi-file reading** (`tests/eval.py --backend ollama --ctx 32768 --tracking <case> --n 10`, the setting of the earlier Gemma and 9B runs). **Criterion, stated before the run:** keeps Qwen's strength if at least 7/10 on `read_three_report` and at least 5/10 on `read_three_long`; under 4/10 on either is a regression.
+
+| Case | Qwen 3.5 4B MLX | Qwen 3.5 9B (earlier) | Gemma 4 E4B (earlier) |
+|---|---|---|---|
+| `read_three_report` | 7/10, 2 stalled, 83s mean, 7.4 steps, 42,845 input tokens | 9/10 | 0/10 |
+| `read_three_long` (files padded to 11K characters) | 9/10, 0 stalled, 83s mean, 9.0 steps, 62,036 input tokens | 7/10 | 0/10 |
+
+- The 4B meets the criterion on both cells. The 2 `read_three_report` failures that were looked at both went wrong on `refuge_inventory.txt` (expected 674): one answered that the file had "no clear key numerical figure", the other reported 1284. The other two figures were right.
+- Caveats: n=10 per cell, so 7 against 9 of 10 is within noise; the 9B and Gemma figures were measured on earlier code states and the 9B can no longer be rerun, so the comparison is not matched; only the reading cases were run, not the other tasks where the models differed (housekeeping chores, declined actions).
+- Reproduce: `.venv/bin/python tests/eval.py --backend ollama --model qwen3.5:4b-mlx --ctx 32768 --tracking read_three_report --n 10`, then `read_three_long`.
 
 ## Prefill cost on this Mac (`tests/prefill_timing.py`)
 
