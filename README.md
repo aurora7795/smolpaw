@@ -318,6 +318,8 @@ Repeatable runs and measurements:
 .venv/bin/python tests/first_call_tokens.py --models qwen3.5:9b gemma4:e4b
 .venv/bin/python tests/first_call_tokens.py --backend lmstudio --models qwen3.5-9b-mlx google/gemma-4-e4b
 # time prompts of increasing size (prefill)
+.venv/bin/python tests/speed.py --model qwen3.5:9b   # load, first-call wait, decode tok/s, long write; --report for a table
+.venv/bin/python tests/task_times.py   # time per task, Gemma against Qwen, from the eval logs
 .venv/bin/python tests/prefill_timing.py --model qwen3.5-9b-mlx --ctx 32768
 ```
 
