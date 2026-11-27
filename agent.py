@@ -45,7 +45,7 @@ MAX_STEPS = 12
 # Both serve an OpenAI-compatible API; the key is ignored by either server but must be non-empty.
 BACKENDS = {
     "lmstudio": {"url": "http://127.0.0.1:1234/v1", "key": "lm-studio", "model": "ternary-bonsai-8b-mlx"},
-    "ollama": {"url": "http://127.0.0.1:11434/v1", "key": "ollama", "model": "qwen3.5:9b"},
+    "ollama": {"url": "http://127.0.0.1:11434/v1", "key": "ollama", "model": "gemma4:e4b"},
 }
 
 RADARR_INSTRUCTIONS = (

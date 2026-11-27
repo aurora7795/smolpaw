@@ -5,6 +5,7 @@ All notable changes to SmolPaw are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Changed
+- The default Ollama model is now `gemma4:e4b` (was `qwen3.5:9b`) in `agent.py` and `web.py`, for responsiveness, a speed choice with accuracy trade-offs: on this Mac it gave a first token for SmolPaw's first call in 3.9s against 11.7s, streamed at about 55 tok/s against 24, and wrote a 1,500-token page in 18s against 47s (`tests/speed.py`, [#148](https://github.com/aurora7795/smolpaw/issues/148); RESULTS.md). A default saved in the web Settings card, or `--model`, still wins; the LM Studio default is unchanged. Gemma is weaker than Qwen at reading several files and at detail summaries (RESULTS.md, "Model by task"); pick Qwen per chat for those. `qwen3.5:9b` was removed from this machine's Ollama and replaced with `qwen3.5:4b-mlx`, so examples that name the 9B need `ollama pull qwen3.5:9b` or another model.
 - The default `--backend` is now Ollama (was LM Studio) in `agent.py`, `web.py`, `tests/eval.py`, `tests/screen_model.py` and the prefill and prefix-cache scripts; LM Studio is still selectable. The LM Studio copies of Qwen 3.5 9B, Gemma 4 E4B, Llama 3.1 8B and Bonsai 9B were deleted to free disk, so the three LM Studio run scripts are marked historical.
 
 ### Fixed

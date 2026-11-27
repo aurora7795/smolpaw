@@ -1448,7 +1448,7 @@ check("lmstudio backend uses port 1234 and its default model", lm.client_kwargs[
 check("the default backend is Ollama", build_agent(toolset="generic").model.client_kwargs["base_url"] == "http://127.0.0.1:11434/v1")
 ol = build_agent(toolset="generic", backend="ollama").model
 check("ollama backend uses port 11434 and its default model",
-      ol.client_kwargs["base_url"] == "http://127.0.0.1:11434/v1" and ol.model_id == "qwen3.5:9b")
+      ol.client_kwargs["base_url"] == "http://127.0.0.1:11434/v1" and ol.model_id == "gemma4:e4b")
 check("explicit model overrides backend default",
       build_agent("gemma4:e4b", toolset="generic", backend="ollama").model.model_id == "gemma4:e4b")
 
